@@ -11,10 +11,16 @@ typedef struct {
     size_t files_loaded;
 } Corpus;
 
+typedef enum {
+    CORPUS_LOAD_ERROR = -1,
+    CORPUS_LOAD_EMPTY = 0,
+    CORPUS_LOAD_OK = 1
+} CorpusLoadResult;
+
 // Loads files containing non-whitespace text and joins them with blank-line separators.
-// Missing, empty, and whitespace-only files are skipped. Returns false if no usable text
-// was found or if a read/allocation/size-limit error occurred.
-bool corpus_load_files(Corpus* corpus, Arena* arena,
+// Missing, empty, and whitespace-only files are skipped. Returns EMPTY when
+// no usable text exists and ERROR on read/allocation/size-limit failures.
+CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
     const char* const* paths, size_t path_count, size_t max_bytes);
 
 #endif
