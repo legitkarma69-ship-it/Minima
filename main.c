@@ -19,13 +19,38 @@
 #include <math.h>
 #include <errno.h>
 
-#define BATCH     4
-#define SEQ       32
+#define BATCH 4
+#define SEQ 32
 #define DEFAULT_STEPS 2000
-#define LR        3e-4f
-#define WARMUP_STEPS 100
-#define LOG_INTERVAL 100
-#define VALIDATION_BATCHES 16
+#define DEFAULT_LR 3e-4f
+#define DEFAULT_WARMUP_STEPS 100
+#define DEFAULT_LOG_INTERVAL 100
+#define DEFAULT_VALIDATION_BATCHES 16
+#define DEFAULT_CHECKPOINT_INTERVAL 100
+#define DEFAULT_TOKENIZER_SAMPLE_BYTES (256u * 1024u)
+
+typedef struct {
+    float learning_rate;
+    int warmup_steps, log_interval, validation_batches, checkpoint_interval;
+    uint64_t seed;
+    size_t tokenizer_sample_bytes;
+    const char* metrics_path;
+} TrainOptions;
+
+static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
+    char* end = NULL; errno = 0;
+    long v = strtol(value, &end, 10);
+    if (errno || !end || *end || v < minv || v > maxv)
+        die("%s has invalid value: %s", name, value);
+    return v;
+}
+static float parse_float_value(const char* name, const char* value, float minv, float maxv) {
+    char* end = NULL; errno = 0;
+    float v = strtof(value, &end);
+    if (errno || !end || *end || !isfinite(v) || v < minv || v > maxv)
+        die("%s has invalid value: %s", name, value);
+    return v;
+}
 
 static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
     const uint8_t* bytes = (const uint8_t*)data;
@@ -37,19 +62,18 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
 }
 
 static void print_usage(const char* exe) {
-    printf("Usage: %s [--resume] [--steps N] [--diagnostics-only] [corpus.txt ...]\n", exe);
-    printf("  --resume           Continue from minima.model and minima.bpe\n");
-    printf("  --steps N          Run N additional optimizer steps (default: %d)\n",
-        DEFAULT_STEPS);
-    printf("  --diagnostics-only Load the checkpoint and run diagnostics without training\n");
-    printf("  --help             Show this help\n");
+    printf("Usage: %s [options] [corpus.txt ...]\n", exe);
+    printf("  --resume --steps N --lr FLOAT --warmup N --log-interval N\n");
+    printf("  --validation-batches N --checkpoint-interval N --seed N\n");
+    printf("  --tokenizer-sample-bytes N --metrics PATH --diagnostics-only\n");
 }
 
 static float evaluate_loss(Model* model, Arena* temp,
-    const uint16_t* all_ids, int validation_start, int validation_tokens) {
+    const uint16_t* all_ids, int validation_start, int validation_tokens,
+    int validation_batches) {
 
     if (!model || !temp || !all_ids ||
-        validation_start < 0 || validation_tokens < BATCH * SEQ + 1)
+        validation_start < 0 || validation_tokens < BATCH * SEQ + 1 || validation_batches < 1)
         return NAN;
 
     arena_reset(temp);
@@ -72,10 +96,10 @@ static float evaluate_loss(Model* model, Arena* temp,
     double loss_sum = 0.0;
 
     // Evaluate fixed, evenly spaced windows across the held-out region.
-    for (int eval_batch = 0; eval_batch < VALIDATION_BATCHES; eval_batch++) {
+    for (int eval_batch = 0; eval_batch < validation_batches; eval_batch++) {
         for (int b = 0; b < BATCH; b++) {
             const size_t sample_index = (size_t)eval_batch * BATCH + b;
-            const size_t sample_count = (size_t)VALIDATION_BATCHES * BATCH;
+            const size_t sample_count = (size_t)validation_batches * BATCH;
             const size_t offset = (span * sample_index) / (sample_count - 1);
             const int start = validation_start + (int)offset;
 
@@ -95,15 +119,18 @@ static float evaluate_loss(Model* model, Arena* temp,
         loss_sum += loss;
     }
 
-    return (float)(loss_sum / VALIDATION_BATCHES);
+    return (float)(loss_sum / validation_batches);
 }
 
 static int parse_arguments(int argc, char** argv, bool* resume,
-    bool* diagnostics_only, int* steps, const char** corpus_paths) {
+    bool* diagnostics_only, int* steps, const char** corpus_paths, TrainOptions* o) {
     int path_count = 0;
-    *resume = false;
-    *diagnostics_only = false;
-    *steps = DEFAULT_STEPS;
+    *resume = false; *diagnostics_only = false; *steps = DEFAULT_STEPS;
+    o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
+    o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
+    o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
+    o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
+    o->metrics_path="minima_metrics.csv";
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -116,15 +143,34 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         else if (strcmp(argv[i], "--diagnostics-only") == 0) {
             *diagnostics_only = true;
         }
-        else if (strcmp(argv[i], "--steps") == 0) {
-            if (i + 1 >= argc) die("--steps requires a positive integer");
-            char* end = NULL;
-            errno = 0;
-            long value = strtol(argv[++i], &end, 10);
-            if (errno != 0 || !end || *end != '\0' ||
-                value <= 0 || value > INT_MAX)
-                die("--steps must be an integer between 1 and INT_MAX");
-            *steps = (int)value;
+        else if (strcmp(argv[i], "--steps") == 0 ||
+            strcmp(argv[i], "--warmup") == 0 ||
+            strcmp(argv[i], "--log-interval") == 0 ||
+            strcmp(argv[i], "--validation-batches") == 0 ||
+            strcmp(argv[i], "--checkpoint-interval") == 0 ||
+            strcmp(argv[i], "--seed") == 0 ||
+            strcmp(argv[i], "--tokenizer-sample-bytes") == 0) {
+            const char* opt=argv[i];
+            if (++i >= argc) die("%s requires a value", opt);
+            long lo=1, hi=INT_MAX;
+            if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
+            if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=67108864; }
+            long v=parse_long_value(opt,argv[i],lo,hi);
+            if (strcmp(opt,"--steps")==0) *steps=(int)v;
+            else if (strcmp(opt,"--warmup")==0) o->warmup_steps=(int)v;
+            else if (strcmp(opt,"--log-interval")==0) o->log_interval=(int)v;
+            else if (strcmp(opt,"--validation-batches")==0) o->validation_batches=(int)v;
+            else if (strcmp(opt,"--checkpoint-interval")==0) o->checkpoint_interval=(int)v;
+            else if (strcmp(opt,"--seed")==0) o->seed=(uint64_t)v;
+            else o->tokenizer_sample_bytes=(size_t)v;
+        }
+        else if (strcmp(argv[i], "--lr") == 0) {
+            if (++i >= argc) die("--lr requires a value");
+            o->learning_rate=parse_float_value("--lr",argv[i],1e-7f,1.0f);
+        }
+        else if (strcmp(argv[i], "--metrics") == 0) {
+            if (++i >= argc || !argv[i][0]) die("--metrics requires a path");
+            o->metrics_path=argv[i];
         }
         else if (argv[i][0] == '-') {
             die("unknown option: %s (use --help)", argv[i]);
@@ -332,8 +378,9 @@ int main(int argc, char** argv) {
     bool diagnostics_only = false;
     int steps_to_run = DEFAULT_STEPS;
     const char* user_paths[32];
+    TrainOptions options;
     const int user_path_count = parse_arguments(argc, argv,
-        &resume, &diagnostics_only, &steps_to_run, user_paths);
+        &resume, &diagnostics_only, &steps_to_run, user_paths, &options);
 
     printf("ProjectMinima text-corpus training experiment\n");
     printf("Vocabulary target: %d\n", MODEL_VOCAB_SIZE);
@@ -447,7 +494,7 @@ int main(int argc, char** argv) {
         if (train_corpus_len < (size_t)BATCH * SEQ + 1)
             die("training portion is too small");
 
-        const size_t tokenizer_sample_cap = 256u * 1024u;
+        const size_t tokenizer_sample_cap = options.tokenizer_sample_bytes;
         const size_t sample_len = train_corpus_len < tokenizer_sample_cap
             ? train_corpus_len : tokenizer_sample_cap;
         uint8_t* tokenizer_sample = (uint8_t*)arena_alloc(&arena, sample_len);
@@ -506,16 +553,16 @@ int main(int argc, char** argv) {
     // 5. Model, optimizer, gradients, and optional checkpoint restore
     // ------------------------------------------------------------------
     Model model;
-    if (!model_init(&model, &arena, 42, tok.vocab_size))
+    if (!model_init(&model, &arena, options.seed, tok.vocab_size))
         die("model_init failed");
     model_summary(&model);
 
     Optim opt;
-    if (!optim_init(&opt, &model, &arena, LR, 0.9f, 0.95f, 1e-8f, 0.01f))
+    if (!optim_init(&opt, &model, &arena, options.learning_rate, 0.9f, 0.95f, 1e-8f, 0.01f))
         die("optim_init failed");
 
     Rng rng;
-    rng_seed(&rng, 1234);
+    rng_seed(&rng, options.seed ^ 0x9e3779b97f4a7c15ULL);
 
     if (resume) {
         if (!checkpoint_load("minima.model", &model, &opt,
@@ -565,13 +612,21 @@ int main(int argc, char** argv) {
     uint16_t* batch_targets;
     float* dlogits;
 
-    const int warmup_steps = steps_to_run < WARMUP_STEPS
-        ? (steps_to_run / 10 > 0 ? steps_to_run / 10 :
-            (steps_to_run > 1 ? 1 : 0)) : WARMUP_STEPS;
+    const int warmup_steps = options.warmup_steps < steps_to_run
+        ? options.warmup_steps : (steps_to_run > 1 ? steps_to_run - 1 : 0);
     const int64_t initial_step = opt.step;
 
     printf(" step | train loss | valid loss | learning rate\n");
     printf("------+------------+------------+--------------\n");
+    FILE* metrics=fopen(options.metrics_path,"a");
+    if (!metrics) die("could not open metrics CSV: %s",options.metrics_path);
+    if (fseek(metrics,0,SEEK_END)!=0) die("could not seek metrics CSV");
+    if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
+    const clock_t training_started=clock();
+    printf("Metrics CSV: %s\n",options.metrics_path);
+    printf("Settings: lr=%.7g warmup=%d log=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu\n",
+        options.learning_rate,options.warmup_steps,options.log_interval,options.validation_batches,
+        options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes);
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
@@ -614,46 +669,45 @@ int main(int argc, char** argv) {
         // Each invocation is an additional training segment with its own
         // warmup + cosine decay. AdamW's bias-correction step remains global.
         opt.lr = steps_to_run == 1 ? LR :
-            optim_lr_cosine(LR, local_step + 1,
+            optim_lr_cosine(options.learning_rate, local_step + 1,
                 warmup_steps, steps_to_run);
         optim_step(&opt, &model, &grads);
 
         train_loss_sum += loss;
         train_loss_count++;
 
-        if ((local_step + 1) % LOG_INTERVAL == 0 ||
+        if ((local_step + 1) % options.log_interval == 0 ||
             local_step == steps_to_run - 1) {
             const float validation_loss = evaluate_loss(&model, &temp,
-                all_ids, train_tokens, validation_tokens);
+                all_ids, train_tokens, validation_tokens, options.validation_batches);
             if (!isfinite(validation_loss))
                 die("validation loss evaluation failed");
 
             const double average_train_loss =
                 train_loss_sum / (double)train_loss_count;
 
-            printf("%5lld | %10.4f | %10.4f | %.7f\n",
-                (long long)opt.step, (float)average_train_loss,
-                validation_loss, opt.lr);
-
-            train_loss_sum = 0.0;
-            train_loss_count = 0;
-
-            // Save at every reporting interval so an interrupted run loses
-            // at most LOG_INTERVAL - 1 optimizer steps.
-            if (!checkpoint_save("minima.model", &model, &opt,
-                &rng, tokenizer_hash))
-                die("periodic checkpoint save failed");
+            const double elapsed=(double)(clock()-training_started)/CLOCKS_PER_SEC;
+            printf("%5lld | %10.4f | %10.4f | %.7f\n",(long long)opt.step,(float)average_train_loss,validation_loss,opt.lr);
+            fprintf(metrics,"%lld,%.7f,%.7f,%.9g,%.7f,%.7f,%.3f\n",
+                (long long)opt.step,(float)average_train_loss,validation_loss,opt.lr,
+                expf((float)average_train_loss),expf(validation_loss),elapsed);
+            fflush(metrics);
+            train_loss_sum=0.0; train_loss_count=0;
         }
     }
 
     const int64_t final_step = opt.step;
+    if (!diagnostics_only && (final_step == initial_step || final_step % options.checkpoint_interval != 0))
+        if (!checkpoint_save("minima.model",&model,&opt,&rng,tokenizer_hash)) die("final checkpoint save failed");
+    const double training_seconds=(double)(clock()-training_started)/CLOCKS_PER_SEC;
+    fclose(metrics);
     printf("\nTraining segment complete: %lld -> %lld\n",
         (long long)initial_step, (long long)final_step);
 
     const float final_train_loss = evaluate_loss(&model, &temp,
-        all_ids, 0, train_tokens);
+        all_ids, 0, train_tokens, options.validation_batches);
     const float final_validation_loss = evaluate_loss(&model, &temp,
-        all_ids, train_tokens, validation_tokens);
+        all_ids, train_tokens, validation_tokens, options.validation_batches);
     if (!isfinite(final_train_loss) || !isfinite(final_validation_loss))
         die("final loss diagnostics are unavailable");
 
@@ -662,6 +716,9 @@ int main(int argc, char** argv) {
     printf("  train perplexity: %.2f\n", expf(final_train_loss));
     printf("  valid loss      : %.4f\n", final_validation_loss);
     printf("  valid perplexity: %.2f\n", expf(final_validation_loss));
+    printf("  training duration: %.2f seconds\n",training_seconds);
+    printf("  total optimizer steps: %lld\n",(long long)opt.step);
+    printf("  checkpoint status: saved (minima.model)\n");
 
     // ------------------------------------------------------------------
     // 8. Tokenizer and checkpoint round-trip regression checks
