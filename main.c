@@ -559,7 +559,7 @@ int main(int argc, char** argv) {
         die("checkpoint round-trip verification failed");
 
     printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG)\n");
-    printf("Checkpoint compatibility: PASS (tokenizer and corpus fingerprints)\n");
+    printf("Checkpoint compatibility: PASS (model architecture and tokenizer)\n");
 
     // ------------------------------------------------------------------
     // 9. KV-cache parity and deterministic multi-prompt generation
