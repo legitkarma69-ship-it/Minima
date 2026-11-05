@@ -1,7 +1,9 @@
 #ifndef MINIMA_GUI_CHAT_STATE_H
 #define MINIMA_GUI_CHAT_STATE_H
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 
 /* Shared by the real window procedure and the Windows integration test. */
