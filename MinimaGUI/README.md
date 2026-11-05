@@ -10,6 +10,8 @@ The frontend is a separate native Win32 application written in C. It launches `M
 4. Keep `Minima.exe` and `MinimaGUI.exe` in the same output directory.
 5. Launch `MinimaGUI.exe`.
 
+The GUI saves its settings and corpus-file list in `minima_gui.ini` beside the executables, and restores them on the next launch.
+
 The engine working directory is the executable directory. Keep the `data` folder and checkpoint/tokenizer files in the locations expected by the engine.
 
 ## Training controls
@@ -62,5 +64,7 @@ Chat requires `minima.model` and `minima.bpe`. Set the model configuration contr
 - Save checkpoint creates `minima.save`; the engine saves at the next optimizer-step boundary.
 - Automatic checkpoints are written at the configured interval and at the end of a training segment.
 - `minima_metrics.csv`, `minima_chat.txt`, and signal files are stored beside the executables.
+
+A Windows x64 GitHub Actions workflow builds both executables and publishes them as a downloadable artifact for each successful build.
 
 The UI is deliberately a controller. It must not own model weights, perform forward/backward passes, or block the window thread with training or generation work.
