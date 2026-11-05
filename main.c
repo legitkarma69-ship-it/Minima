@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
     Arena arena;          // permanent (weights, optim, tokenizer)
     Arena temp;           // per-step activations / gradients scratch
 
-    if (!arena_init(&arena, 512ull * 1024 * 1024))  // 512 MB
+    if (!arena_init(&arena, 8ull * 1024 * 1024 * 1024))  // 8 GiB reserved, committed on demand
         die("permanent arena failed");
     if (!arena_init(&temp, 256ull * 1024 * 1024))  // 256 MB
         die("temp arena failed");
