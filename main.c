@@ -12,6 +12,7 @@
 #include "config.h"
 #include "train.h"
 #include "chat.h"
+#include "diagnostics.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -719,8 +720,9 @@ int main(int argc, char** argv) {
         check_tokens, options.sequence_length, 1e-4f))
         die("KV-cache parity check failed");
 
-    if (!chat_run_generation_benchmark(&model, &tok, &cache))
-        die("deterministic generation benchmark failed");
+    if (!diagnostics_run(&model, &tok, &arena, &temp, all_ids,
+        train_tokens, validation_tokens, options.sequence_length))
+        die("model-quality diagnostics failed");
 
     printf("\nSmoke test finished.\n");
     printf("Training, validation, persistence, and generation checks completed.\n");
