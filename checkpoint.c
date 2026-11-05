@@ -5,8 +5,8 @@
 #include <string.h>
 #include <math.h>
 
-#define CHECKPOINT_MAGIC "MINIMA01"
-#define CHECKPOINT_VERSION 1u
+#define CHECKPOINT_MAGIC "MINIMA02"
+#define CHECKPOINT_VERSION 2u
 
 static bool write_bytes(FILE* f, const void* data, size_t size, size_t count) {
     return fwrite(data, size, count, f) == count;
@@ -68,9 +68,11 @@ static size_t model_parameter_count(const Model* m) {
     if (!write_floats(f, opt->v_##name, (count))) goto fail; \
 } while (0)
 
-bool checkpoint_save(const char* path, const Model* model, const Optim* opt) {
+bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
+    const Rng* rng, uint64_t tokenizer_hash, uint64_t corpus_hash) {
     const Model* m = model;
-    if (!path || !model || !opt || !model->tok_emb ||
+    if (!path || !model || !opt || !rng || !tokenizer_hash ||
+        !corpus_hash || !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
@@ -89,12 +91,16 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt) {
     };
     uint64_t params = (uint64_t)model_parameter_count(model);
     int64_t step = opt->step;
+    uint64_t rng_state = rng->state;
 
     if (!write_bytes(f, magic, 1, sizeof(magic)) ||
         !write_bytes(f, &version, sizeof(version), 1) ||
         !write_bytes(f, dims, sizeof(uint32_t), 6) ||
         !write_bytes(f, &params, sizeof(params), 1) ||
         !write_bytes(f, &step, sizeof(step), 1) ||
+        !write_bytes(f, &rng_state, sizeof(rng_state), 1) ||
+        !write_bytes(f, &tokenizer_hash, sizeof(tokenizer_hash), 1) ||
+        !write_bytes(f, &corpus_hash, sizeof(corpus_hash), 1) ||
         !write_bytes(f, &opt->lr, sizeof(float), 1) ||
         !write_bytes(f, &opt->beta1, sizeof(float), 1) ||
         !write_bytes(f, &opt->beta2, sizeof(float), 1) ||
@@ -122,9 +128,11 @@ fail:
     if (!read_floats(f, opt->v_##name, (count))) goto fail; \
 } while (0)
 
-bool checkpoint_load(const char* path, Model* model, Optim* opt) {
+bool checkpoint_load(const char* path, Model* model, Optim* opt,
+    Rng* rng, uint64_t tokenizer_hash, uint64_t corpus_hash) {
     Model* m = model;
-    if (!path || !model || !opt || !model->tok_emb ||
+    if (!path || !model || !opt || !rng || !tokenizer_hash ||
+        !corpus_hash || !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
@@ -138,6 +146,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt) {
     uint32_t version = 0, dims[6] = { 0 };
     uint64_t params = 0;
     int64_t step = 0;
+    uint64_t rng_state = 0, saved_tokenizer_hash = 0, saved_corpus_hash = 0;
     float lr, beta1, beta2, eps, weight_decay;
 
     if (!read_bytes(f, magic, 1, sizeof(magic)) ||
@@ -147,6 +156,9 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt) {
         !read_bytes(f, dims, sizeof(uint32_t), 6) ||
         !read_bytes(f, &params, sizeof(params), 1) ||
         !read_bytes(f, &step, sizeof(step), 1) ||
+        !read_bytes(f, &rng_state, sizeof(rng_state), 1) ||
+        !read_bytes(f, &saved_tokenizer_hash, sizeof(saved_tokenizer_hash), 1) ||
+        !read_bytes(f, &saved_corpus_hash, sizeof(saved_corpus_hash), 1) ||
         !read_bytes(f, &lr, sizeof(float), 1) ||
         !read_bytes(f, &beta1, sizeof(float), 1) ||
         !read_bytes(f, &beta2, sizeof(float), 1) ||
@@ -162,6 +174,8 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt) {
         dims[5] != (uint32_t)model->max_seq ||
         params != (uint64_t)model_parameter_count(model) ||
         params != (uint64_t)opt->n_params ||
+        saved_tokenizer_hash != tokenizer_hash ||
+        saved_corpus_hash != corpus_hash ||
         step < 0 || !isfinite(lr) || lr <= 0.0f ||
         !isfinite(beta1) || beta1 < 0.0f || beta1 >= 1.0f ||
         !isfinite(beta2) || beta2 < 0.0f || beta2 >= 1.0f ||
@@ -176,6 +190,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt) {
     if (fgetc(f) != EOF || ferror(f)) goto fail;
 
     opt->step = step;
+    rng->state = rng_state ? rng_state : 0x123456789abcdef0ULL;
     opt->lr = lr;
     opt->beta1 = beta1;
     opt->beta2 = beta2;
