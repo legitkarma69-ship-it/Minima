@@ -86,7 +86,15 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
             test_pending = true;
             continue;
         }
-        if(!bytes){puts("CHAT_READY");continue;}
+        if(!bytes){
+            if (test_pending) {
+                active_options = *options;
+                test_pending = false;
+                history_len = 0;
+            }
+            puts("CHAT_READY");
+            continue;
+        }
         int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,(int)(sizeof(input_ids)/sizeof(input_ids[0])));
         if(input_count<=0){puts(test_pending ? "TEST: [input encoding failed]" : "BOT: [input encoding failed]");active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;}
         if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
