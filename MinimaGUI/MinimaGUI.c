@@ -26,6 +26,7 @@ static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes;
 static HANDLE g_process, g_thread;
 static volatile LONG g_running;
+static BOOL g_close_when_done;
 static wchar_t g_engine_path[MAX_PATH];
 
 static void append_log(const wchar_t* text) {
@@ -189,7 +190,12 @@ static void start_engine(void) {
         MessageBoxW(g_window,L"One or more training settings are empty or too long.",L"ProjectMinima",MB_ICONWARNING);
         return;
     }
-    wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\"");
+    wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\"");
+    wchar_t stop_path[MAX_PATH];
+    wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
+    wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
+    if (stop_slash) wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
+    DeleteFileW(stop_path);
 
     int corpus_count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
@@ -248,14 +254,21 @@ static void start_engine(void) {
     }
 }
 
+static void request_cooperative_stop(void) {
+    wchar_t path[MAX_PATH];
+    wcscpy_s(path,_countof(path),g_engine_path);
+    wchar_t* slash=wcsrchr(path,L'\\');
+    if (slash) wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.stop");
+    HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if (file!=INVALID_HANDLE_VALUE) CloseHandle(file);
+    append_log(L"Stop requested. The engine will finish the current step and save a checkpoint.\\r\\n");
+}
+
 static void stop_engine(void) {
-    if (g_process && InterlockedCompareExchange(&g_running, 0, 0)) {
-        /* The engine checkpoints at its configured reporting intervals.
-           Termination can lose work since the most recent checkpoint. */
-        if (MessageBoxW(g_window,
-            L"Stop Minima now? Work since the last saved checkpoint may be lost.",
-            L"Stop training", MB_YESNO | MB_ICONWARNING) == IDYES)
-            TerminateProcess(g_process, 2);
+    if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
+        if (MessageBoxW(g_window,L"Request a graceful stop after the current training step?",
+            L"Stop training",MB_YESNO|MB_ICONQUESTION)==IDYES)
+            request_cooperative_stop();
     }
 }
 
@@ -339,13 +352,15 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_thread) { CloseHandle(g_thread); g_thread = NULL; }
         set_running(FALSE);
         append_log(wp == 0 ? L"\r\n--- Engine exited successfully ---\r\n" : L"\r\n--- Engine exited with an error ---\r\n");
+        if (g_close_when_done) DestroyWindow(hwnd);
         return 0;
     case WM_CLOSE:
-        if (g_process && InterlockedCompareExchange(&g_running, 0, 0)) {
-            if (MessageBoxW(hwnd, L"Training is still running. Stop it and close?",
-                L"ProjectMinima", MB_YESNO | MB_ICONWARNING) != IDYES) return 0;
-            TerminateProcess(g_process, 2);
-            WaitForSingleObject(g_process, 3000);
+        if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
+            if (MessageBoxW(hwnd,L"Training is running. Request a graceful stop, save a checkpoint, then close?",
+                L"ProjectMinima",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
+            g_close_when_done=TRUE;
+            request_cooperative_stop();
+            return 0;
         }
         DestroyWindow(hwnd);
         return 0;
