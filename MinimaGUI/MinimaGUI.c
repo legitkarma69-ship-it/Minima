@@ -1006,6 +1006,7 @@ static void stop_generation(void) {
         append_log(L"\r\nStopping generation...\r\n");
         EnableWindow(g_chat_input,FALSE);
         EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
+        EnableWindow(g_chat_test,FALSE);
         EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),FALSE);
         SetWindowTextW(g_status,L"Stopping chat");
         TerminateProcess(g_process,3);
@@ -1308,7 +1309,7 @@ static void create_controls(HWND hwnd) {
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
-        g_group_advanced,g_chat_input,g_chat_test,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
+        g_group_advanced,g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
     };
     g_tab_control_count=(int)_countof(tab_controls);
     for(int i=0;i<g_tab_control_count;i++) {
