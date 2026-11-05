@@ -1006,14 +1006,18 @@ int main(int argc, char** argv) {
         opt.step != final_step || rng.state != saved_rng_state)
         die("checkpoint round-trip verification failed");
 
-    printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG)\n");
+    if (opt.schedule_base_lr <= 0.0f || opt.schedule_total_steps <= 0 ||
+        opt.schedule_warmup_steps < 0 ||
+        (opt.schedule_type != 0 && opt.schedule_type != 1))
+        die("checkpoint LR schedule round-trip verification failed");
+    printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG, LR schedule)\n");
     printf("Checkpoint compatibility: PASS (model architecture and tokenizer)\n");
 
     /* A truncated checkpoint must not alter any live destination state. */
     {
         FILE* source = fopen("minima.model", "rb");
         FILE* truncated = fopen("minima_truncated.model", "wb");
-        uint8_t prefix[104];
+        uint8_t prefix[128];
         size_t bytes = source ? fread(prefix, 1, sizeof(prefix), source) : 0;
         if (source) fclose(source);
         if (!truncated || bytes != sizeof(prefix) ||
@@ -1033,6 +1037,10 @@ int main(int argc, char** argv) {
         const float guard_lr = opt.lr;
         const int64_t guard_step = opt.step;
         const uint64_t guard_rng = rng.state;
+        const float guard_schedule_lr = opt.schedule_base_lr;
+        const int64_t guard_schedule_total = opt.schedule_total_steps;
+        const int64_t guard_schedule_warmup = opt.schedule_warmup_steps;
+        const int32_t guard_schedule_type = opt.schedule_type;
         model.tok_emb[0] = guard_weight + 3.0f;
         opt.m_tok_emb[0] = guard_moment + 4.0f;
         opt.v_tok_emb[0] = guard_variance + 5.0f;
@@ -1052,7 +1060,10 @@ int main(int argc, char** argv) {
             opt.m_tok_emb[0] == expected_moment &&
             opt.v_tok_emb[0] == expected_variance &&
             opt.lr == expected_lr && opt.step == expected_step &&
-            rng.state == expected_rng;
+            opt.schedule_base_lr == guard_schedule_lr &&
+            opt.schedule_total_steps == guard_schedule_total &&
+            opt.schedule_warmup_steps == guard_schedule_warmup &&
+            opt.schedule_type == guard_schedule_type && rng.state == expected_rng;
 
         model.tok_emb[0] = guard_weight;
         opt.m_tok_emb[0] = guard_moment;
