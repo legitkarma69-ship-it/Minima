@@ -147,32 +147,67 @@ fail:
     return false;
 }
 
+#define STAGE_MODEL(name, count) do { \
+    staged_model.name = cursor; cursor += (count); \
+} while (0)
+
+#define STAGE_OPT_MOMENTS(name, count) do { \
+    staged_opt.m_##name = cursor; cursor += (count); \
+    staged_opt.v_##name = cursor; cursor += (count); \
+} while (0)
+
 #define READ_MODEL(name, count) do { \
-    if (!read_floats(f, model->name, (count))) goto fail; \
+    if (!read_floats(f, staged_model.name, (count))) goto fail; \
 } while (0)
 
 #define READ_OPT_MOMENTS(name, count) do { \
-    if (!read_floats(f, opt->m_##name, (count))) goto fail; \
-    if (!read_floats(f, opt->v_##name, (count))) goto fail; \
+    if (!read_floats(f, staged_opt.m_##name, (count))) goto fail; \
+    if (!read_floats(f, staged_opt.v_##name, (count))) goto fail; \
+} while (0)
+
+#define COMMIT_MODEL(name, count) do { \
+    memcpy(model->name, staged_model.name, (count) * sizeof(float)); \
+} while (0)
+
+#define COMMIT_OPT_MOMENTS(name, count) do { \
+    memcpy(opt->m_##name, staged_opt.m_##name, (count) * sizeof(float)); \
+    memcpy(opt->v_##name, staged_opt.v_##name, (count) * sizeof(float)); \
 } while (0)
 
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
     Rng* rng, uint64_t tokenizer_hash) {
-    Model* m = model;
     if (!path || !model || !opt || !rng || !tokenizer_hash ||
-        !model->tok_emb ||
-        !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
-        !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
-        !model->rms1_scale || !model->rms2_scale ||
-        !model->rms_final_scale)
+        !model->tok_emb || !model->pos_emb || !model->attn_qkv ||
+        !model->attn_proj || !model->ffn_up || !model->ffn_gate ||
+        !model->ffn_down || !model->rms1_scale || !model->rms2_scale ||
+        !model->rms_final_scale || opt->n_params != model_parameter_count(model) ||
+        !opt->m_tok_emb || !opt->m_pos_emb || !opt->m_attn_qkv ||
+        !opt->m_attn_proj || !opt->m_ffn_up || !opt->m_ffn_gate ||
+        !opt->m_ffn_down || !opt->m_rms1_scale || !opt->m_rms2_scale ||
+        !opt->m_rms_final_scale || !opt->v_tok_emb || !opt->v_pos_emb ||
+        !opt->v_attn_qkv || !opt->v_attn_proj || !opt->v_ffn_up ||
+        !opt->v_ffn_gate || !opt->v_ffn_down || !opt->v_rms1_scale ||
+        !opt->v_rms2_scale || !opt->v_rms_final_scale)
         return false;
 
+    const size_t param_count = model_parameter_count(model);
+    if (param_count > SIZE_MAX / (3 * sizeof(float))) return false;
+    float* staging = (float*)malloc(param_count * 3 * sizeof(float));
+    if (!staging) return false;
+
+    Model staged_model = *model;
+    Optim staged_opt = *opt;
+    float* cursor = staging;
+    Model* m = &staged_model;
+    MODEL_ARRAYS(STAGE_MODEL);
+    OPT_ARRAYS(STAGE_OPT_MOMENTS);
+
     FILE* f = fopen(path, "rb");
-    if (!f) return false;
+    if (!f) { free(staging); return false; }
 
     char magic[8];
     uint32_t version = 0, dims[6] = { 0 };
-    uint64_t params = 0;
+    uint64_t checkpoint_params = 0;
     int64_t step = 0;
     uint64_t rng_state = 0, saved_tokenizer_hash = 0;
     float lr, beta1, beta2, eps, weight_decay;
@@ -182,7 +217,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !read_bytes(f, &version, sizeof(version), 1) ||
         version != CHECKPOINT_VERSION ||
         !read_bytes(f, dims, sizeof(uint32_t), 6) ||
-        !read_bytes(f, &params, sizeof(params), 1) ||
+        !read_bytes(f, &checkpoint_params, sizeof(checkpoint_params), 1) ||
         !read_bytes(f, &step, sizeof(step), 1) ||
         !read_bytes(f, &rng_state, sizeof(rng_state), 1) ||
         !read_bytes(f, &saved_tokenizer_hash, sizeof(saved_tokenizer_hash), 1) ||
@@ -199,8 +234,8 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         dims[3] != (uint32_t)model->n_heads ||
         dims[4] != (uint32_t)model->ffn_dim ||
         dims[5] != (uint32_t)model->max_seq ||
-        params != (uint64_t)model_parameter_count(model) ||
-        params != (uint64_t)opt->n_params ||
+        checkpoint_params != (uint64_t)model_parameter_count(model) ||
+        checkpoint_params != (uint64_t)opt->n_params ||
         saved_tokenizer_hash != tokenizer_hash ||
         step < 0 || !isfinite(lr) || lr < 0.0f ||
         !isfinite(beta1) || beta1 < 0.0f || beta1 >= 1.0f ||
@@ -212,9 +247,17 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     MODEL_ARRAYS(READ_MODEL);
     OPT_ARRAYS(READ_OPT_MOMENTS);
 
-    // Reject truncated files and unexpected trailing data.
+    // Reject truncated files, unexpected trailing bytes, and non-finite state.
     if (fgetc(f) != EOF || ferror(f)) goto fail;
+    for (size_t i = 0; i < param_count * 3; ++i)
+        if (!isfinite(staging[i])) goto fail;
 
+    if (fclose(f) != 0) { free(staging); return false; }
+
+    // Commit only after the entire file has been read and validated.
+    m = &staged_model;
+    MODEL_ARRAYS(COMMIT_MODEL);
+    OPT_ARRAYS(COMMIT_OPT_MOMENTS);
     opt->step = step;
     rng->state = rng_state ? rng_state : 0x123456789abcdef0ULL;
     opt->lr = lr;
@@ -222,11 +265,11 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     opt->beta2 = beta2;
     opt->eps = eps;
     opt->weight_decay = weight_decay;
-
-    if (fclose(f) != 0) return false;
+    free(staging);
     return true;
 
 fail:
     fclose(f);
+    free(staging);
     return false;
 }

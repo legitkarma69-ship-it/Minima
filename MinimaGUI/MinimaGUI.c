@@ -6,6 +6,7 @@
 #include <wchar.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gui_protocol.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
@@ -148,10 +149,11 @@ static DWORD WINAPI reader_thread(void* parameter) {
             carry[used++] = buffer[i];
             if (buffer[i] == '\n' || used >= 60000) {
                 carry[used] = 0;
-                if(used==11 && memcmp(carry,"CHAT_READY\n",11)==0){
+                const int protocol_marker=minima_protocol_marker(carry,used);
+                if(protocol_marker==MINIMA_PROTOCOL_CHAT_READY){
                     PostMessageW(g_window,WM_CHAT_READY,0,0);used=0;continue;
                 }
-                if(used==12 && memcmp(carry,"CHAT_CLOSED\n",12)==0){used=0;continue;}
+                if(protocol_marker==MINIMA_PROTOCOL_CHAT_CLOSED){used=0;continue;}
                 UINT code_page=CP_UTF8;
                 int needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);
                 if(needed<=0){code_page=CP_ACP;needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);}
