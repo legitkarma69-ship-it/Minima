@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <math.h>
 #include "gui_protocol.h"
 #include "gui_chat_state.h"
 
@@ -32,6 +33,7 @@
 #define IDC_REBUILD_TOKENIZER 1015
 #define IDC_AUTO_SETTINGS 1016
 #define IDC_ADVANCED_TOGGLE 1017
+#define IDC_CHAT_TEST    1018
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
@@ -42,7 +44,7 @@ static HWND g_tab_controls[40];
 static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_total_steps, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
-static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
+static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_batch_size, g_sequence_length;
 static wchar_t g_metrics_path[MAX_PATH];
@@ -153,8 +155,9 @@ static void layout_controls(HWND hwnd) {
     if (g_graph) MoveWindow(g_graph, scale_px(600), scale_px(170), width - scale_px(624), scale_px(175), TRUE);
     if (g_log) MoveWindow(g_log, pad, output_top + scale_px(27), width - 2 * pad,
         height - output_top - scale_px(108), TRUE);
-    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(240), scale_px(26), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(225), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
+    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(355), scale_px(26), TRUE);
+    if (g_chat_test) MoveWindow(g_chat_test, width - scale_px(340), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(230), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_CHAT_STOP), width - scale_px(110), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_START), scale_px(12), actions_y, scale_px(120), scale_px(30), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_STOP), scale_px(142), actions_y, scale_px(105), scale_px(30), TRUE);
@@ -384,8 +387,15 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window,IDC_AUTO_SETTINGS),!running);
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
-        g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
+        g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
+    /* Sampling controls remain editable during chat; each test uses a one-shot override. */
+    EnableWindow(g_temperature,!running || g_chat_mode);
+    EnableWindow(g_top_k,!running || g_chat_mode);
+    EnableWindow(g_top_p,!running || g_chat_mode);
+    EnableWindow(g_repetition,!running || g_chat_mode);
+    EnableWindow(g_max_tokens,!running || g_chat_mode);
+    EnableWindow(g_chat_test,FALSE);
     SetWindowTextW(g_status,running?(g_chat_mode?L"Chat running":L"Training running"):L"Idle");
     update_fresh_only_controls();
 }
@@ -904,6 +914,93 @@ static void send_chat_message(void) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
 }
 
+static BOOL read_float_control(HWND control, float minimum, float maximum, float* value) {
+    wchar_t text[64], *end = NULL;
+    GetWindowTextW(control, text, _countof(text));
+    if (!text[0]) return FALSE;
+    const float parsed = wcstof(text, &end);
+    if (!end || *end || !isfinite((double)parsed) ||
+        parsed < minimum || parsed > maximum) return FALSE;
+    *value = parsed;
+    return TRUE;
+}
+
+static BOOL read_integer_control(HWND control, long minimum, long maximum, long* value) {
+    wchar_t text[64], *end = NULL;
+    GetWindowTextW(control, text, _countof(text));
+    if (!text[0]) return FALSE;
+    const long parsed = wcstol(text, &end, 10);
+    if (!end || *end || parsed < minimum || parsed > maximum) return FALSE;
+    *value = parsed;
+    return TRUE;
+}
+
+static void test_generation_settings(void) {
+    if (!g_chat_mode || !g_stdin_write ||
+        !InterlockedCompareExchange(&g_running, 0, 0)) return;
+
+    wchar_t prompt[4096];
+    GetWindowTextW(g_chat_input, prompt, _countof(prompt));
+    if (!prompt[0]) {
+        MessageBoxW(g_window, L"Enter a prompt or choose one from the prompt list first.",
+            L"Generation Lab", MB_ICONINFORMATION);
+        return;
+    }
+
+    float temperature, top_p, repetition;
+    long top_k, max_tokens;
+    if (!read_float_control(g_temperature, 0.05f, 5.0f, &temperature) ||
+        !read_integer_control(g_top_k, 1, 256, &top_k) ||
+        !read_float_control(g_top_p, 0.01f, 1.0f, &top_p) ||
+        !read_float_control(g_repetition, 1.0f, 3.0f, &repetition) ||
+        !read_integer_control(g_max_tokens, 1, 512, &max_tokens)) {
+        MessageBoxW(g_window,
+            L"Sampling settings are out of range. Temperature: 0.05-5.0, top-k: 1-256, top-p: 0.01-1.0, repetition: 1.0-3.0, max tokens: 1-512.",
+            L"Generation Lab", MB_ICONWARNING);
+        return;
+    }
+
+    wchar_t message[8192];
+    const int chars = _snwprintf_s(message, _countof(message), _TRUNCATE,
+        L"/test %.6g %ld %.6g %.6g %ld\n%s\n",
+        (double)temperature, top_k, (double)top_p, (double)repetition,
+        max_tokens, prompt);
+    if (chars <= 0) {
+        append_log(L"Generation test prompt is too long.\r\n");
+        return;
+    }
+
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, message, chars,
+        NULL, 0, NULL, NULL);
+    if (bytes <= 0) {
+        append_log(L"Could not encode the generation test prompt as UTF-8.\r\n");
+        return;
+    }
+    char* utf8 = (char*)malloc((size_t)bytes);
+    if (!utf8) return;
+    WideCharToMultiByte(CP_UTF8, 0, message, chars, utf8, bytes, NULL, NULL);
+    DWORD written = 0;
+    const BOOL sent = WriteFile(g_stdin_write, utf8, (DWORD)bytes, &written, NULL) &&
+        written == (DWORD)bytes;
+    free(utf8);
+    if (!sent) {
+        append_log(L"Could not send the generation test to Minima.\r\n");
+        return;
+    }
+
+    wchar_t header[256];
+    _snwprintf_s(header, _countof(header), _TRUNCATE,
+        L"\r\n--- Generation Lab | T=%.3g, top-k=%ld, top-p=%.3g, repetition=%.3g, max=%ld ---\r\nPrompt: ",
+        (double)temperature, top_k, (double)top_p, (double)repetition, max_tokens);
+    append_log(header);
+    append_log(prompt);
+    append_log(L"\r\n");
+    SetWindowTextW(g_chat_input, L"");
+    EnableWindow(GetDlgItem(g_window, IDC_CHAT_SEND), FALSE);
+    EnableWindow(g_chat_test, FALSE);
+    SetWindowTextW(g_status, L"Testing");
+}
+
 static void stop_generation(void) {
     if(g_process && g_chat_mode && InterlockedCompareExchange(&g_running,0,0)){
         append_log(L"\r\nStopping generation...\r\n");
@@ -1149,12 +1246,21 @@ static void create_controls(HWND hwnd) {
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
         12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
     SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
-    g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL,
-        12,665,700,26,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
-    SendMessageW(g_chat_input,EM_SETLIMITTEXT,1024,0);
+    g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"COMBOBOX",L"",
+        WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_VSCROLL,
+        12,665,600,180,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
+    SendMessageW(g_chat_input,CB_LIMITTEXT,1024,0);
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The quick brown fox");
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Once upon a time");
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"In the beginning");
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The meaning of life");
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"It was a dark");
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Hello there, how do you do?");
+    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
     EnableWindow(g_chat_input,FALSE);
-    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,720,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,835,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
+    g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,hwnd,(HMENU)IDC_CHAT_TEST,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
@@ -1183,6 +1289,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
+        add_tooltip(g_chat_input, L"Choose a sample prompt from the dropdown or type your own prompt.");
+        add_tooltip(g_chat_test, L"Run one isolated generation with the current sampling settings. It does not change the active chat defaults or model checkpoint.");
     }
 
     DpiScaleContext initial_scale = { hwnd, 96, g_dpi };
@@ -1198,9 +1306,9 @@ static void create_controls(HWND hwnd) {
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_total_steps,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
-        GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_SAVE_NOW),
+        GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
-        g_group_advanced,g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
+        g_group_advanced,g_chat_input,g_chat_test,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
     };
     g_tab_control_count=(int)_countof(tab_controls);
     for(int i=0;i<g_tab_control_count;i++) {
@@ -1294,6 +1402,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);
             return 0;
         case IDC_CHAT_SEND: send_chat_message(); return 0;
+        case IDC_CHAT_TEST: test_generation_settings(); return 0;
         case IDC_CHAT_STOP: stop_generation(); return 0;
         case IDC_SAVE_NOW: request_checkpoint_save(); return 0;
         }
@@ -1301,6 +1410,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CHAT_READY:
         minima_gui_set_chat_send_ready(GetDlgItem(hwnd,IDC_CHAT_SEND),
             g_chat_mode, InterlockedCompareExchange(&g_running,0,0) != 0);
+        EnableWindow(g_chat_test,
+            g_chat_mode && InterlockedCompareExchange(&g_running,0,0) != 0);
         return 0;
     case WM_APPEND_LOG:
         append_log((const wchar_t*)lp);
@@ -1322,6 +1433,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write=NULL; }
         EnableWindow(g_chat_input,FALSE);
         EnableWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),FALSE);
+        EnableWindow(g_chat_test,FALSE);
         EnableWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),FALSE);
         g_chat_mode=FALSE;
         set_running(FALSE);
