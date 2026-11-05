@@ -16,7 +16,7 @@
 
 #define BATCH     4
 #define SEQ       32
-#define STEPS     80
+#define STEPS     200
 #define LR        3e-4f
 
 int main(int argc, char** argv) {
