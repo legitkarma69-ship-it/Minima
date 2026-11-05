@@ -256,8 +256,24 @@ static BOOL append_combo_option(wchar_t* command,size_t capacity,const wchar_t* 
     return TRUE;
 }
 
+static BOOL engine_sidecar_exists(const wchar_t* filename) {
+    wchar_t path[MAX_PATH];
+    wcscpy_s(path,_countof(path),g_engine_path);
+    wchar_t* slash=wcsrchr(path,L'\\');
+    if(!slash)return FALSE;
+    wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),filename);
+    DWORD attributes=GetFileAttributesW(path);
+    return attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY);
+}
+
 static void start_engine(BOOL chat_mode) {
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
+    if(chat_mode && (!engine_sidecar_exists(L"minima.model") ||
+                     !engine_sidecar_exists(L"minima.bpe"))){
+        MessageBoxW(g_window,L"No checkpoint/tokenizer found. Train a model first, then start chat.",
+            L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
 
     wchar_t command[32768];
     if(chat_mode){
