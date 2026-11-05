@@ -130,6 +130,8 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window, IDC_REMOVE), !running);
     EnableWindow(g_steps,!running);EnableWindow(g_resume,!running);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
+    EnableWindow(GetDlgItem(g_window,IDC_REBUILD_TOKENIZER),!running);
+    EnableWindow(GetDlgItem(g_window,IDC_AUTO_SETTINGS),!running);
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
@@ -473,6 +475,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     CloseHandle(pi.hThread);
     g_chat_mode=chat_mode;
     set_running(TRUE);
+    if(tokenizer_only)SetWindowTextW(g_status,L"Rebuilding tokenizer");
     EnableWindow(GetDlgItem(g_window,IDC_STOP),!chat_mode && !tokenizer_only);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     EnableWindow(GetDlgItem(g_window,IDC_SAVE_NOW),!chat_mode && !tokenizer_only);
@@ -535,6 +538,18 @@ static void apply_auto_settings(void) {
             if(!add_file_size(L"..\\data\\chatlogs.txt",&corpus_bytes))valid=FALSE;
             found=TRUE;
         }
+        if(!found) {
+            DWORD root_a=GetFileAttributesW(L"data\\books.txt");
+            DWORD root_b=GetFileAttributesW(L"data\\chatlogs.txt");
+            if(root_a!=INVALID_FILE_ATTRIBUTES && !(root_a&FILE_ATTRIBUTE_DIRECTORY)) {
+                if(!add_file_size(L"data\\books.txt",&corpus_bytes))valid=FALSE;
+                found=TRUE;
+            }
+            if(valid && root_b!=INVALID_FILE_ATTRIBUTES && !(root_b&FILE_ATTRIBUTE_DIRECTORY)) {
+                if(!add_file_size(L"data\\chatlogs.txt",&corpus_bytes))valid=FALSE;
+                found=TRUE;
+            }
+        }
         if(!found)valid=FALSE;
     }
     if(!valid || corpus_bytes<4096) {
@@ -575,6 +590,7 @@ static void rebuild_tokenizer(void) {
         return;
     }
     if(MessageBoxW(g_window,L"Rebuild minima.bpe using the current corpus and tokenizer settings?\r\n\r\nThe existing tokenizer will be backed up as minima.bpe.previous. The current model checkpoint will no longer match it. You must start a fresh training run afterward.",L"Rebuild tokenizer",MB_YESNO|MB_ICONWARNING)!=IDYES)return;
+    g_use_saved_tokenizer=FALSE;
     wchar_t source[MAX_PATH],backup[MAX_PATH];
     wcscpy_s(source,_countof(source),g_engine_path);
     wchar_t* slash=wcsrchr(source,L'\\'); if(!slash)return;
