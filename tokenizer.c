@@ -118,7 +118,7 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
 
             size_t h = pair_hash(a, b, pair_hash_size);
             // Linear probing must either find this pair or an empty slot.
-            // A bounded 32-slot search silently loses counts under collisions.
+            // Probe the dynamically sized table until the pair or an empty slot is found.
             bool inserted = false;
             const uint32_t key = ((uint32_t)a << 16) | b;
             for (size_t probe = 0; probe < pair_hash_size; probe++) {
