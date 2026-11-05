@@ -26,6 +26,13 @@ typedef struct {
 bool activations_init(Activations* act, Arena* temp_arena,
     int batch, int seq, const Model* model);
 
+// Shared scalar kernels used by both forward and backward passes.
+void rmsnorm(float* out, const float* x, const float* scale,
+    int dim, float eps);
+void matmul(float* out, const float* x, const float* w,
+    int n, int d_in, int d_out);
+float silu(float x);
+
 // Full forward pass.
 // tokens: [batch, seq]  (uint16_t token ids)
 // Returns pointer to logits [batch * seq * vocab] (also stored in act->logits)
