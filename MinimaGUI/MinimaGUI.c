@@ -294,6 +294,8 @@ static void start_engine(BOOL chat_mode) {
         wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
         if(stop_slash)wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
         DeleteFileW(stop_path);
+        if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED)
+            DeleteFileW(g_metrics_path); /* A fresh model starts a fresh loss graph. */
     }
     int corpus_count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
