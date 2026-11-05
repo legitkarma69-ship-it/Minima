@@ -59,7 +59,8 @@ bool corpus_load_files(Corpus* corpus, Arena* arena,
     // Reserve two separator bytes between sources, plus a NUL terminator.
     if (file_count > 1) {
         size_t separators = (file_count - 1) * 2;
-        if (total > max_bytes - separators) return false;
+        if (separators > max_bytes || total > max_bytes - separators)
+            return false;
         total += separators;
     }
 
