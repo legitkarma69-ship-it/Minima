@@ -548,9 +548,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         MoveWindow(g_corpus,12,34,r.right-24,95,TRUE);
         MoveWindow(g_graph,r.right-320,170,285,175,TRUE);
         MoveWindow(g_log,12,402,r.right-24,r.bottom-510,TRUE);
-        MoveWindow(g_chat_input,12,r.bottom-75,r.right-205,26,TRUE);
-        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),r.right-185,r.bottom-75,110,26,TRUE);
-        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),r.right-70,r.bottom-75,100,26,TRUE);
+        MoveWindow(g_chat_input,12,r.bottom-75,r.right-240,26,TRUE);
+        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),r.right-225,r.bottom-75,110,26,TRUE);
+        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),r.right-110,r.bottom-75,100,26,TRUE);
         return 0;
     }
     case WM_COMMAND:
