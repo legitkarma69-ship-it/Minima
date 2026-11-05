@@ -117,7 +117,9 @@ bool activations_init(Activations* act, Arena* temp_arena,
     if (!act || !temp_arena || !model || batch <= 0 || seq <= 0 ||
         seq > model->max_seq || seq > 512 ||
         model->dim <= 0 || model->ffn_dim <= 0 ||
-        model->vocab_size <= 0 || model->n_layers <= 0)
+        model->vocab_size <= 0 || model->n_layers <= 0 ||
+        model->n_heads <= 0 || model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim)
         return false;
 
     memset(act, 0, sizeof(*act));
@@ -165,7 +167,14 @@ float* model_forward(Model* model, Activations* act,
     const uint16_t* tokens, int batch, int seq) {
 
     if (!model || !act || !tokens || batch <= 0 || seq <= 0 ||
-        seq > model->max_seq || seq > 512)
+        seq > model->max_seq || seq > 512 ||
+        model->dim <= 0 || model->ffn_dim <= 0 ||
+        model->vocab_size <= 0 || model->n_layers <= 0 ||
+        model->n_heads <= 0 || model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim ||
+        !act->x || !act->x_norm || !act->qkv || !act->attn_out ||
+        !act->up_buf || !act->gate_buf || !act->ffn_buf ||
+        !act->resid_attn || !act->resid_ffn || !act->logits)
         return NULL;
 
     const int dim = model->dim;
