@@ -75,8 +75,9 @@ Minima.exe [--resume] [--steps N] [corpus.txt ...]
   paths are used.
 
 A step-zero checkpoint is written before fresh training begins, then updated
-every 100 steps and at the end of each run. An interrupted run therefore loses
-at most 99 completed optimizer steps. The AdamW bias-correction counter and
+every 100 steps and at the end of each run. Checkpoint replacement is atomic,
+so an interrupted write leaves the previous complete checkpoint intact. An
+interrupted training run therefore loses at most 99 completed optimizer steps. The AdamW bias-correction counter and
 random training-sample sequence continue from their saved states.
 
 Each invocation is a separate training segment: its learning-rate schedule
@@ -84,7 +85,10 @@ starts with a fresh warmup and cosine decay, while the AdamW optimizer step
 remains global. This is a deliberate warm restart, not an attempt to pretend
 that a newly extended schedule was known during the previous run. Resume also
 requires the same corpus contents and tokenizer. If you change the training
-text or vocabulary configuration, start a fresh run instead.
+text or vocabulary configuration, start a fresh run instead. The previous
+512-entry tokenizer/checkpoint from earlier experiments is incompatible with
+the new 2,048-entry configuration; the first run must be a fresh run, without
+`--resume`.
 
 The smoke test includes a deterministic generation benchmark using five fixed
 prompts and greedy top-k=1 decoding. Each prompt is generated twice from the
