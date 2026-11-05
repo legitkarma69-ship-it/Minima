@@ -260,7 +260,7 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--layers",g_layers) ||
            !append_option(command,_countof(command),L"--heads",g_heads) ||
            !append_option(command,_countof(command),L"--ffn-dim",g_ffn) ||
-              !append_option(command,_countof(command),L"--max-seq",g_max_seq) ||
+                 !append_option(command,_countof(command),L"--max-seq",g_max_seq) ||
            !append_option(command,_countof(command),L"--batch-size",g_batch_size) ||
            !append_option(command,_countof(command),L"--sequence-length",g_sequence_length) ||
            !append_combo_option(command,_countof(command),L"--lr-schedule",g_lr_schedule) ||
