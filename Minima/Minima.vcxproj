@@ -131,6 +131,7 @@
     <ClCompile Include="..\arena.c" />
     <ClCompile Include="..\backward.c" />
     <ClCompile Include="..\forward.c" />
+    <ClCompile Include="..\gradcheck.c" />
     <ClCompile Include="..\generate.c" />
     <ClCompile Include="..\main.c" />
     <ClCompile Include="..\model.c" />
@@ -143,6 +144,7 @@
     <ClInclude Include="..\backward.h" />
     <ClInclude Include="..\config.h" />
     <ClInclude Include="..\forward.h" />
+    <ClInclude Include="..\gradcheck.h" />
     <ClInclude Include="..\generate.h" />
     <ClInclude Include="..\model.h" />
     <ClInclude Include="..\optim.h" />
