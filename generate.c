@@ -1,4 +1,4 @@
-#includ#include "generate.h"
+#include "generate.h"
 #include "util.h"
 #include <math.h>
 #include <string.h>
