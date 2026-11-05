@@ -77,7 +77,10 @@ static void print_usage(const char* exe) {
     printf("  --validation-batches N --validation-interval N --checkpoint-interval N --seed N\n");
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
     printf("  --heads N --ffn-dim N --max-seq N --batch-size N --sequence-length N\n");
-    printf("  --metrics PATH --diagnostics-only\n");
+    printf("  --lr-schedule cosine|constant --tokenizer-sampling spread|prefix\n");
+    printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
+    printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
+    printf("  --diagnostics-only --help\n");
 }
 
 static float evaluate_loss(Model* model, Arena* temp,
