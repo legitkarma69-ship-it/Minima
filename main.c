@@ -6,6 +6,7 @@
 #include "forward.h"
 #include "backward.h"
 #include "gradcheck.h"
+#include "generate.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -164,6 +165,46 @@ int main(void) {
         if (step % 5 == 0 || step == STEPS - 1)
             printf("%4d | %.4f\n", step, loss);
     }
+
+    // ------------------------------------------------------------------
+    // 8. Autoregressive generation smoke test
+    // ------------------------------------------------------------------
+    const char* prompt_text = "The quick ";
+    const size_t prompt_bytes = strlen(prompt_text);
+    uint16_t* prompt_ids = arena_alloc(&arena,
+        prompt_bytes * sizeof(uint16_t));
+    uint16_t generated_ids[32];
+    char generated_text[32 * TOK_MAX_TOKEN_LEN + 1];
+
+    if (!prompt_ids) die("generation prompt allocation failed");
+
+    int prompt_len = tokenizer_encode(&tok,
+        (const uint8_t*)prompt_text, prompt_bytes,
+        prompt_ids, (int)prompt_bytes);
+    if (prompt_len <= 0) die("generation prompt tokenization failed");
+
+    KVCache cache;
+    if (!kvcache_init(&cache, &arena, &model, model.max_seq))
+        die("KV cache initialization failed");
+
+    Rng generation_rng;
+    rng_seed(&generation_rng, 5678);
+
+    int generated_len = generate(&model, &tok, &cache,
+        prompt_ids, prompt_len, generated_ids, 32,
+        16, 0.8f, 40, &generation_rng);
+    if (generated_len <= prompt_len)
+        die("generation smoke test failed");
+
+    int generated_bytes = tokenizer_decode(&tok, generated_ids,
+        generated_len, generated_text, (int)sizeof(generated_text));
+    if (generated_bytes <= 0)
+        die("generation decode failed");
+
+    printf("\nGeneration smoke test\n");
+    printf("  prompt tokens : %d\n", prompt_len);
+    printf("  generated     : %d new tokens\n", generated_len - prompt_len);
+    printf("  text          : %s\n", generated_text);
 
     printf("\nSmoke test finished.\n");
     printf("If loss decreased significantly, the full pipeline is working.\n");
