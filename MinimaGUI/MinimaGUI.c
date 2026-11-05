@@ -114,6 +114,8 @@ static BOOL is_action_control(HWND child) {
         id == IDC_ADVANCED_TOGGLE;
 }
 
+static void layout_controls(HWND hwnd);
+
 typedef struct { BOOL visible; HWND parent; } AdvancedVisibilityContext;
 
 static BOOL CALLBACK set_advanced_child_visibility(HWND child, LPARAM parameter) {
