@@ -334,6 +334,10 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         g_use_saved_tokenizer=FALSE; use_prebuilt_tokenizer=FALSE;
         append_log(L"Tokenizer settings changed since rebuild; the next fresh run will rebuild it again.\r\n");
     }
+    if(chat_mode && g_use_saved_tokenizer) {
+        MessageBoxW(g_window,L"The tokenizer was rebuilt, but the model checkpoint still uses the old tokenizer. Start a fresh training run before chatting.",L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
     if(chat_mode && (!engine_sidecar_exists(L"minima.model") ||
                      !engine_sidecar_exists(L"minima.bpe"))){
         MessageBoxW(g_window,L"No checkpoint/tokenizer found. Train a model first, then start chat.",
