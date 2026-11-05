@@ -5,13 +5,10 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
-#include <errno.h>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#else
-#include <stdio.h>
 #endif
 
 #define CHECKPOINT_MAGIC "MINIMA02"
