@@ -20,6 +20,124 @@ jobs:
       - name: Build Minima and Win32 GUI
         run: msbuild Minima.sln /m /p:Configuration=Release /p:Platform=x64 /p:RestoreIgnoreFailedSources=true
 
+      - name: Verify embedded GUI manifest
+        shell: pwsh
+        run: |
+          $sdkBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits/10/bin"
+          $mt = Get-ChildItem -Path $sdkBin -Filter mt.exe -Recurse |
+            Where-Object { $_.FullName -match '\\x64\\mt.exe        shell: pwsh
+        run: |
+          & ".\x64\Release\Minima.exe" --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test GUI reader-to-window readiness integration
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw "Visual C++ x64 tools were not found." }
+          $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC tests\gui_protocol_integration_test.c /Fe:gui_protocol_integration_test.exe /link user32.lib && gui_protocol_integration_test.exe'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Prepare deterministic smoke-test corpus
+        shell: pwsh
+        run: |
+          $builder = [System.Text.StringBuilder]::new()
+          $line = "The quick brown fox jumps over the lazy dog. A small language model learns patterns from repeated text. Training tests should exercise validation, checkpoints, and generation."
+          for ($i = 0; $i -lt 256; $i++) {
+            [void]$builder.AppendLine("$line Example record number $i.")
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "minima_ci_corpus.txt"),
+            $builder.ToString(),
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Test tokenizer-only rebuild
+        shell: pwsh
+        run: |
+          & ".\x64\Release\Minima.exe" --retrain-tokenizer-only --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --tokenizer-sampling spread ".\minima_ci_corpus.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path ".\minima.bpe")) { throw "Tokenizer-only rebuild did not produce minima.bpe." }
+
+      - name: Run fresh-training smoke test (non-default configuration A)
+        shell: pwsh
+        run: |
+          $output = & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "Gradient allocation layout: PASS") {
+            throw "Runtime gradient layout check did not execute for configuration A."
+          }
+          if ($text -notmatch "Gradient checks passed: 10 / 10") {
+            throw "Numerical forward/backward gradient checks failed for configuration A."
+          }
+          if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
+            throw "Fresh-training smoke test did not produce a checkpoint and tokenizer."
+          }
+
+      - name: Run fresh-training smoke test (non-default configuration B)
+        shell: pwsh
+        run: |
+          $output = & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics_config_b.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "Gradient allocation layout: PASS") {
+            throw "Runtime gradient layout check did not execute for configuration B."
+          }
+          if ($text -notmatch "Gradient checks passed: 10 / 10") {
+            throw "Numerical forward/backward gradient checks failed for configuration B."
+          }
+          if (!(Test-Path ".\minima.model")) {
+            throw "Configuration B did not produce its checkpoint."
+          }
+
+      - name: Verify checkpoint resume diagnostics
+        shell: pwsh
+        run: |
+          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+
+      - name: Verify resumed global-step learning-rate schedule
+        shell: pwsh
+        run: |
+          $output = & ".\x64\Release\Minima.exe" --resume --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_resume_training_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "Restored LR schedule: cosine, base_lr=0.0003, warmup=1, total_steps=2") {
+            throw "Resume did not restore the original LR schedule metadata."
+          }
+          if ($text -notmatch "2\s+\|.*\| 0\.0000000") {
+            throw "Resumed optimizer step did not reach the saved cosine endpoint."
+          }
+
+      - name: Publish Windows executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectMinima-Windows-x64
+          path: |
+            x64/Release/Minima.exe
+            x64/Release/MinimaGUI.exe
+          if-no-files-found: error
+ } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (!$mt) { throw "Windows SDK mt.exe was not found." }
+          & $mt.FullName '-inputresource:x64/Release/MinimaGUI.exe;#1' '-out:minima_gui_embedded.manifest'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $manifest = Get-Content "minima_gui_embedded.manifest" -Raw
+          if ($manifest -notmatch "PerMonitorV2" -or
+              $manifest -notmatch "Microsoft.Windows.Common-Controls" -or
+              $manifest -notmatch "6.0.0.0") {
+            throw "The GUI executable is missing its embedded visual-styles or Per-Monitor V2 manifest."
+          }
+
       - name: Verify engine CLI
         shell: pwsh
         run: |
@@ -58,26 +176,51 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path ".\minima.bpe")) { throw "Tokenizer-only rebuild did not produce minima.bpe." }
 
-      - name: Run fresh-training smoke test
+      - name: Run fresh-training smoke test (non-default configuration A)
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt"
+          $output = & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "Gradient allocation layout: PASS") {
+            throw "Runtime gradient layout check did not execute for configuration A."
+          }
+          if ($text -notmatch "Gradient checks passed: 10 / 10") {
+            throw "Numerical forward/backward gradient checks failed for configuration A."
+          }
           if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
             throw "Fresh-training smoke test did not produce a checkpoint and tokenizer."
+          }
+
+      - name: Run fresh-training smoke test (non-default configuration B)
+        shell: pwsh
+        run: |
+          $output = & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics_config_b.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "Gradient allocation layout: PASS") {
+            throw "Runtime gradient layout check did not execute for configuration B."
+          }
+          if ($text -notmatch "Gradient checks passed: 10 / 10") {
+            throw "Numerical forward/backward gradient checks failed for configuration B."
+          }
+          if (!(Test-Path ".\minima.model")) {
+            throw "Configuration B did not produce its checkpoint."
           }
 
       - name: Verify checkpoint resume diagnostics
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
+          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
       - name: Verify resumed global-step learning-rate schedule
         shell: pwsh
         run: |
-          $output = & ".\x64\Release\Minima.exe" --resume --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_resume_training_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output = & ".\x64\Release\Minima.exe" --resume --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_resume_training_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
           $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $text = $output -join "`n"
