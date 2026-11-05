@@ -113,7 +113,7 @@ static void set_running(BOOL running) {
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
-    SetWindowTextW(g_status, running ? L"Training process running" : L"Idle");
+    SetWindowTextW(g_status,running?(g_chat_mode?L"Chat running":L"Training running"):L"Idle");
 }
 
 static DWORD WINAPI reader_thread(void* parameter) {
@@ -384,7 +384,8 @@ static void request_cooperative_stop(void) {
     wchar_t* slash=wcsrchr(path,L'\\');
     if (slash) wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.stop");
     HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-    if (file!=INVALID_HANDLE_VALUE) CloseHandle(file);
+    if(file==INVALID_HANDLE_VALUE){append_log(L"Could not create stop signal file.\r\n");return;}
+    CloseHandle(file);
     append_log(L"Stop requested. The engine will finish the current step and save a checkpoint.\r\n");
 }
 
@@ -417,6 +418,7 @@ static void request_checkpoint_save(void) {
     if(slash)wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.save");
     HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if(file!=INVALID_HANDLE_VALUE){CloseHandle(file);append_log(L"Checkpoint save requested.\r\n");}
+    else append_log(L"Could not create checkpoint save signal file.\r\n");
 }
 
 static void stop_engine(void) {
