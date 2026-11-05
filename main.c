@@ -140,7 +140,7 @@ static float evaluate_loss(Model* model, Arena* temp,
 
 static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
     const TrainOptions* options) {
-    uint16_t history[512], input_ids[512], prompt[512], output[512];
+    uint16_t history[512], input_ids[8192], prompt[512], output[512];
     int history_len=0;
     char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
     puts("CHAT_READY");
@@ -150,7 +150,7 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
         size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\n'||line[bytes-1]=='\r'))line[--bytes]=0;
         if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
         if(!bytes){puts("CHAT_READY");continue;}
-        int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,512);
+        int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,(int)(sizeof(input_ids)/sizeof(input_ids[0])));
         if(input_count<=0){puts("BOT: [input encoding failed]");puts("CHAT_READY");continue;}
         if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
         uint16_t separator[4];
