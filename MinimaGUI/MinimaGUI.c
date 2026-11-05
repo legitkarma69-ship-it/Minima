@@ -36,6 +36,7 @@ static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_batch_size, g_sequence_length;
 static wchar_t g_metrics_path[MAX_PATH];
+static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
 static volatile LONG g_running;
@@ -470,6 +471,114 @@ static void stop_engine(void) {
     }
 }
 
+static void load_edit_setting(const wchar_t* key,HWND control,const wchar_t* fallback) {
+    wchar_t value[128];
+    GetPrivateProfileStringW(L"Training",key,fallback,value,_countof(value),g_settings_path);
+    SetWindowTextW(control,value);
+}
+
+static void save_edit_setting(const wchar_t* key,HWND control) {
+    wchar_t value[128];
+    GetWindowTextW(control,value,_countof(value));
+    WritePrivateProfileStringW(L"Training",key,value,g_settings_path);
+}
+
+static void load_combo_setting(const wchar_t* key,HWND control,const wchar_t* fallback) {
+    wchar_t value[64];
+    GetPrivateProfileStringW(L"Training",key,fallback,value,_countof(value),g_settings_path);
+    LRESULT index=SendMessageW(control,CB_FINDSTRINGEXACT,(WPARAM)-1,(LPARAM)value);
+    if(index>=0)SendMessageW(control,CB_SETCURSEL,(WPARAM)index,0);
+}
+
+static void save_combo_setting(const wchar_t* key,HWND control) {
+    int index=(int)SendMessageW(control,CB_GETCURSEL,0,0);
+    if(index<0)return;
+    wchar_t value[64];
+    SendMessageW(control,CB_GETLBTEXT,(WPARAM)index,(LPARAM)value);
+    WritePrivateProfileStringW(L"Training",key,value,g_settings_path);
+}
+
+static void load_settings(void) {
+    if(!g_settings_path[0])return;
+    load_edit_setting(L"steps",g_steps,L"2000");
+    load_edit_setting(L"vocab",g_vocab,L"2048");
+    load_edit_setting(L"dim",g_dim,L"64");
+    load_edit_setting(L"layers",g_layers,L"2");
+    load_edit_setting(L"heads",g_heads,L"2");
+    load_edit_setting(L"ffn",g_ffn,L"128");
+    load_edit_setting(L"context",g_max_seq,L"64");
+    load_edit_setting(L"batch",g_batch_size,L"4");
+    load_edit_setting(L"sequence",g_sequence_length,L"32");
+    load_edit_setting(L"learning_rate",g_lr,L"0.0003");
+    load_edit_setting(L"warmup",g_warmup,L"100");
+    load_edit_setting(L"log_interval",g_log_interval,L"100");
+    load_edit_setting(L"validation_interval",g_validation_interval,L"100");
+    load_edit_setting(L"validation_batches",g_validation_batches,L"16");
+    load_edit_setting(L"checkpoint_interval",g_checkpoint_interval,L"100");
+    load_edit_setting(L"seed",g_seed,L"1234");
+    load_edit_setting(L"tokenizer_bytes",g_tokenizer_bytes,L"262144");
+    load_edit_setting(L"temperature",g_temperature,L"0.8");
+    load_edit_setting(L"top_k",g_top_k,L"40");
+    load_edit_setting(L"top_p",g_top_p,L"0.9");
+    load_edit_setting(L"repetition",g_repetition,L"1.1");
+    load_edit_setting(L"max_tokens",g_max_tokens,L"32");
+    load_combo_setting(L"lr_schedule",g_lr_schedule,L"cosine");
+    load_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling,L"spread");
+    SendMessageW(g_resume,BM_SETCHECK,
+        GetPrivateProfileIntW(L"Training",L"resume",0,g_settings_path)?BST_CHECKED:BST_UNCHECKED,0);
+
+    int count=GetPrivateProfileIntW(L"Corpus",L"count",0,g_settings_path);
+    if(count<0)count=0;if(count>32)count=32;
+    for(int i=0;i<count;i++){
+        wchar_t key[32],path[MAX_PATH*2];
+        _snwprintf_s(key,_countof(key),_TRUNCATE,L"file%d",i);
+        GetPrivateProfileStringW(L"Corpus",key,L"",path,_countof(path),g_settings_path);
+        if(path[0])SendMessageW(g_corpus,LB_ADDSTRING,0,(LPARAM)path);
+    }
+    update_fresh_only_controls();
+}
+
+static void save_settings(void) {
+    if(!g_settings_path[0])return;
+    save_edit_setting(L"steps",g_steps);
+    save_edit_setting(L"vocab",g_vocab);
+    save_edit_setting(L"dim",g_dim);
+    save_edit_setting(L"layers",g_layers);
+    save_edit_setting(L"heads",g_heads);
+    save_edit_setting(L"ffn",g_ffn);
+    save_edit_setting(L"context",g_max_seq);
+    save_edit_setting(L"batch",g_batch_size);
+    save_edit_setting(L"sequence",g_sequence_length);
+    save_edit_setting(L"learning_rate",g_lr);
+    save_edit_setting(L"warmup",g_warmup);
+    save_edit_setting(L"log_interval",g_log_interval);
+    save_edit_setting(L"validation_interval",g_validation_interval);
+    save_edit_setting(L"validation_batches",g_validation_batches);
+    save_edit_setting(L"checkpoint_interval",g_checkpoint_interval);
+    save_edit_setting(L"seed",g_seed);
+    save_edit_setting(L"tokenizer_bytes",g_tokenizer_bytes);
+    save_edit_setting(L"temperature",g_temperature);
+    save_edit_setting(L"top_k",g_top_k);
+    save_edit_setting(L"top_p",g_top_p);
+    save_edit_setting(L"repetition",g_repetition);
+    save_edit_setting(L"max_tokens",g_max_tokens);
+    save_combo_setting(L"lr_schedule",g_lr_schedule);
+    save_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling);
+    WritePrivateProfileStringW(L"Training",L"resume",
+        SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED?L"1":L"0",g_settings_path);
+    int count=(int)SendMessageW(g_corpus,LB_GETCOUNT,0,0);
+    if(count>32)count=32;
+    wchar_t number[16];
+    _snwprintf_s(number,_countof(number),_TRUNCATE,L"%d",count);
+    WritePrivateProfileStringW(L"Corpus",L"count",number,g_settings_path);
+    for(int i=0;i<count;i++){
+        wchar_t key[32],path[MAX_PATH*2];
+        _snwprintf_s(key,_countof(key),_TRUNCATE,L"file%d",i);
+        SendMessageW(g_corpus,LB_GETTEXT,(WPARAM)i,(LPARAM)path);
+        WritePrivateProfileStringW(L"Corpus",key,path,g_settings_path);
+    }
+}
+
 static void create_controls(HWND hwnd) {
     HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, hwnd, NULL, NULL, NULL);
@@ -560,6 +669,7 @@ static void create_controls(HWND hwnd) {
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 
+    load_settings();
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
     if(history_slash)wcscpy_s(history_slash+1,_countof(history_path)-(size_t)(history_slash+1-history_path),L"minima_chat.txt");
@@ -647,10 +757,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
             if (MessageBoxW(hwnd,L"An engine process is running. Stop it and close?",
                 L"ProjectMinima",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
+            save_settings();
             if(g_chat_mode){g_close_when_done=TRUE;TerminateProcess(g_process,3);}
             else {if(!request_cooperative_stop())return 0;g_close_when_done=TRUE;}
             return 0;
         }
+        save_settings();
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
@@ -670,6 +782,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     wchar_t* slash = wcsrchr(g_engine_path, L'\\');
     if (!slash) return 1;
     wcscpy_s(slash + 1, _countof(g_engine_path) - (size_t)(slash + 1 - g_engine_path), L"Minima.exe");
+    wcscpy_s(g_settings_path,_countof(g_settings_path),g_engine_path);
+    wchar_t* settings_slash=wcsrchr(g_settings_path,L'\\');
+    if(settings_slash)wcscpy_s(settings_slash+1,_countof(g_settings_path)-(size_t)(settings_slash+1-g_settings_path),L"minima_gui.ini");
 
     WNDCLASSW gwc; ZeroMemory(&gwc,sizeof(gwc));
     gwc.lpfnWndProc=graph_proc;gwc.hInstance=instance;gwc.lpszClassName=L"MinimaLossGraph";
