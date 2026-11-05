@@ -261,8 +261,8 @@ int main(int argc, char** argv) {
         die("failed to save model checkpoint to minima.model");
 
     // Verify that the tokenizer can be reloaded and produces identical IDs.
-    Tokenizer loaded_tok;
-    if (!tokenizer_load(&loaded_tok, &arena, "minima.bpe"))
+    Tokenizer* loaded_tok = (Tokenizer*)arena_alloc(&arena, sizeof(Tokenizer));
+    if (!loaded_tok || !tokenizer_load(loaded_tok, &arena, "minima.bpe"))
         die("tokenizer round-trip load failed");
 
     const char* tokenizer_test_text = "The quick brown fox";
@@ -271,11 +271,11 @@ int main(int argc, char** argv) {
     const int original_count = tokenizer_encode(&tok,
         (const uint8_t*)tokenizer_test_text, (size_t)tokenizer_test_len,
         original_ids, 64);
-    const int loaded_count = tokenizer_encode(&loaded_tok,
+    const int loaded_count = tokenizer_encode(loaded_tok,
         (const uint8_t*)tokenizer_test_text, (size_t)tokenizer_test_len,
         loaded_ids, 64);
-    if (loaded_tok.vocab_size != tok.vocab_size ||
-        loaded_tok.n_merges != tok.n_merges ||
+    if (loaded_tok->vocab_size != tok.vocab_size ||
+        loaded_tok->n_merges != tok.n_merges ||
         original_count != loaded_count ||
         memcmp(original_ids, loaded_ids,
             (size_t)original_count * sizeof(uint16_t)) != 0)
