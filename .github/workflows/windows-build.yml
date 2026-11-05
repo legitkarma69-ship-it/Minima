@@ -54,7 +54,7 @@ jobs:
       - name: Run fresh-training smoke test
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --steps 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt"
+          & ".\x64\Release\Minima.exe" --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
             throw "Fresh-training smoke test did not produce a checkpoint and tokenizer."
@@ -65,6 +65,21 @@ jobs:
         run: |
           & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+
+      - name: Verify resumed global-step learning-rate schedule
+        shell: pwsh
+        run: |
+          $output = & ".\x64\Release\Minima.exe" --resume --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_resume_training_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "Restored LR schedule: cosine, base_lr=0.0003, warmup=1, total_steps=2") {
+            throw "Resume did not restore the original LR schedule metadata."
+          }
+          if ($text -notmatch "2\s+\|.*\| 0\.0000000") {
+            throw "Resumed optimizer step did not reach the saved cosine endpoint."
+          }
 
       - name: Publish Windows executables
         uses: actions/upload-artifact@v4
