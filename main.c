@@ -153,6 +153,43 @@ static void print_repetition_stats(const uint16_t* ids,
             adjacent_repeats++;
     }
 
+    int frequent_ids[5] = { -1, -1, -1, -1, -1 };
+    int frequent_counts[5] = { 0, 0, 0, 0, 0 };
+    for (int i = 0; i < n; i++) {
+        const uint16_t id = ids[prompt_len + i];
+        bool counted = false;
+        for (int j = 0; j < i; j++) {
+            if (ids[prompt_len + j] == id) {
+                counted = true;
+                break;
+            }
+        }
+        if (counted) continue;
+
+        int count = 0;
+        for (int j = i; j < n; j++)
+            if (ids[prompt_len + j] == id) count++;
+
+        for (int slot = 0; slot < 5; slot++) {
+            if (count > frequent_counts[slot]) {
+                for (int move = 4; move > slot; move--) {
+                    frequent_counts[move] = frequent_counts[move - 1];
+                    frequent_ids[move] = frequent_ids[move - 1];
+                }
+                frequent_counts[slot] = count;
+                frequent_ids[slot] = id;
+                break;
+            }
+        }
+    }
+
+    printf("      most frequent token IDs:");
+    for (int i = 0; i < 5 && frequent_ids[i] >= 0; i++) {
+        printf(" %d=%d(%.1f%%)", frequent_ids[i], frequent_counts[i],
+            100.0 * (double)frequent_counts[i] / (double)n);
+    }
+    putchar('\n');
+
     int repeated_ngram_len = 0;
     int repeated_ngram_count = 1;
     for (int width = 2; width <= 4 && width <= n; width++) {
