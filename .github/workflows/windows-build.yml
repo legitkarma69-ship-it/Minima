@@ -33,7 +33,7 @@ jobs:
           $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (!$vs) { throw "Visual C++ x64 tools were not found." }
           $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
-          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC tests\\gui_protocol_integration_test.c /Fe:gui_protocol_integration_test.exe user32.lib && gui_protocol_integration_test.exe'
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC tests\gui_protocol_integration_test.c /Fe:gui_protocol_integration_test.exe user32.lib && gui_protocol_integration_test.exe'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
