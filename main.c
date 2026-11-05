@@ -325,6 +325,9 @@ static bool run_generation_benchmark(Model* model, Tokenizer* tok,
 }
 
 int main(int argc, char** argv) {
+    /* Keep redirected GUI output responsive instead of fully buffered. */
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
     bool resume = false;
     bool diagnostics_only = false;
     int steps_to_run = DEFAULT_STEPS;
