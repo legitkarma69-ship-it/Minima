@@ -5,7 +5,7 @@
 // Small defaults for the initial smoke test.
 // Increase these only after the training and inference paths are validated.
 
-#define MODEL_VOCAB_SIZE      512
+#define MODEL_VOCAB_SIZE      2048
 #define MODEL_DIM             64
 #define MODEL_N_LAYERS        2
 #define MODEL_N_HEADS         2
