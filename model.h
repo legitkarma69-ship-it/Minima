@@ -31,7 +31,7 @@ typedef struct {
 
     float* rms_final_scale;  // [dim]
 
-    // Output head – we tie it to tok_emb (no extra storage)
+    // Output head â€“ we tie it to tok_emb (no extra storage)
     // float *lm_head;       // intentionally absent
 
     // Total bytes occupied by weights
@@ -40,7 +40,7 @@ typedef struct {
 
 // Allocate all weight tensors from the arena and initialise them.
 // Returns true on success.
-bool model_init(Model* m, Arena* arena, uint64_t seed);
+bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size);
 
 // Convenience: number of parameters
 size_t model_param_count(const Model* m);
