@@ -6,6 +6,7 @@
 #include <wchar.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "gui_protocol.h"
 #include "gui_chat_state.h"
 
@@ -26,6 +27,8 @@
 #define IDC_CHAT_SEND    1012
 #define IDC_CHAT_STOP    1013
 #define IDC_SAVE_NOW     1014
+#define IDC_REBUILD_TOKENIZER 1015
+#define IDC_AUTO_SETTINGS 1016
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
@@ -45,6 +48,10 @@ static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
 static volatile LONG g_running;
 static BOOL g_close_when_done;
+static BOOL g_tokenizer_rebuild_mode;
+static BOOL g_use_saved_tokenizer;
+static BOOL g_fresh_used_saved_tokenizer;
+static wchar_t g_prebuilt_vocab[64],g_prebuilt_tokenizer_bytes[64],g_prebuilt_sampling[64];
 static wchar_t g_engine_path[MAX_PATH];
 
 static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -123,6 +130,8 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window, IDC_REMOVE), !running);
     EnableWindow(g_steps,!running);EnableWindow(g_resume,!running);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
+    EnableWindow(GetDlgItem(g_window,IDC_REBUILD_TOKENIZER),!running);
+    EnableWindow(GetDlgItem(g_window,IDC_AUTO_SETTINGS),!running);
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
@@ -298,8 +307,43 @@ static BOOL engine_sidecar_exists(const wchar_t* filename) {
     return attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY);
 }
 
-static void start_engine(BOOL chat_mode) {
+static BOOL prebuilt_tokenizer_settings_match(void) {
+    wchar_t vocab[64],bytes[64],sampling[64];
+    GetWindowTextW(g_vocab,vocab,_countof(vocab));
+    GetWindowTextW(g_tokenizer_bytes,bytes,_countof(bytes));
+    int index=(int)SendMessageW(g_tokenizer_sampling,CB_GETCURSEL,0,0);
+    if(index<0)return FALSE;
+    SendMessageW(g_tokenizer_sampling,CB_GETLBTEXT,(WPARAM)index,(LPARAM)sampling);
+    return engine_sidecar_exists(L"minima.bpe") &&
+        wcscmp(vocab,g_prebuilt_vocab)==0 &&
+        wcscmp(bytes,g_prebuilt_tokenizer_bytes)==0 &&
+        wcscmp(sampling,g_prebuilt_sampling)==0;
+}
+static void remember_prebuilt_tokenizer_settings(void) {
+    GetWindowTextW(g_vocab,g_prebuilt_vocab,_countof(g_prebuilt_vocab));
+    GetWindowTextW(g_tokenizer_bytes,g_prebuilt_tokenizer_bytes,_countof(g_prebuilt_tokenizer_bytes));
+    int index=(int)SendMessageW(g_tokenizer_sampling,CB_GETCURSEL,0,0);
+    g_prebuilt_sampling[0]=0;
+    if(index>=0)SendMessageW(g_tokenizer_sampling,CB_GETLBTEXT,(WPARAM)index,(LPARAM)g_prebuilt_sampling);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"1",g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_vocab",g_prebuilt_vocab,g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer_bytes",g_prebuilt_tokenizer_bytes,g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_sampling",g_prebuilt_sampling,g_settings_path);
+}
+
+static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
+    BOOL use_prebuilt_tokenizer = (!chat_mode && !tokenizer_only &&
+        SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED && g_use_saved_tokenizer);
+    if(use_prebuilt_tokenizer && !prebuilt_tokenizer_settings_match()) {
+        g_use_saved_tokenizer=FALSE; use_prebuilt_tokenizer=FALSE;
+        WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+        append_log(L"Tokenizer settings changed since rebuild; the next fresh run will rebuild it again.\r\n");
+    }
+    if(chat_mode && g_use_saved_tokenizer) {
+        MessageBoxW(g_window,L"The tokenizer was rebuilt, but the model checkpoint still uses the old tokenizer. Start a fresh training run before chatting.",L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
     if(chat_mode && (!engine_sidecar_exists(L"minima.model") ||
                      !engine_sidecar_exists(L"minima.bpe"))){
         MessageBoxW(g_window,L"No checkpoint/tokenizer found. Train a model first, then start chat.",
@@ -322,6 +366,13 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--ffn-dim",g_ffn) ||
                  !append_option(command,_countof(command),L"--max-seq",g_max_seq)){
             MessageBoxW(g_window,L"Check the generation settings.",L"ProjectMinima",MB_ICONWARNING);return;
+        }
+    } else if(tokenizer_only) {
+        _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%s\" --retrain-tokenizer-only",g_engine_path);
+        if(!append_option(command,_countof(command),L"--tokenizer-sample-bytes",g_tokenizer_bytes) ||
+           !append_option(command,_countof(command),L"--vocab-size",g_vocab) ||
+           !append_combo_option(command,_countof(command),L"--tokenizer-sampling",g_tokenizer_sampling)) {
+            MessageBoxW(g_window,L"Check the tokenizer settings.",L"ProjectMinima",MB_ICONWARNING);return;
         }
     } else {
         wchar_t steps[32];GetWindowTextW(g_steps,steps,_countof(steps));
@@ -354,6 +405,7 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--total-steps",g_total_steps)){
             MessageBoxW(g_window,L"Check the total training-step horizon.",L"ProjectMinima",MB_ICONWARNING);return;
         }
+        if(use_prebuilt_tokenizer)wcscat_s(command,_countof(command),L" --use-existing-tokenizer");
         wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\" --save-file \"minima.save\"");
         wchar_t stop_path[MAX_PATH];wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
         wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
@@ -428,15 +480,20 @@ static void start_engine(BOOL chat_mode) {
     if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
     if(child_stdin)CloseHandle(child_stdin);
     g_process = pi.hProcess;
+    g_tokenizer_rebuild_mode=tokenizer_only;
+    g_fresh_used_saved_tokenizer=use_prebuilt_tokenizer;
     CloseHandle(pi.hThread);
     g_chat_mode=chat_mode;
     set_running(TRUE);
-    EnableWindow(GetDlgItem(g_window,IDC_STOP),!chat_mode);
+    if(tokenizer_only)SetWindowTextW(g_status,L"Rebuilding tokenizer");
+    EnableWindow(GetDlgItem(g_window,IDC_STOP),!chat_mode && !tokenizer_only);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
+    EnableWindow(GetDlgItem(g_window,IDC_SAVE_NOW),!chat_mode && !tokenizer_only);
     EnableWindow(g_chat_input,chat_mode);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
-    append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":L"\r\n--- Starting Minima training engine ---\r\n");
+    append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":
+        (tokenizer_only?L"\r\n--- Rebuilding tokenizer from selected corpus ---\r\n":L"\r\n--- Starting Minima training engine ---\r\n"));
     g_thread = CreateThread(NULL, 0, reader_thread, read_pipe, 0, NULL);
     if (!g_thread) {
         TerminateProcess(g_process, 1);
@@ -445,9 +502,124 @@ static void start_engine(BOOL chat_mode) {
         g_process = NULL;
         CloseHandle(read_pipe);
         g_chat_mode=FALSE;
+        g_tokenizer_rebuild_mode=FALSE;
+        g_fresh_used_saved_tokenizer=FALSE;
         set_running(FALSE);
         MessageBoxW(g_window, L"Could not create the output-reader thread.", L"ProjectMinima", MB_ICONERROR);
     }
+}
+
+static BOOL get_positive_control_value(HWND control, long* value) {
+    wchar_t text[64],*end=NULL;
+    GetWindowTextW(control,text,_countof(text));
+    long parsed=wcstol(text,&end,10);
+    if(!text[0] || !end || *end || parsed<1 || parsed>2147483647L)return FALSE;
+    *value=parsed; return TRUE;
+}
+static BOOL add_file_size(const wchar_t* path, unsigned long long* total) {
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    if(!GetFileAttributesExW(path,GetFileExInfoStandard,&data) ||
+       (data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY))return FALSE;
+    ULARGE_INTEGER size; size.HighPart=data.nFileSizeHigh; size.LowPart=data.nFileSizeLow;
+    if(*total>ULLONG_MAX-size.QuadPart)return FALSE;
+    *total+=size.QuadPart; return TRUE;
+}
+static void apply_auto_settings(void) {
+    if(InterlockedCompareExchange(&g_running,0,0))return;
+    if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED) {
+        MessageBoxW(g_window,L"Automatic settings configure a fresh training schedule. Uncheck Resume first; an existing checkpoint's schedule cannot be changed automatically.",L"ProjectMinima",MB_ICONINFORMATION);
+        return;
+    }
+    unsigned long long corpus_bytes=0;
+    int count=(int)SendMessageW(g_corpus,LB_GETCOUNT,0,0);
+    BOOL valid=TRUE;
+    if(count>0) {
+        for(int i=0;i<count;i++) {
+            wchar_t path[MAX_PATH*2]; SendMessageW(g_corpus,LB_GETTEXT,(WPARAM)i,(LPARAM)path);
+            if(!add_file_size(path,&corpus_bytes)){valid=FALSE;break;}
+        }
+    } else {
+        DWORD a=GetFileAttributesW(L"..\\data\\books.txt");
+        DWORD b=GetFileAttributesW(L"..\\data\\chatlogs.txt");
+        BOOL found=FALSE;
+        if(a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY)) {
+            if(!add_file_size(L"..\\data\\books.txt",&corpus_bytes))valid=FALSE;
+            found=TRUE;
+        }
+        if(valid && b!=INVALID_FILE_ATTRIBUTES && !(b&FILE_ATTRIBUTE_DIRECTORY)) {
+            if(!add_file_size(L"..\\data\\chatlogs.txt",&corpus_bytes))valid=FALSE;
+            found=TRUE;
+        }
+        if(!found) {
+            DWORD root_a=GetFileAttributesW(L"data\\books.txt");
+            DWORD root_b=GetFileAttributesW(L"data\\chatlogs.txt");
+            if(root_a!=INVALID_FILE_ATTRIBUTES && !(root_a&FILE_ATTRIBUTE_DIRECTORY)) {
+                if(!add_file_size(L"data\\books.txt",&corpus_bytes))valid=FALSE;
+                found=TRUE;
+            }
+            if(valid && root_b!=INVALID_FILE_ATTRIBUTES && !(root_b&FILE_ATTRIBUTE_DIRECTORY)) {
+                if(!add_file_size(L"data\\chatlogs.txt",&corpus_bytes))valid=FALSE;
+                found=TRUE;
+            }
+        }
+        if(!found)valid=FALSE;
+    }
+    if(!valid || corpus_bytes<4096) {
+        MessageBoxW(g_window,L"Could not estimate the corpus size. Check that the selected text files exist and are accessible.",L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
+    long batch=0,sequence=0;
+    if(!get_positive_control_value(g_batch_size,&batch) || !get_positive_control_value(g_sequence_length,&sequence)) {
+        MessageBoxW(g_window,L"Enter valid Batch and Seq values before applying automatic settings.",L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
+    /* Current BPE experiments average about three source bytes per token. This is an estimate only. */
+    long double estimated_train_tokens=((long double)corpus_bytes/3.0L)*0.95L;
+    long double raw_steps=estimated_train_tokens/((long double)batch*(long double)sequence);
+    if(raw_steps<1.0L)raw_steps=1.0L;
+    if(raw_steps>2147483647.0L) {
+        MessageBoxW(g_window,L"The estimated training schedule exceeds the supported step limit.",L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
+    long steps=(long)raw_steps; if((long double)steps<raw_steps)steps++;
+    long warmup=steps/100; if(warmup<10)warmup=10; if(warmup>500)warmup=500;
+    long interval=steps/100; if(interval<25)interval=25; if(interval>1000)interval=1000;
+    unsigned long long sample=corpus_bytes/20; if(sample<65536ULL)sample=65536ULL; if(sample>1048576ULL)sample=1048576ULL;
+    wchar_t value[64];
+    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",steps); SetWindowTextW(g_steps,value); SetWindowTextW(g_total_steps,value);
+    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",warmup); SetWindowTextW(g_warmup,value);
+    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",interval);
+    SetWindowTextW(g_log_interval,value); SetWindowTextW(g_validation_interval,value); SetWindowTextW(g_checkpoint_interval,value);
+    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%llu",sample); SetWindowTextW(g_tokenizer_bytes,value);
+    wchar_t message[320];
+    _snwprintf_s(message,_countof(message),_TRUNCATE,L"Auto settings: %llu corpus bytes, approximately %.0f training tokens, %ld steps (about one token-pass). Batch, sequence length, and model size were left unchanged. Actual token counts may differ after BPE.",corpus_bytes,(double)estimated_train_tokens,steps);
+    append_log(L"\r\n"); append_log(message); append_log(L"\r\n");
+}
+static void rebuild_tokenizer(void) {
+    if(InterlockedCompareExchange(&g_running,0,0))return;
+    if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED) {
+        MessageBoxW(g_window,L"Uncheck Resume before rebuilding the tokenizer. A new tokenizer changes token IDs and makes the existing model checkpoint incompatible.",L"ProjectMinima",MB_ICONWARNING);
+        return;
+    }
+    if(MessageBoxW(g_window,L"Rebuild minima.bpe using the current corpus and tokenizer settings?\r\n\r\nThe existing tokenizer will be backed up as minima.bpe.previous. The current model checkpoint will no longer match it. You must start a fresh training run afterward.",L"Rebuild tokenizer",MB_YESNO|MB_ICONWARNING)!=IDYES)return;
+    g_use_saved_tokenizer=FALSE;
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+    wchar_t source[MAX_PATH],backup[MAX_PATH];
+    wcscpy_s(source,_countof(source),g_engine_path);
+    wchar_t* slash=wcsrchr(source,L'\\'); if(!slash)return;
+    wcscpy_s(slash+1,_countof(source)-(size_t)(slash+1-source),L"minima.bpe");
+    wcscpy_s(backup,_countof(backup),source);
+    wchar_t* backup_name=wcsrchr(backup,L'\\'); if(!backup_name)return;
+    wcscpy_s(backup_name+1,_countof(backup)-(size_t)(backup_name+1-backup),L"minima.bpe.previous");
+    if(GetFileAttributesW(source)!=INVALID_FILE_ATTRIBUTES) {
+        DeleteFileW(backup);
+        if(!CopyFileW(source,backup,TRUE)) {
+            MessageBoxW(g_window,L"Could not back up the existing tokenizer. Rebuild was cancelled to protect the current files.",L"ProjectMinima",MB_ICONERROR);
+            return;
+        }
+        append_log(L"Previous tokenizer backed up to minima.bpe.previous.\r\n");
+    }
+    start_engine(FALSE,TRUE);
 }
 
 static BOOL request_cooperative_stop(void) {
@@ -567,6 +739,10 @@ static void load_settings(void) {
     load_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling,L"spread");
     SendMessageW(g_resume,BM_SETCHECK,
         GetPrivateProfileIntW(L"Training",L"resume",0,g_settings_path)?BST_CHECKED:BST_UNCHECKED,0);
+    g_use_saved_tokenizer=GetPrivateProfileIntW(L"Training",L"prebuilt_tokenizer",0,g_settings_path)?TRUE:FALSE;
+    GetPrivateProfileStringW(L"Training",L"prebuilt_vocab",L"",g_prebuilt_vocab,_countof(g_prebuilt_vocab),g_settings_path);
+    GetPrivateProfileStringW(L"Training",L"prebuilt_tokenizer_bytes",L"",g_prebuilt_tokenizer_bytes,_countof(g_prebuilt_tokenizer_bytes),g_settings_path);
+    GetPrivateProfileStringW(L"Training",L"prebuilt_sampling",L"",g_prebuilt_sampling,_countof(g_prebuilt_sampling),g_settings_path);
 
     int count=GetPrivateProfileIntW(L"Corpus",L"count",0,g_settings_path);
     if(count<0)count=0;if(count>32)count=32;
@@ -608,6 +784,7 @@ static void save_settings(void) {
     save_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling);
     WritePrivateProfileStringW(L"Training",L"resume",
         SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED?L"1":L"0",g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",g_use_saved_tokenizer?L"1":L"0",g_settings_path);
     int count=(int)SendMessageW(g_corpus,LB_GETCOUNT,0,0);
     if(count>32)count=32;
     wchar_t number[16];
@@ -690,7 +867,9 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,hwnd,(HMENU)IDC_SAVE_NOW,NULL,NULL);
-    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,470,346,110,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Rebuild tokenizer",WS_CHILD|WS_VISIBLE,470,340,135,30,hwnd,(HMENU)IDC_REBUILD_TOKENIZER,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Auto settings",WS_CHILD|WS_VISIBLE,612,340,115,30,hwnd,(HMENU)IDC_AUTO_SETTINGS,NULL,NULL);
+    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL);
 
     g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,hwnd,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
@@ -723,6 +902,7 @@ static void create_controls(HWND hwnd) {
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_total_steps,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_SAVE_NOW),
+        GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
         g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
     };
     g_tab_control_count=(int)_countof(tab_controls);
@@ -779,8 +959,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case IDC_ADD: add_corpus_files(); return 0;
+        case IDC_ADD: g_use_saved_tokenizer=FALSE; WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path); add_corpus_files(); return 0;
         case IDC_REMOVE: {
+            g_use_saved_tokenizer=FALSE;
+            WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
             int selected[32];
             LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
             for (int i = (int)n - 1; i >= 0; --i)
@@ -788,9 +970,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case IDC_RESUME: update_fresh_only_controls(); return 0;
-        case IDC_START: start_engine(FALSE); return 0;
+        case IDC_START: start_engine(FALSE,FALSE); return 0;
         case IDC_STOP: stop_engine(); return 0;
-        case IDC_CHAT_START: start_engine(TRUE); return 0;
+        case IDC_CHAT_START: start_engine(TRUE,FALSE); return 0;
+        case IDC_REBUILD_TOKENIZER: rebuild_tokenizer(); return 0;
+        case IDC_AUTO_SETTINGS: apply_auto_settings(); return 0;
         case IDC_CHAT_SEND: send_chat_message(); return 0;
         case IDC_CHAT_STOP: stop_generation(); return 0;
         case IDC_SAVE_NOW: request_checkpoint_save(); return 0;
@@ -805,6 +989,16 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         free((void*)lp);
         return 0;
     case WM_ENGINE_EXIT:
+        if(wp==0 && g_tokenizer_rebuild_mode) {
+            g_use_saved_tokenizer=TRUE; remember_prebuilt_tokenizer_settings();
+            append_log(L"Tokenizer rebuilt successfully. Start a fresh training run to use it; the GUI will reuse it if tokenizer settings and corpus selection remain unchanged.\r\n");
+        }
+        if(wp==0 && g_fresh_used_saved_tokenizer) {
+            g_use_saved_tokenizer=FALSE;
+            WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+            append_log(L"Fresh model training completed using the prebuilt tokenizer.\r\n");
+        }
+        g_tokenizer_rebuild_mode=FALSE; g_fresh_used_saved_tokenizer=FALSE;
         if (g_process) { CloseHandle(g_process); g_process = NULL; }
         if (g_thread) { CloseHandle(g_thread); g_thread = NULL; }
         if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write=NULL; }

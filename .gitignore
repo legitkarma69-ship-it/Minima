@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Local training corpora (keep private text out of public commits)
+data/*.txt
+
 # User-specific files
 *.rsuser
 *.suo
