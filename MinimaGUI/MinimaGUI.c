@@ -22,6 +22,8 @@
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
+static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
+static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes;
 static HANDLE g_process, g_thread;
 static volatile LONG g_running;
 static wchar_t g_engine_path[MAX_PATH];
@@ -150,6 +152,18 @@ static void add_corpus_files(void) {
     }
 }
 
+static BOOL append_option(wchar_t* command, size_t capacity,
+    const wchar_t* name, HWND control) {
+    wchar_t value[128];
+    GetWindowTextW(control, value, _countof(value));
+    if (!value[0]) return FALSE;
+    size_t used=wcslen(command), nl=wcslen(name), vl=wcslen(value);
+    if (used+nl+vl+3>=capacity) return FALSE;
+    command[used++]=L' '; wcscpy_s(command+used,capacity-used,name); used+=nl;
+    command[used++]=L' '; wcscpy_s(command+used,capacity-used,value);
+    return TRUE;
+}
+
 static void start_engine(void) {
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
 
@@ -163,9 +177,19 @@ static void start_engine(void) {
     }
 
     _snwprintf_s(command, _countof(command), _TRUNCATE, L"\"%s\" --steps %ld", g_engine_path, count);
-    if (SendMessageW(g_resume, BM_GETCHECK, 0, 0) == BST_CHECKED) {
+    if (SendMessageW(g_resume, BM_GETCHECK, 0, 0) == BST_CHECKED)
         wcscat_s(command, _countof(command), L" --resume");
+    if (!append_option(command,_countof(command),L"--lr",g_lr) ||
+        !append_option(command,_countof(command),L"--warmup",g_warmup) ||
+        !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
+        !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
+        !append_option(command,_countof(command),L"--checkpoint-interval",g_checkpoint_interval) ||
+        !append_option(command,_countof(command),L"--seed",g_seed) ||
+        !append_option(command,_countof(command),L"--tokenizer-sample-bytes",g_tokenizer_bytes)) {
+        MessageBoxW(g_window,L"One or more training settings are empty or too long.",L"ProjectMinima",MB_ICONWARNING);
+        return;
     }
+    wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\"");
 
     int corpus_count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
@@ -243,22 +267,38 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, hwnd, (HMENU)IDC_ADD, NULL, NULL);
     CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, hwnd, (HMENU)IDC_REMOVE, NULL, NULL);
 
-    CreateWindowW(L"STATIC", L"Additional training steps:", WS_CHILD | WS_VISIBLE, 12, 184, 160, 20, hwnd, NULL, NULL, NULL);
-    g_steps = CreateWindowW(L"EDIT", L"2000", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-        176, 181, 90, 24, hwnd, (HMENU)IDC_STEPS, NULL, NULL);
-    g_resume = CreateWindowW(L"BUTTON", L"Resume existing checkpoint", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
-        282, 182, 220, 24, hwnd, (HMENU)IDC_RESUME, NULL, NULL);
+    CreateWindowW(L"STATIC",L"Additional steps",WS_CHILD|WS_VISIBLE,12,174,100,20,hwnd,NULL,NULL,NULL);
+    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,112,171,75,24,hwnd,(HMENU)IDC_STEPS,NULL,NULL);
+    g_resume=CreateWindowW(L"BUTTON",L"Resume checkpoint",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,205,172,170,24,hwnd,(HMENU)IDC_RESUME,NULL,NULL);
 
-    CreateWindowW(L"BUTTON", L"Start training", WS_CHILD | WS_VISIBLE, 12, 216, 120, 30, hwnd, (HMENU)IDC_START, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Stop", WS_CHILD | WS_VISIBLE | WS_DISABLED, 142, 216, 80, 30, hwnd, (HMENU)IDC_STOP, NULL, NULL);
-    g_status = CreateWindowW(L"STATIC", L"Idle", WS_CHILD | WS_VISIBLE, 240, 221, 280, 20, hwnd, (HMENU)IDC_STATUS, NULL, NULL);
+    CreateWindowW(L"STATIC",L"Learning rate",WS_CHILD|WS_VISIBLE,12,210,90,18,hwnd,NULL,NULL,NULL);
+    g_lr=CreateWindowW(L"EDIT",L"0.0003",WS_CHILD|WS_VISIBLE|WS_BORDER,104,207,80,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,200,210,55,18,hwnd,NULL,NULL,NULL);
+    g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,258,207,65,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,340,210,60,18,hwnd,NULL,NULL,NULL);
+    g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,402,207,65,23,hwnd,NULL,NULL,NULL);
 
-    CreateWindowW(L"STATIC", L"Engine output / training metrics", WS_CHILD | WS_VISIBLE, 12, 258, 300, 20, hwnd, NULL, NULL, NULL);
-    g_log = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
-        12, 280, 720, 260, hwnd, (HMENU)IDC_LOG, NULL, NULL);
+    CreateWindowW(L"STATIC",L"Validation batches",WS_CHILD|WS_VISIBLE,12,244,112,18,hwnd,NULL,NULL,NULL);
+    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,126,241,60,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Checkpoint every",WS_CHILD|WS_VISIBLE,200,244,100,18,hwnd,NULL,NULL,NULL);
+    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,302,241,65,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Random seed",WS_CHILD|WS_VISIBLE,385,244,75,18,hwnd,NULL,NULL,NULL);
+    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,462,241,90,23,hwnd,NULL,NULL,NULL);
 
-    HWND controls[] = { g_corpus, g_steps, g_resume, g_log };
+    CreateWindowW(L"STATIC",L"Tokenizer sample bytes",WS_CHILD|WS_VISIBLE,12,278,135,18,hwnd,NULL,NULL,NULL);
+    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,150,275,100,23,hwnd,NULL,NULL,NULL);
+
+    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,310,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Stop",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,310,80,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
+    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,240,316,280,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL,NULL);
+
+    CreateWindowW(L"STATIC",L"Engine output / training metrics",WS_CHILD|WS_VISIBLE,12,350,300,20,hwnd,NULL,NULL,NULL);
+    g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
+        12,372,850,280,hwnd,(HMENU)IDC_LOG,NULL,NULL);
+
+    HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
+        g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 }
@@ -272,8 +312,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SIZE: {
         RECT r;
         GetClientRect(hwnd, &r);
-        MoveWindow(g_corpus, 12, 34, r.right - 24, 105, TRUE);
-        MoveWindow(g_log, 12, 280, r.right - 24, r.bottom - 292, TRUE);
+        MoveWindow(g_corpus,12,34,r.right-24,95,TRUE);
+        MoveWindow(g_log,12,372,r.right-24,r.bottom-384,TRUE);
         return 0;
     }
     case WM_COMMAND:
@@ -337,7 +377,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if (!RegisterClassW(&wc)) return 1;
 
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"ProjectMinima",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 760, 600,
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 900, 720,
         NULL, NULL, instance, NULL);
     if (!hwnd) return 1;
     ShowWindow(hwnd, show);
