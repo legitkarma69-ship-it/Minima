@@ -10,7 +10,7 @@
 
 static float* alloc_weights(Arena* arena, size_t count) {
     float* p = arena_alloc(arena, count * sizeof(float));
-    if (!p) die("model weight allocation failed – increase arena size");
+    if (!p) die("model weight allocation failed â€“ increase arena size");
     return p;
 }
 
@@ -37,10 +37,13 @@ static void fill_zero(float* p, size_t n) {
 // Public API
 // ------------------------------------------------------------------
 
-bool model_init(Model* m, Arena* arena, uint64_t seed) {
+bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size) {
+    if (!m || !arena || vocab_size <= 0)
+        return false;
+
     memset(m, 0, sizeof(*m));
 
-    m->vocab_size = MODEL_VOCAB_SIZE;
+    m->vocab_size = vocab_size;
     m->dim = MODEL_DIM;
     m->n_layers = MODEL_N_LAYERS;
     m->n_heads = MODEL_N_HEADS;
