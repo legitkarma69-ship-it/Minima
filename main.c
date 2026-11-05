@@ -41,9 +41,15 @@ int main(int argc, char** argv) {
     bool have_corpus = false;
 
     if (argc > 1) {
+        if (argc - 1 > 32)
+            die("too many corpus paths (maximum 32)");
+
+        const char* user_paths[32];
+        for (int i = 1; i < argc; i++)
+            user_paths[i - 1] = argv[i];
+
         if (!corpus_load_files(&loaded_corpus, &arena,
-            (const char* const*)(argv + 1), (size_t)(argc - 1),
-            max_corpus_bytes))
+            user_paths, (size_t)(argc - 1), max_corpus_bytes))
             die("could not load usable text from the supplied corpus paths");
         have_corpus = true;
     }
