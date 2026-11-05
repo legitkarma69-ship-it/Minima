@@ -831,7 +831,8 @@ int main(int argc, char** argv) {
             ? options.learning_rate
             : optim_lr_cosine(options.learning_rate,local_step+1,warmup_steps,steps_to_run);
         optim_step(&opt, &model, &grads);
-        if (opt.step % options.checkpoint_interval == 0 || consume_file_signal(options.save_file)) {
+        const bool manual_save_requested=consume_file_signal(options.save_file);
+        if (opt.step % options.checkpoint_interval == 0 || manual_save_requested) {
             if (!checkpoint_save("minima.model", &model, &opt, &rng, tokenizer_hash))
                 die("checkpoint save failed");
             printf("Checkpoint saved at optimizer step %lld\n",(long long)opt.step);
@@ -892,7 +893,8 @@ int main(int argc, char** argv) {
     printf("  valid perplexity: %.2f\n", expf(final_validation_loss));
     printf("  training duration: %.2f seconds\n",training_seconds);
     printf("  total optimizer steps: %lld\n",(long long)opt.step);
-    printf("  checkpoint status: saved (minima.model)\n");
+    printf("  checkpoint status: %s (minima.model)\n",
+        diagnostics_only ? "unchanged" : "saved");
 
     // ------------------------------------------------------------------
     // 8. Tokenizer and checkpoint round-trip regression checks
