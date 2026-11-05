@@ -166,7 +166,7 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
         memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
         if(separator_count)memcpy(prompt+history_len,separator,(size_t)separator_count*sizeof(uint16_t));
         memcpy(prompt+history_len+separator_count,input_ids,(size_t)input_count*sizeof(uint16_t));
-        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)opt->seed^(uint64_t)history_len);
+        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)options->seed^(uint64_t)history_len);
         int max_new=options->max_new_tokens;
         if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
         int total=generate_ex(model,tok,cache,prompt,prompt_len,output,512,max_new,
