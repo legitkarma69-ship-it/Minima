@@ -253,27 +253,39 @@ int tokenizer_decode(const Tokenizer* tok,
 // ------------------------------------------------------------------
 
 bool tokenizer_save(const Tokenizer* tok, const char* path) {
+    if (!tok || !path || tok->vocab_size < 260 ||
+        tok->vocab_size > TOK_MAX_VOCAB ||
+        tok->n_merges < 0 || tok->n_merges > TOK_MAX_MERGES ||
+        tok->n_merges > tok->vocab_size - 260)
+        return false;
+
     FILE* f = fopen(path, "wb");
     if (!f) return false;
 
-    // header
-    uint32_t magic = 0x42504531;          // "BPE1"
-    fwrite(&magic, 4, 1, f);
-    fwrite(&tok->vocab_size, 4, 1, f);
-    fwrite(&tok->n_merges, 4, 1, f);
+    uint32_t magic = 0x42504531; // "BPE1"
+    bool ok = fwrite(&magic, sizeof(magic), 1, f) == 1 &&
+        fwrite(&tok->vocab_size, sizeof(tok->vocab_size), 1, f) == 1 &&
+        fwrite(&tok->n_merges, sizeof(tok->n_merges), 1, f) == 1;
 
-    // token strings
-    for (int i = 0; i < tok->vocab_size; i++) {
-        uint16_t len = (uint16_t)tok->token_len[i];
-        fwrite(&len, 2, 1, f);
-        fwrite(tok->token_str[i], 1, len, f);
+    for (int i = 0; ok && i < tok->vocab_size; i++) {
+        int token_len = tok->token_len[i];
+        if (!tok->token_str[i] || token_len <= 0 ||
+            token_len > TOK_MAX_TOKEN_LEN || token_len > UINT16_MAX) {
+            ok = false;
+            break;
+        }
+
+        uint16_t len = (uint16_t)token_len;
+        ok = fwrite(&len, sizeof(len), 1, f) == 1 &&
+            fwrite(tok->token_str[i], 1, len, f) == len;
     }
 
-    // merges
-    fwrite(tok->merges, sizeof(Merge), tok->n_merges, f);
+    if (ok && tok->n_merges > 0)
+        ok = fwrite(tok->merges, sizeof(Merge),
+            (size_t)tok->n_merges, f) == (size_t)tok->n_merges;
 
-    fclose(f);
-    return true;
+    if (fclose(f) != 0) ok = false;
+    return ok;
 }
 
 bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
