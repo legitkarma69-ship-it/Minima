@@ -33,12 +33,16 @@ Minima.exe ..\data\books.txt ..\data\chatlogs.txt
 
 Empty or missing default files are skipped. If neither contains text, the program uses its small built-in synthetic corpus so the smoke tests remain runnable.
 
-The loader currently accepts up to 64 MiB total input. BPE learns its vocabulary from an evenly distributed sample capped at 256 KiB, then the tokenizer encodes the entire loaded corpus for training. The model itself is still the tiny smoke-test configuration; this loader is the first real-data path, not yet a production-scale training pipeline.
+The loader currently accepts up to 5 MiB total input. BPE learns its vocabulary from an evenly distributed 256 KiB sample taken only from the training portion. The tokenizer then encodes the entire corpus. The final 5% of tokens are held out for validation and are never sampled for gradient updates. Training uses the first 95% of tokens.
 
 ## Training output and checkpoints
 
-The current smoke-training run uses 200 optimizer steps. This is a pipeline test,
-not a claim that 200 steps are enough to train a useful language model on a book.
+The default experiment accepts up to 5 MiB of plaintext and runs 2,000 optimizer
+steps with batch size 4 and sequence length 32. It uses 100 warmup steps followed
+by cosine learning-rate decay from a base rate of 3e-4. Training loss is averaged
+and validation loss is evaluated every 100 steps over 16 fixed, evenly spaced
+validation batches. This is still a small experimental model, not a claim that
+2,000 steps produce a generally useful language model.
 
 After training, the program writes two files in its working directory:
 
