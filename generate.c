@@ -252,6 +252,92 @@ bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
     return max_abs <= tolerance;
 }
 
+// Print one token as a quoted, byte-safe representation.
+static void print_token_escaped(const Tokenizer* tok, int id) {
+    if (!tok || id < 0 || id >= tok->vocab_size) {
+        printf("\"<invalid>\"");
+        return;
+    }
+    const unsigned char* s = (const unsigned char*)tok->token_str[id];
+    const int len = tok->token_len[id];
+    putchar('"');
+    for (int i = 0; i < len; i++) {
+        const unsigned char c = s[i];
+        if (c == '\\') printf("\\\\");
+        else if (c == '"') printf("\\\"");
+        else if (c == '\n') printf("\\n");
+        else if (c == '\r') printf("\\r");
+        else if (c == '\t') printf("\\t");
+        else if (c >= 32 && c <= 126) putchar((int)c);
+        else printf("\\x%02X", (unsigned int)c);
+    }
+    putchar('"');
+}
+
+// Inspect the model's next-token distribution after a prompt. Probabilities
+// are normalized over the complete vocabulary, not only the displayed top N.
+bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
+    KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n) {
+    if (!model || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
+        top_n <= 0 || model->vocab_size <= 0 ||
+        model->vocab_size > 8192 || tok->vocab_size != model->vocab_size ||
+        prompt_len > cache->max_seq || !cache->k_cache || !cache->v_cache)
+        return false;
+
+    if (top_n > 20) top_n = 20;
+    float x[512];
+    float logits[8192];
+    kvcache_reset(cache);
+
+    for (int i = 0; i < prompt_len; i++) {
+        if (prompt_ids[i] >= model->vocab_size) return false;
+        forward_one(model, cache, prompt_ids[i], x, logits);
+    }
+
+    float max_logit = -INFINITY;
+    for (int i = 0; i < model->vocab_size; i++) {
+        if (!isfinite(logits[i])) return false;
+        if (logits[i] > max_logit) max_logit = logits[i];
+    }
+
+    double denom = 0.0;
+    for (int i = 0; i < model->vocab_size; i++)
+        denom += exp((double)logits[i] - (double)max_logit);
+    if (!(denom > 0.0) || !isfinite(denom)) return false;
+
+    int best_ids[20];
+    float best_logits[20];
+    int found = 0;
+    for (int id = 0; id < model->vocab_size; id++) {
+        int at = found;
+        if (at > top_n) at = top_n;
+        while (at > 0 && logits[id] > best_logits[at - 1]) {
+            if (at < top_n) {
+                best_logits[at] = best_logits[at - 1];
+                best_ids[at] = best_ids[at - 1];
+            }
+            at--;
+        }
+        if (at < top_n) {
+            best_logits[at] = logits[id];
+            best_ids[at] = id;
+            if (found < top_n) found++;
+        }
+    }
+
+    printf("  Next-token distribution (top %d, full-vocabulary probabilities):\n",
+        found);
+    for (int i = 0; i < found; i++) {
+        const double probability =
+            exp((double)best_logits[i] - (double)max_logit) / denom;
+        printf("    %2d. id=%4d  p=%8.4f%%  token=",
+            i + 1, best_ids[i], probability * 100.0);
+        print_token_escaped(tok, best_ids[i]);
+        putchar('\n');
+    }
+    return true;
+}
+
 // ------------------------------------------------------------------
 // Sampling helpers
 // ------------------------------------------------------------------
