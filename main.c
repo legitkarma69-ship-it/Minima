@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <errno.h>
+#include <time.h>
 
 #define BATCH 4
 #define SEQ 32
@@ -676,7 +677,7 @@ int main(int argc, char** argv) {
 
         // Each invocation is an additional training segment with its own
         // warmup + cosine decay. AdamW's bias-correction step remains global.
-        opt.lr = steps_to_run == 1 ? LR :
+        opt.lr = steps_to_run == 1 ? options.learning_rate :
             optim_lr_cosine(options.learning_rate, local_step + 1,
                 warmup_steps, steps_to_run);
         optim_step(&opt, &model, &grads);
