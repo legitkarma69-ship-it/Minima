@@ -20,7 +20,7 @@
 #define LR        3e-4f
 
 int main(int argc, char** argv) {
-    printf("ProjectMinima smoke test - overfitting a short string\n\n");
+    printf("ProjectMinima text-corpus training smoke test\n\n");
 
     // ------------------------------------------------------------------
     // 1. Arenas
