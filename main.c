@@ -140,8 +140,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     return path_count;
 }
 
-static void run_generation_benchmark(Model* model, Tokenizer* tok,
-    KVCache* cache, Arena* arena) {
+static bool run_generation_benchmark(Model* model, Tokenizer* tok,
+    KVCache* cache) {
     static const char* prompts[] = {
         "The quick brown fox",
         "Once upon a time",
@@ -153,6 +153,7 @@ static void run_generation_benchmark(Model* model, Tokenizer* tok,
     printf("\nDeterministic generation benchmark (greedy, top-k=1)\n");
     uint16_t prompt_ids[64];
     uint16_t output_ids[64];
+    uint16_t verify_ids[64];
     char output_text[64 * TOK_MAX_TOKEN_LEN + 1];
 
     for (size_t i = 0; i < sizeof(prompts) / sizeof(prompts[0]); i++) {
@@ -162,31 +163,46 @@ static void run_generation_benchmark(Model* model, Tokenizer* tok,
             prompt_ids, (int)(sizeof(prompt_ids) / sizeof(prompt_ids[0])));
         if (prompt_len <= 0) {
             printf("  [%zu] prompt encoding failed\n", i + 1);
-            continue;
+            return false;
         }
 
         kvcache_reset(cache);
         Rng generation_rng;
         rng_seed(&generation_rng, 5678u + (uint64_t)i);
-
         const int generated_len = generate(model, tok, cache,
             prompt_ids, prompt_len, output_ids, 64,
             32, 1.0f, 1, &generation_rng);
         if (generated_len <= prompt_len) {
             printf("  [%zu] generation failed\n", i + 1);
-            continue;
+            return false;
+        }
+
+        // Repeat from the same cache state and RNG seed. Greedy top-k=1
+        // must reproduce the exact same token sequence.
+        kvcache_reset(cache);
+        Rng verify_rng;
+        rng_seed(&verify_rng, 5678u + (uint64_t)i);
+        const int verify_len = generate(model, tok, cache,
+            prompt_ids, prompt_len, verify_ids, 64,
+            32, 1.0f, 1, &verify_rng);
+        if (verify_len != generated_len ||
+            memcmp(output_ids, verify_ids,
+                (size_t)generated_len * sizeof(uint16_t)) != 0) {
+            printf("  [%zu] deterministic generation: FAIL\n", i + 1);
+            return false;
         }
 
         const int bytes = tokenizer_decode(tok, output_ids,
             generated_len, output_text, (int)sizeof(output_text));
         if (bytes <= 0) {
             printf("  [%zu] decoding failed\n", i + 1);
-            continue;
+            return false;
         }
-
         printf("  [%zu] %s\n", i + 1, output_text);
     }
-    (void)arena;
+
+    printf("Determinism check: PASS (all prompts reproduced exactly)\n");
+    return true;
 }
 
 int main(int argc, char** argv) {
@@ -412,6 +428,12 @@ int main(int argc, char** argv) {
         check_tokens, check_targets, BATCH, SEQ))
         die("numerical gradient check failed");
 
+    // Create a valid step-zero checkpoint before training starts. If the
+    // process is interrupted early, --resume still has a matching baseline.
+    if (!resume && !checkpoint_save("minima.model", &model, &opt,
+        &rng, tokenizer_hash, corpus_hash))
+        die("initial checkpoint save failed");
+
     // ------------------------------------------------------------------
     // 7. Continue training; optimizer step and RNG state are global
     // ------------------------------------------------------------------
@@ -518,6 +540,7 @@ int main(int argc, char** argv) {
         loaded_ids, 64);
     if (loaded_tok->vocab_size != tok.vocab_size ||
         loaded_tok->n_merges != tok.n_merges ||
+        tokenizer_fingerprint(loaded_tok) != tokenizer_hash ||
         original_count != loaded_count ||
         memcmp(original_ids, loaded_ids,
             (size_t)original_count * sizeof(uint16_t)) != 0)
@@ -557,7 +580,8 @@ int main(int argc, char** argv) {
         check_tokens, SEQ, 1e-4f))
         die("KV-cache parity check failed");
 
-    run_generation_benchmark(&model, &tok, &cache, &arena);
+    if (!run_generation_benchmark(&model, &tok, &cache))
+        die("deterministic generation benchmark failed");
 
     printf("\nSmoke test finished.\n");
     printf("Training, validation, persistence, and generation checks completed.\n");
