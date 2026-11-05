@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <stdlib.h>
+#include <string.h>
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
@@ -319,7 +320,15 @@ static void start_engine(BOOL chat_mode) {
     si.wShowWindow = SW_HIDE;
     si.hStdOutput = write_pipe;
     si.hStdError = write_pipe;
-    si.hStdInput = chat_mode ? child_stdin : GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE null_input=INVALID_HANDLE_VALUE;
+    if(!chat_mode){
+        null_input=CreateFileW(L"NUL",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,&sa,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(null_input==INVALID_HANDLE_VALUE){
+            CloseHandle(read_pipe);CloseHandle(write_pipe);
+            MessageBoxW(g_window,L"Could not open NUL for engine standard input.",L"ProjectMinima",MB_ICONERROR);return;
+        }
+    }
+    si.hStdInput = chat_mode ? child_stdin : null_input;
 
     wchar_t working_dir[MAX_PATH];
     wcscpy_s(working_dir, _countof(working_dir), g_engine_path);
@@ -328,6 +337,7 @@ static void start_engine(BOOL chat_mode) {
 
     if (!CreateProcessW(g_engine_path, command, NULL, NULL, TRUE,
         CREATE_NO_WINDOW, NULL, working_dir, &si, &pi)) {
+        if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
         CloseHandle(read_pipe);CloseHandle(write_pipe);
         if(child_stdin)CloseHandle(child_stdin);
         if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
@@ -335,6 +345,7 @@ static void start_engine(BOOL chat_mode) {
         return;
     }
     CloseHandle(write_pipe);
+    if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
     if(child_stdin)CloseHandle(child_stdin);
     g_process = pi.hProcess;
     CloseHandle(pi.hThread);
@@ -348,6 +359,7 @@ static void start_engine(BOOL chat_mode) {
     g_thread = CreateThread(NULL, 0, reader_thread, read_pipe, 0, NULL);
     if (!g_thread) {
         TerminateProcess(g_process, 1);
+        if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
         CloseHandle(g_process);
         g_process = NULL;
         CloseHandle(read_pipe);
