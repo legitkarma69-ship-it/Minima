@@ -209,13 +209,14 @@ static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* ar
 
 static BOOL add_corpus_path(const wchar_t* path) {
     int count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
-    if (count < 0 || count >= 32) return FALSE;
+    if (count < 0) return FALSE;
     for (int i = 0; i < count; ++i) {
         wchar_t existing[MAX_PATH * 2];
         if (SendMessageW(g_corpus, LB_GETTEXT, i, (LPARAM)existing) >= 0 &&
             _wcsicmp(existing, path) == 0)
             return TRUE; /* Ignore duplicate selections. */
     }
+    if (count >= 32) return FALSE;
     LRESULT result = SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)path);
     return result != LB_ERR && result != LB_ERRSPACE;
 }
@@ -470,6 +471,10 @@ static void send_chat_message(void) {
 static void stop_generation(void) {
     if(g_process && g_chat_mode && InterlockedCompareExchange(&g_running,0,0)){
         append_log(L"\r\nStopping generation...\r\n");
+        EnableWindow(g_chat_input,FALSE);
+        EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
+        EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),FALSE);
+        SetWindowTextW(g_status,L"Stopping chat");
         TerminateProcess(g_process,3);
     }
 }
@@ -690,6 +695,23 @@ static void create_controls(HWND hwnd) {
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 
+    /* Make every interactive control reachable through normal keyboard tab navigation. */
+    HWND tab_controls[] = {
+        g_corpus, GetDlgItem(hwnd,IDC_ADD), GetDlgItem(hwnd,IDC_REMOVE),
+        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_steps,g_resume,
+        g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
+        g_validation_interval,g_validation_batches,g_checkpoint_interval,
+        g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
+        g_max_tokens,g_lr_schedule,g_tokenizer_sampling,
+        GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
+        GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_SAVE_NOW),
+        g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
+    };
+    for(int i=0;i<(int)_countof(tab_controls);i++) {
+        LONG_PTR style=GetWindowLongPtrW(tab_controls[i],GWL_STYLE);
+        SetWindowLongPtrW(tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
+    }
+
     load_settings();
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
@@ -833,8 +855,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
+        if(!IsDialogMessageW(hwnd,&msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
     return (int)msg.wParam;
 }
