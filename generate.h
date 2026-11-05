@@ -42,4 +42,10 @@ int generate(Model* model, Tokenizer* tok, KVCache* cache,
     float temperature, int top_k,
     Rng* rng);
 
+int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
+    const uint16_t* prompt_ids, int prompt_len,
+    uint16_t* out_ids, int out_cap, int n_new,
+    float temperature, int top_k, float top_p,
+    float repetition_penalty, Rng* rng);
+
 #endif
