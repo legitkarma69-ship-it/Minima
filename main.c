@@ -277,7 +277,7 @@ int main(int argc, char** argv) {
         opt.step != STEPS)
         die("checkpoint round-trip verification failed");
 
-    printf("Checkpoint round-trip: PASS (weights, optimizer moments, step)\\n");
+    printf("Checkpoint round-trip: PASS (weights, optimizer moments, step)\n");
 
     // ------------------------------------------------------------------
     // 9. Autoregressive generation smoke test
