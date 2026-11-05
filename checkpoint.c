@@ -69,6 +69,7 @@ static size_t model_parameter_count(const Model* m) {
 } while (0)
 
 bool checkpoint_save(const char* path, const Model* model, const Optim* opt) {
+    const Model* m = model;
     if (!path || !model || !opt || !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
@@ -122,6 +123,7 @@ fail:
 } while (0)
 
 bool checkpoint_load(const char* path, Model* model, Optim* opt) {
+    Model* m = model;
     if (!path || !model || !opt || !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
