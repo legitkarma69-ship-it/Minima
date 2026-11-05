@@ -523,7 +523,7 @@ static void create_controls(HWND hwnd) {
     SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
     g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL,
         12,665,700,26,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
-    SendMessageW(g_chat_input,EM_SETLIMITTEXT,2048,0);
+    SendMessageW(g_chat_input,EM_SETLIMITTEXT,1024,0);
     EnableWindow(g_chat_input,FALSE);
     CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,720,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,835,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
@@ -541,7 +541,7 @@ static void create_controls(HWND hwnd) {
     if(history_slash)wcscpy_s(history_slash+1,_countof(history_path)-(size_t)(history_slash+1-history_path),L"minima_chat.txt");
     FILE* history_file=_wfopen(history_path,L"rt");
     if(history_file){
-        char line[4096];
+        char line[65536];
         if(fseek(history_file,0,SEEK_END)==0){
             long end=ftell(history_file),start=end>1024*1024?end-1024*1024:0;
             if(start>0){fseek(history_file,start,SEEK_SET);(void)fgets(line,sizeof(line),history_file);}
