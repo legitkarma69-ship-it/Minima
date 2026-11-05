@@ -31,7 +31,7 @@ static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
-static HWND g_lr_schedule, g_tokenizer_sampling;
+static HWND g_lr_schedule, g_tokenizer_sampling, g_batch_size, g_sequence_length;
 static wchar_t g_metrics_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
@@ -87,7 +87,7 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
     HWND fields[]={g_lr,g_warmup,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
-        g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens};
+        g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     SetWindowTextW(g_status, running ? L"Training process running" : L"Idle");
 }
@@ -233,6 +233,8 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--heads",g_heads) ||
            !append_option(command,_countof(command),L"--ffn-dim",g_ffn) ||
            !append_option(command,_countof(command),L"--max-seq",g_max_seq) ||
+           !append_option(command,_countof(command),L"--batch-size",g_batch_size) ||
+           !append_option(command,_countof(command),L"--sequence-length",g_sequence_length) ||
            !append_combo_option(command,_countof(command),L"--lr-schedule",g_lr_schedule) ||
            !append_combo_option(command,_countof(command),L"--tokenizer-sampling",g_tokenizer_sampling)){
             MessageBoxW(g_window,L"Check the generation settings.",L"ProjectMinima",MB_ICONWARNING);return;
@@ -400,12 +402,16 @@ static void create_controls(HWND hwnd) {
     g_max_seq=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,540,173,42,23,hwnd,NULL,NULL,NULL);
 
     CreateWindowW(L"STATIC",L"Steps",WS_CHILD|WS_VISIBLE,12,210,42,18,hwnd,NULL,NULL,NULL);
-    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,65,23,hwnd,(HMENU)IDC_STEPS,NULL,NULL);
-    g_resume=CreateWindowW(L"BUTTON",L"Resume checkpoint",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,132,208,150,23,hwnd,(HMENU)IDC_RESUME,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Learning rate",WS_CHILD|WS_VISIBLE,290,210,78,18,hwnd,NULL,NULL,NULL);
-    g_lr=CreateWindowW(L"EDIT",L"0.0003",WS_CHILD|WS_VISIBLE|WS_BORDER,370,207,68,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,445,210,52,18,hwnd,NULL,NULL,NULL);
-    g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,500,207,48,23,hwnd,NULL,NULL,NULL);
+    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,hwnd,(HMENU)IDC_STEPS,NULL,NULL);
+    g_resume=CreateWindowW(L"BUTTON",L"Resume",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,118,208,75,23,hwnd,(HMENU)IDC_RESUME,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Batch",WS_CHILD|WS_VISIBLE,198,210,38,18,hwnd,NULL,NULL,NULL);
+    g_batch_size=CreateWindowW(L"EDIT",L"4",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,237,207,35,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Seq",WS_CHILD|WS_VISIBLE,278,210,30,18,hwnd,NULL,NULL,NULL);
+    g_sequence_length=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,309,207,40,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"LR",WS_CHILD|WS_VISIBLE,355,210,22,18,hwnd,NULL,NULL,NULL);
+    g_lr=CreateWindowW(L"EDIT",L"0.0003",WS_CHILD|WS_VISIBLE|WS_BORDER,379,207,65,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,450,210,52,18,hwnd,NULL,NULL,NULL);
+    g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,hwnd,NULL,NULL,NULL);
 
     CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,244,60,18,hwnd,NULL,NULL,NULL);
     g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,241,48,23,hwnd,NULL,NULL,NULL);
@@ -456,7 +462,8 @@ static void create_controls(HWND hwnd) {
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
-        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling };
+        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,
+        g_batch_size,g_sequence_length };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 }
