@@ -148,6 +148,30 @@ jobs:
             throw "Resumed optimizer step did not reach the saved cosine endpoint."
           }
 
+      - name: Verify isolated Generation Lab sampling override
+        shell: pwsh
+        run: |
+          $chatInput = "/test 0.8 40 0.9 1.1 8`r`nThe quick brown fox`r`n/quit`r`n"
+          [System.IO.File]::WriteAllText(
+            "minima_generation_lab_input.txt",
+            $chatInput,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          $command = 'type minima_generation_lab_input.txt | x64\Release\Minima.exe --chat --resume --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --max-seq 72 --max-new-tokens 8'
+          $output = & cmd.exe /d /s /c $command 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          Remove-Item "minima_generation_lab_input.txt" -ErrorAction SilentlyContinue
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "TEST:") {
+            throw "The one-shot Generation Lab override did not produce a test response."
+          }
+          if ($text -match "TEST_ERROR:") {
+            throw "The chat engine rejected the Generation Lab sampling settings."
+          }
+          if (([regex]::Matches($text, "CHAT_READY")).Count -lt 2) {
+            throw "The chat protocol did not return to ready state after the test generation."
+          }
       - name: Publish Windows executables
         uses: actions/upload-artifact@v4
         with:
