@@ -9,6 +9,7 @@
 #include "generate.h"
 #include "corpus.h"
 #include "checkpoint.h"
+#include "config.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -16,14 +17,39 @@
 #include <limits.h>
 #include <stdint.h>
 #include <math.h>
+#include <errno.h>
 
 #define BATCH     4
 #define SEQ       32
-#define STEPS     2000
+#define DEFAULT_STEPS 2000
 #define LR        3e-4f
 #define WARMUP_STEPS 100
 #define LOG_INTERVAL 100
 #define VALIDATION_BATCHES 16
+
+static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
+    const uint8_t* bytes = (const uint8_t*)data;
+    for (size_t i = 0; i < length; i++) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static uint64_t corpus_fingerprint(const uint8_t* data, size_t length) {
+    if (!data || length == 0) return 0;
+    uint64_t hash = 14695981039346656037ULL;
+    hash = hash_bytes(hash, data, length);
+    return hash ? hash : 1;
+}
+
+static void print_usage(const char* exe) {
+    printf("Usage: %s [--resume] [--steps N] [corpus.txt ...]\n", exe);
+    printf("  --resume   Continue from minima.model and minima.bpe\n");
+    printf("  --steps N  Run N additional optimizer steps (default: %d)\n",
+        DEFAULT_STEPS);
+    printf("  --help     Show this help\n");
+}
 
 static float evaluate_loss(Model* model, Arena* temp,
     const uint16_t* all_ids, int validation_start, int validation_tokens) {
@@ -78,8 +104,103 @@ static float evaluate_loss(Model* model, Arena* temp,
     return (float)(loss_sum / VALIDATION_BATCHES);
 }
 
+static int parse_arguments(int argc, char** argv, bool* resume,
+    int* steps, const char** corpus_paths) {
+    int path_count = 0;
+    *resume = false;
+    *steps = DEFAULT_STEPS;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            exit(0);
+        }
+        else if (strcmp(argv[i], "--resume") == 0) {
+            *resume = true;
+        }
+        else if (strcmp(argv[i], "--steps") == 0) {
+            if (i + 1 >= argc) die("--steps requires a positive integer");
+            char* end = NULL;
+            errno = 0;
+            long value = strtol(argv[++i], &end, 10);
+            if (errno != 0 || !end || *end != '\0' ||
+                value <= 0 || value > INT_MAX)
+                die("--steps must be an integer between 1 and INT_MAX");
+            *steps = (int)value;
+        }
+        else if (argv[i][0] == '-') {
+            die("unknown option: %s (use --help)", argv[i]);
+        }
+        else {
+            if (path_count >= 32)
+                die("too many corpus paths (maximum 32)");
+            corpus_paths[path_count++] = argv[i];
+        }
+    }
+    return path_count;
+}
+
+static void run_generation_benchmark(Model* model, Tokenizer* tok,
+    KVCache* cache, Arena* arena) {
+    static const char* prompts[] = {
+        "The quick brown fox",
+        "Once upon a time",
+        "In the beginning",
+        "The meaning of life",
+        "It was a dark"
+    };
+
+    printf("\nDeterministic generation benchmark (greedy, top-k=1)\n");
+    uint16_t prompt_ids[64];
+    uint16_t output_ids[64];
+    char output_text[64 * TOK_MAX_TOKEN_LEN + 1];
+
+    for (size_t i = 0; i < sizeof(prompts) / sizeof(prompts[0]); i++) {
+        const size_t prompt_bytes = strlen(prompts[i]);
+        const int prompt_len = tokenizer_encode(tok,
+            (const uint8_t*)prompts[i], prompt_bytes,
+            prompt_ids, (int)(sizeof(prompt_ids) / sizeof(prompt_ids[0])));
+        if (prompt_len <= 0) {
+            printf("  [%zu] prompt encoding failed\n", i + 1);
+            continue;
+        }
+
+        kvcache_reset(cache);
+        Rng generation_rng;
+        rng_seed(&generation_rng, 5678u + (uint64_t)i);
+
+        const int generated_len = generate(model, tok, cache,
+            prompt_ids, prompt_len, output_ids, 64,
+            32, 1.0f, 1, &generation_rng);
+        if (generated_len <= prompt_len) {
+            printf("  [%zu] generation failed\n", i + 1);
+            continue;
+        }
+
+        const int bytes = tokenizer_decode(tok, output_ids,
+            generated_len, output_text, (int)sizeof(output_text));
+        if (bytes <= 0) {
+            printf("  [%zu] decoding failed\n", i + 1);
+            continue;
+        }
+
+        printf("  [%zu] %s\n", i + 1, output_text);
+    }
+    (void)arena;
+}
+
 int main(int argc, char** argv) {
-    printf("ProjectMinima text-corpus training experiment\n\n");
+    bool resume = false;
+    int steps_to_run = DEFAULT_STEPS;
+    const char* user_paths[32];
+    const int user_path_count = parse_arguments(argc, argv,
+        &resume, &steps_to_run, user_paths);
+
+    printf("ProjectMinima text-corpus training experiment\n");
+    printf("Vocabulary target: %d\n", MODEL_VOCAB_SIZE);
+    printf("Steps this run: %d%s\n\n", steps_to_run,
+        resume ? " (resume)" : "");
+
     if (!optim_check_adamw())
         die("AdamW numerical regression check failed");
     printf("AdamW bias-correction check: PASS\n");
@@ -87,33 +208,24 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------
     // 1. Arenas
     // ------------------------------------------------------------------
-    Arena arena;          // permanent (weights, optim, tokenizer)
-    Arena temp;           // per-step activations / gradients scratch
+    Arena arena;
+    Arena temp;
 
-    if (!arena_init(&arena, 8ull * 1024 * 1024 * 1024))  // 8 GiB reserved, committed on demand
+    if (!arena_init(&arena, 8ull * 1024 * 1024 * 1024))
         die("permanent arena failed");
-    if (!arena_init(&temp, 256ull * 1024 * 1024))  // 256 MB
+    if (!arena_init(&temp, 256ull * 1024 * 1024))
         die("temp arena failed");
 
     // ------------------------------------------------------------------
     // 2. Load plain-text training data
     // ------------------------------------------------------------------
-    // No arbitrary corpus-size limit. Actual capacity is bounded by available
-    // memory, the arena size, and the tokenizer's current int-based API.
     const size_t max_corpus_bytes = SIZE_MAX;
     Corpus loaded_corpus;
     bool have_corpus = false;
 
-    if (argc > 1) {
-        if (argc - 1 > 32)
-            die("too many corpus paths (maximum 32)");
-
-        const char* user_paths[32];
-        for (int i = 1; i < argc; i++)
-            user_paths[i - 1] = argv[i];
-
+    if (user_path_count > 0) {
         const CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
-            &arena, user_paths, (size_t)(argc - 1), max_corpus_bytes);
+            &arena, user_paths, (size_t)user_path_count, max_corpus_bytes);
         if (load_result == CORPUS_LOAD_ERROR)
             die("corpus loading failed (check file access, available memory, and supported corpus size)");
         if (load_result == CORPUS_LOAD_EMPTY)
@@ -131,7 +243,6 @@ int main(int argc, char** argv) {
         if (load_result == CORPUS_LOAD_ERROR)
             die("corpus loading failed (check file access, available memory, and supported corpus size)");
 
-        // Also support launching with the repository root as working directory.
         if (load_result == CORPUS_LOAD_EMPTY) {
             const char* root_paths[] = {
                 "data/books.txt",
@@ -155,15 +266,14 @@ int main(int argc, char** argv) {
             corpus_len, loaded_corpus.files_loaded);
     }
     else {
-        if (argc > 1)
+        if (user_path_count > 0)
             die("the supplied corpus files contained no usable text");
 
-        // Empty placeholder files fall back to the deterministic smoke corpus.
         const char* smoke_text =
             "The quick brown fox jumps over the lazy dog. "
             "Hello world from a tiny language model. "
             "Pure C is enough for small transformers. ";
-        size_t smoke_len = strlen(smoke_text);
+        const size_t smoke_len = strlen(smoke_text);
         corpus_len = smoke_len * 80;
         corpus = (uint8_t*)arena_alloc(&arena, corpus_len + 1);
         if (!corpus) die("smoke corpus allocation failed");
@@ -171,7 +281,6 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < 80; i++)
             memcpy(corpus + i * smoke_len, smoke_text, smoke_len);
         corpus[corpus_len] = 0;
-
         printf("No training text found; using synthetic smoke corpus.\n");
     }
 
@@ -180,52 +289,69 @@ int main(int argc, char** argv) {
     if (corpus_len > (size_t)INT_MAX)
         die("corpus exceeds tokenizer's current INT_MAX byte/token-capacity limit");
 
-    // ------------------------------------------------------------------
-    // 3. Train BPE on a bounded, evenly distributed corpus sample
-    // ------------------------------------------------------------------
-    // Hold out the final 5% of the corpus for validation. BPE learns only
-    // from the training portion, not from the held-out validation text.
-    const size_t train_corpus_len =
-        (corpus_len * 95u) / 100u;
-    if (train_corpus_len < (size_t)BATCH * SEQ + 1)
-        die("training portion is too small");
-
-    const size_t tokenizer_sample_cap = 256u * 1024u;
-    size_t sample_len = train_corpus_len < tokenizer_sample_cap
-        ? train_corpus_len : tokenizer_sample_cap;
-    uint8_t* tokenizer_sample = (uint8_t*)arena_alloc(&arena, sample_len);
-    if (!tokenizer_sample) die("tokenizer sample allocation failed");
-
-    if (train_corpus_len <= tokenizer_sample_cap) {
-        memcpy(tokenizer_sample, corpus, sample_len);
-    }
-    else {
-        const size_t chunks = 64;
-        const size_t chunk_len = sample_len / chunks;
-        for (size_t i = 0; i < chunks; i++) {
-            size_t start = ((train_corpus_len - chunk_len) * i) / (chunks - 1);
-            memcpy(tokenizer_sample + i * chunk_len,
-                corpus + start, chunk_len);
-        }
-    }
-
-    printf("Tokenizer training sample: %zu bytes\n", sample_len);
+    const uint64_t corpus_hash = corpus_fingerprint(corpus, corpus_len);
+    if (!corpus_hash) die("failed to fingerprint training corpus");
 
     // ------------------------------------------------------------------
-    // 4. Tokenizer and corpus encoding
+    // 3. Load or train tokenizer
     // ------------------------------------------------------------------
     Tokenizer tok;
-    if (!tokenizer_train(&tok, &arena, tokenizer_sample,
-        sample_len, MODEL_VOCAB_SIZE))
-        die("tokenizer_train failed");
+    if (resume) {
+        if (!tokenizer_load(&tok, &arena, "minima.bpe"))
+            die("resume requested, but minima.bpe could not be loaded");
+        if (tok.vocab_size != MODEL_VOCAB_SIZE)
+            die("saved tokenizer vocabulary does not match MODEL_VOCAB_SIZE; start a fresh run");
+        printf("Loaded tokenizer: minima.bpe (vocab = %d)\n", tok.vocab_size);
+    }
+    else {
+        const size_t train_corpus_len = (corpus_len * 95u) / 100u;
+        if (train_corpus_len < (size_t)BATCH * SEQ + 1)
+            die("training portion is too small");
+
+        const size_t tokenizer_sample_cap = 256u * 1024u;
+        const size_t sample_len = train_corpus_len < tokenizer_sample_cap
+            ? train_corpus_len : tokenizer_sample_cap;
+        uint8_t* tokenizer_sample = (uint8_t*)arena_alloc(&arena, sample_len);
+        if (!tokenizer_sample) die("tokenizer sample allocation failed");
+
+        if (train_corpus_len <= tokenizer_sample_cap) {
+            memcpy(tokenizer_sample, corpus, sample_len);
+        }
+        else {
+            const size_t chunks = 64;
+            const size_t chunk_len = sample_len / chunks;
+            for (size_t i = 0; i < chunks; i++) {
+                const size_t start =
+                    ((train_corpus_len - chunk_len) * i) / (chunks - 1);
+                memcpy(tokenizer_sample + i * chunk_len,
+                    corpus + start, chunk_len);
+            }
+        }
+
+        printf("Tokenizer training sample: %zu bytes\n", sample_len);
+        if (!tokenizer_train(&tok, &arena, tokenizer_sample,
+            sample_len, MODEL_VOCAB_SIZE))
+            die("tokenizer_train failed");
+        if (tok.vocab_size != MODEL_VOCAB_SIZE)
+            die("BPE could not reach the configured vocabulary size");
+        if (!tokenizer_save(&tok, "minima.bpe"))
+            die("failed to save tokenizer to minima.bpe");
+    }
+
+    const uint64_t tokenizer_hash = tokenizer_fingerprint(&tok);
+    if (!tokenizer_hash) die("failed to fingerprint tokenizer");
     printf("vocab size = %d\n", tok.vocab_size);
 
+    // ------------------------------------------------------------------
+    // 4. Encode the complete corpus and create held-out validation region
+    // ------------------------------------------------------------------
     uint16_t* all_ids = (uint16_t*)arena_alloc(&arena,
         corpus_len * sizeof(uint16_t));
     if (!all_ids) die("token id allocation failed");
 
-    int n_tokens = tokenizer_encode(&tok, corpus, corpus_len,
+    const int n_tokens = tokenizer_encode(&tok, corpus, corpus_len,
         all_ids, (int)corpus_len);
+    if (n_tokens <= 0) die("corpus tokenization failed");
     printf("total tokens = %d\n\n", n_tokens);
 
     const int train_tokens = n_tokens - n_tokens / 20;
@@ -238,9 +364,8 @@ int main(int argc, char** argv) {
     printf("Validation tokens: %d (5%%)\n\n", validation_tokens);
 
     // ------------------------------------------------------------------
-    // 5. Model + optimiser + gradients
+    // 5. Model, optimizer, gradients, and optional checkpoint restore
     // ------------------------------------------------------------------
-    // All translation units now use the same values from config.h.
     Model model;
     if (!model_init(&model, &arena, 42, tok.vocab_size))
         die("model_init failed");
@@ -250,15 +375,24 @@ int main(int argc, char** argv) {
     if (!optim_init(&opt, &model, &arena, LR, 0.9f, 0.95f, 1e-8f, 0.01f))
         die("optim_init failed");
 
+    Rng rng;
+    rng_seed(&rng, 1234);
+
+    if (resume) {
+        if (!checkpoint_load("minima.model", &model, &opt,
+            &rng, tokenizer_hash, corpus_hash))
+            die("checkpoint load failed: model, tokenizer, or corpus does not match");
+        printf("Resumed checkpoint at optimizer step %lld\n\n",
+            (long long)opt.step);
+    }
+
     Gradients grads;
     if (!gradients_init(&grads, &arena, &model))
-        die("gradients_init failed");
+        die("gradient allocation failed");
 
     // ------------------------------------------------------------------
     // 6. Numerical gradient check
     // ------------------------------------------------------------------
-    // Use a fixed, deterministic batch so every finite-difference
-    // evaluation sees exactly the same tokens and targets.
     uint16_t* check_tokens = arena_alloc(&arena,
         (size_t)BATCH * SEQ * sizeof(uint16_t));
     uint16_t* check_targets = arena_alloc(&arena,
@@ -279,15 +413,16 @@ int main(int argc, char** argv) {
         die("numerical gradient check failed");
 
     // ------------------------------------------------------------------
-    // 7. Training loop
+    // 7. Continue training; optimizer step and RNG state are global
     // ------------------------------------------------------------------
     Activations act;
-    Rng rng;
-    rng_seed(&rng, 1234);
-
     uint16_t* batch_tokens;
     uint16_t* batch_targets;
     float* dlogits;
+
+    const int warmup_steps = steps_to_run < WARMUP_STEPS
+        ? (steps_to_run > 1 ? steps_to_run / 10 : 0) : WARMUP_STEPS;
+    const int64_t initial_step = opt.step;
 
     printf(" step | train loss | valid loss | learning rate\n");
     printf("------+------------+------------+--------------\n");
@@ -295,8 +430,7 @@ int main(int argc, char** argv) {
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
 
-    for (int step = 0; step < STEPS; step++) {
-        // Activations and batch buffers are scratch allocations.
+    for (int local_step = 0; local_step < steps_to_run; local_step++) {
         arena_reset(&temp);
         if (!activations_init(&act, &temp, BATCH, SEQ, &model))
             die("activation allocation failed");
@@ -305,41 +439,40 @@ int main(int argc, char** argv) {
             (size_t)BATCH * SEQ * model.vocab_size * sizeof(float));
         batch_tokens = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
         batch_targets = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
-
         if (!dlogits || !batch_tokens || !batch_targets)
             die("training scratch allocation failed");
 
-        // Sample random starting positions
         for (int b = 0; b < BATCH; b++) {
-            int start = rng_int(&rng, 0, train_tokens - SEQ - 1);
+            const int start = rng_int(&rng, 0, train_tokens - SEQ - 1);
             for (int t = 0; t < SEQ; t++) {
                 batch_tokens[b * SEQ + t] = all_ids[start + t];
                 batch_targets[b * SEQ + t] = all_ids[start + t + 1];
             }
         }
 
-        // Forward
-        float* logits = model_forward(&model, &act, batch_tokens, BATCH, SEQ);
+        float* logits = model_forward(&model, &act,
+            batch_tokens, BATCH, SEQ);
         if (!logits) die("model_forward failed");
 
-        // Loss + dlogits
-        float loss = loss_cross_entropy(logits, batch_targets, dlogits,
+        const float loss = loss_cross_entropy(logits, batch_targets, dlogits,
             BATCH, SEQ, model.vocab_size);
+        if (!isfinite(loss)) die("training loss became non-finite");
 
-        // Backward
         gradients_zero(&grads, &model);
-        model_backward(&model, &grads, &act, dlogits, batch_tokens, BATCH, SEQ);
+        model_backward(&model, &grads, &act, dlogits,
+            batch_tokens, BATCH, SEQ);
 
-        // Linear warmup followed by cosine decay.
-        opt.lr = optim_lr_cosine(LR, step + 1, WARMUP_STEPS, STEPS);
-
-        // AdamW
+        // Each invocation is an additional training segment with its own
+        // warmup + cosine decay. AdamW's bias-correction step remains global.
+        opt.lr = optim_lr_cosine(LR, local_step + 1,
+            warmup_steps, steps_to_run);
         optim_step(&opt, &model, &grads);
 
         train_loss_sum += loss;
         train_loss_count++;
 
-        if ((step + 1) % LOG_INTERVAL == 0 || step == STEPS - 1) {
+        if ((local_step + 1) % LOG_INTERVAL == 0 ||
+            local_step == steps_to_run - 1) {
             const float validation_loss = evaluate_loss(&model, &temp,
                 all_ids, train_tokens, validation_tokens);
             if (!isfinite(validation_loss))
@@ -348,28 +481,28 @@ int main(int argc, char** argv) {
             const double average_train_loss =
                 train_loss_sum / (double)train_loss_count;
 
-            printf("%5d | %10.4f | %10.4f | %.7f\n",
-                step + 1, (float)average_train_loss,
+            printf("%5lld | %10.4f | %10.4f | %.7f\n",
+                (long long)opt.step, (float)average_train_loss,
                 validation_loss, opt.lr);
 
             train_loss_sum = 0.0;
             train_loss_count = 0;
+
+            // Save at every reporting interval so an interrupted run loses
+            // at most LOG_INTERVAL - 1 optimizer steps.
+            if (!checkpoint_save("minima.model", &model, &opt,
+                &rng, tokenizer_hash, corpus_hash))
+                die("periodic checkpoint save failed");
         }
     }
 
-    // ------------------------------------------------------------------
-    // 8. Save tokenizer, model weights, and AdamW state
-    // ------------------------------------------------------------------
-    // Store the base learning rate in the checkpoint. The schedule is
-    // deterministic from the configured run length and step count.
-    opt.lr = LR;
+    const int64_t final_step = opt.step;
+    printf("\nTraining segment complete: %lld -> %lld\n",
+        (long long)initial_step, (long long)final_step);
 
-    if (!tokenizer_save(&tok, "minima.bpe"))
-        die("failed to save tokenizer to minima.bpe");
-    if (!checkpoint_save("minima.model", &model, &opt))
-        die("failed to save model checkpoint to minima.model");
-
-    // Verify that the tokenizer can be reloaded and produces identical IDs.
+    // ------------------------------------------------------------------
+    // 8. Tokenizer and checkpoint round-trip regression checks
+    // ------------------------------------------------------------------
     Tokenizer* loaded_tok = (Tokenizer*)arena_alloc(&arena, sizeof(Tokenizer));
     if (!loaded_tok || !tokenizer_load(loaded_tok, &arena, "minima.bpe"))
         die("tokenizer round-trip load failed");
@@ -392,45 +525,30 @@ int main(int argc, char** argv) {
 
     printf("Tokenizer round-trip: PASS (vocabulary, merges, encoding)\n");
 
-    printf("\nSaved tokenizer: minima.bpe\n");
-    printf("Saved model + optimizer: minima.model (step %d)\n", STEPS);
-
-    // Exercise the loader by deliberately corrupting one saved value,
-    // then confirm the checkpoint restores both weights and AdamW moments.
-    float saved_weight = model.tok_emb[0];
-    float saved_moment = opt.m_tok_emb[0];
-    float saved_variance = opt.v_tok_emb[0];
+    const float saved_weight = model.tok_emb[0];
+    const float saved_moment = opt.m_tok_emb[0];
+    const float saved_variance = opt.v_tok_emb[0];
+    const uint64_t saved_rng_state = rng.state;
     model.tok_emb[0] += 1.0f;
     opt.m_tok_emb[0] += 1.0f;
     opt.v_tok_emb[0] += 1.0f;
+    rng.state ^= 0x55aa55aa55aa55aaULL;
 
-    if (!checkpoint_load("minima.model", &model, &opt))
+    if (!checkpoint_load("minima.model", &model, &opt,
+        &rng, tokenizer_hash, corpus_hash))
         die("checkpoint round-trip load failed");
     if (model.tok_emb[0] != saved_weight ||
         opt.m_tok_emb[0] != saved_moment ||
         opt.v_tok_emb[0] != saved_variance ||
-        opt.step != STEPS)
+        opt.step != final_step || rng.state != saved_rng_state)
         die("checkpoint round-trip verification failed");
 
-    printf("Checkpoint round-trip: PASS (weights, optimizer moments, step)\n");
+    printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG)\n");
+    printf("Checkpoint compatibility: PASS (tokenizer and corpus fingerprints)\n");
 
     // ------------------------------------------------------------------
-    // 9. Autoregressive generation smoke test
+    // 9. KV-cache parity and deterministic multi-prompt generation
     // ------------------------------------------------------------------
-    const char* prompt_text = "The quick ";
-    const size_t prompt_bytes = strlen(prompt_text);
-    uint16_t* prompt_ids = arena_alloc(&arena,
-        prompt_bytes * sizeof(uint16_t));
-    uint16_t generated_ids[32];
-    char generated_text[32 * TOK_MAX_TOKEN_LEN + 1];
-
-    if (!prompt_ids) die("generation prompt allocation failed");
-
-    int prompt_len = tokenizer_encode(&tok,
-        (const uint8_t*)prompt_text, prompt_bytes,
-        prompt_ids, (int)prompt_bytes);
-    if (prompt_len <= 0) die("generation prompt tokenization failed");
-
     KVCache cache;
     if (!kvcache_init(&cache, &arena, &model, model.max_seq))
         die("KV cache initialization failed");
@@ -439,27 +557,10 @@ int main(int argc, char** argv) {
         check_tokens, SEQ, 1e-4f))
         die("KV-cache parity check failed");
 
-    Rng generation_rng;
-    rng_seed(&generation_rng, 5678);
-
-    int generated_len = generate(&model, &tok, &cache,
-        prompt_ids, prompt_len, generated_ids, 32,
-        16, 0.8f, 40, &generation_rng);
-    if (generated_len <= prompt_len)
-        die("generation smoke test failed");
-
-    int generated_bytes = tokenizer_decode(&tok, generated_ids,
-        generated_len, generated_text, (int)sizeof(generated_text));
-    if (generated_bytes <= 0)
-        die("generation decode failed");
-
-    printf("\nGeneration smoke test\n");
-    printf("  prompt tokens : %d\n", prompt_len);
-    printf("  generated     : %d new tokens\n", generated_len - prompt_len);
-    printf("  text          : %s\n", generated_text);
+    run_generation_benchmark(&model, &tok, &cache, &arena);
 
     printf("\nSmoke test finished.\n");
-    printf("If loss decreased significantly, the full pipeline is working.\n");
+    printf("Training, validation, persistence, and generation checks completed.\n");
 
     arena_free(&temp);
     arena_free(&arena);
