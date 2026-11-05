@@ -53,7 +53,7 @@ After training, the program writes two files in its working directory:
 - `minima.model`: model weights, AdamW first and second moments, optimizer
   hyperparameters, and optimizer step count.
 
-The checkpoint format is version 2. It stores model weights, both AdamW
+The checkpoint format is version 3. It stores model weights, both AdamW
 moment arrays, optimizer hyperparameters and global step, plus the training
 RNG state. It also stores a fingerprint of the exact tokenizer. Resume refuses to load
 if the model architecture or tokenizer differs, but the corpus may be expanded
@@ -81,12 +81,13 @@ so an interrupted write leaves the previous complete checkpoint intact. An
 interrupted training run therefore loses at most 99 completed optimizer steps. The AdamW bias-correction counter and
 random training-sample sequence continue from their saved states.
 
-Each invocation is a separate training segment: its learning-rate schedule
-starts with a fresh warmup and cosine decay, while the AdamW optimizer step
-remains global. This is a deliberate warm restart, not an attempt to pretend
-that a newly extended schedule was known during the previous run. Resume
-requires the same tokenizer, but it can use updated or expanded training text.
-The new corpus is encoded with the saved tokenizer, and the 95/5
+The learning-rate schedule uses the absolute optimizer step and is stored in
+the checkpoint. A resumed run continues the same warmup/cosine schedule rather
+than restarting it. On a fresh run, use `--total-steps N` to choose the full
+schedule horizon; `--steps N` controls how many updates this invocation
+performs. Resume requires the same tokenizer, but it can use updated or
+expanded training text. Old version-2 checkpoints are incompatible with the
+version-3 format. The new corpus is encoded with the saved tokenizer, and the 95/5
 train/validation split is recalculated from that corpus. If you change the
 vocabulary configuration, start a fresh run instead. The previous
 512-entry tokenizer/checkpoint from earlier experiments is incompatible with
