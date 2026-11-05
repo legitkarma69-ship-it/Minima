@@ -7,20 +7,59 @@
 #include <string.h>
 #include <time.h>
 
+static bool parse_test_settings(const char* line, ChatOptions* settings) {
+    float temperature = 0.0f, top_p = 0.0f, repetition = 0.0f;
+    int top_k = 0, max_tokens = 0, consumed = 0;
+    if (sscanf(line, "/test %f %d %f %f %d %n",
+        &temperature, &top_k, &top_p, &repetition, &max_tokens,
+        &consumed) != 5 || consumed <= 0)
+        return false;
+    for (const char* p = line + consumed; *p; ++p)
+        if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n')
+            return false;
+    if (!isfinite(temperature) || temperature < 0.05f || temperature > 5.0f ||
+        top_k < 1 || top_k > 256 ||
+        !isfinite(top_p) || top_p < 0.01f || top_p > 1.0f ||
+        !isfinite(repetition) || repetition < 1.0f || repetition > 3.0f ||
+        max_tokens < 1 || max_tokens > 512)
+        return false;
+
+    settings->temperature = temperature;
+    settings->top_k = top_k;
+    settings->top_p = top_p;
+    settings->repetition_penalty = repetition;
+    settings->max_new_tokens = max_tokens;
+    return true;
+}
+
 int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
     const ChatOptions* options) {
     uint16_t history[512], input_ids[8192], prompt[512], output[512];
     int history_len=0;
     char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
+    ChatOptions active_options = *options;
+    bool test_pending = false;
     puts("CHAT_READY");
     puts("ProjectMinima chat. Type /quit to exit.");
     for(;;){
         if(!fgets(line,sizeof(line),stdin))break;
         size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\n'||line[bytes-1]=='\r'))line[--bytes]=0;
         if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
+        if(strncmp(line,"/test ",6)==0) {
+            ChatOptions requested = *options;
+            if (!parse_test_settings(line, &requested)) {
+                puts("TEST_ERROR: invalid sampling settings; expected /test temperature top_k top_p repetition_penalty max_tokens");
+                puts("CHAT_READY");
+                continue;
+            }
+            active_options = requested;
+            history_len = 0;
+            test_pending = true;
+            continue;
+        }
         if(!bytes){puts("CHAT_READY");continue;}
         int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,(int)(sizeof(input_ids)/sizeof(input_ids[0])));
-        if(input_count<=0){puts("BOT: [input encoding failed]");puts("CHAT_READY");continue;}
+        if(input_count<=0){puts(test_pending ? "TEST: [input encoding failed]" : "BOT: [input encoding failed]");active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;}
         if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
         uint16_t separator[4];
         int separator_count=history_len
@@ -35,18 +74,29 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
         memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
         if(separator_count)memcpy(prompt+history_len,separator,(size_t)separator_count*sizeof(uint16_t));
         memcpy(prompt+history_len+separator_count,input_ids,(size_t)input_count*sizeof(uint16_t));
-        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)options->seed^(uint64_t)history_len);
-        int max_new=options->max_new_tokens;
+        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)active_options.seed^(uint64_t)history_len);
+        int max_new=active_options.max_new_tokens;
         if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
         int total=generate_ex(model,tok,cache,prompt,prompt_len,output,512,max_new,
-            options->temperature,options->top_k,options->top_p,options->repetition_penalty,&rng);
-        if(total<=prompt_len){puts("BOT: [generation failed]");puts("CHAT_READY");continue;}
+            active_options.temperature,active_options.top_k,active_options.top_p,
+            active_options.repetition_penalty,&rng);
+        if(total<=prompt_len){
+            puts(test_pending ? "TEST: [generation failed]" : "BOT: [generation failed]");
+            active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;
+        }
         int decoded_bytes=tokenizer_decode(tok,output+prompt_len,total-prompt_len,decoded,(int)sizeof(decoded));
         if(decoded_bytes<0)decoded[0]=0;
-        printf("BOT: %s\n",decoded);
-        history_len=total;
-        if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
-        else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
+        printf("%s: %s\n", test_pending ? "TEST" : "BOT", decoded);
+        if (test_pending) {
+            /* A test is isolated: it neither consumes nor changes chat history. */
+            history_len = 0;
+            active_options = *options;
+            test_pending = false;
+        } else {
+            history_len=total;
+            if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
+            else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
+        }
         puts("CHAT_READY");
     }
     puts("CHAT_CLOSED");
