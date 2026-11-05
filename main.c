@@ -16,7 +16,7 @@
 #define LR        3e-4f
 
 int main(void) {
-    printf("tinyllm smoke test – overfitting a short string\n\n");
+    printf("tinyllm smoke test - overfitting a short string\n\n");
 
     // ------------------------------------------------------------------
     // 1. Arenas
@@ -41,15 +41,17 @@ int main(void) {
     // Repeat it so we have enough tokens
     size_t corpus_len = text_len * 40;
     uint8_t* corpus = arena_alloc(&arena, corpus_len + 1);
+    if (!corpus) die("corpus allocation failed");
+
     for (size_t i = 0; i < 40; i++)
         memcpy(corpus + i * text_len, text, text_len);
     corpus[corpus_len] = 0;
 
     // ------------------------------------------------------------------
-    // 3. Tokenizer (tiny vocab for the smoke test)
+    // 3. Tokenizer
     // ------------------------------------------------------------------
     Tokenizer tok;
-    if (!tokenizer_train(&tok, &arena, corpus, corpus_len, 512))
+    if (!tokenizer_train(&tok, &arena, corpus, corpus_len, MODEL_VOCAB_SIZE))
         die("tokenizer_train failed");
     printf("vocab size = %d\n", tok.vocab_size);
 
@@ -57,6 +59,8 @@ int main(void) {
     // 4. Tokenise the whole corpus once
     // ------------------------------------------------------------------
     uint16_t* all_ids = arena_alloc(&arena, corpus_len * sizeof(uint16_t));
+    if (!all_ids) die("token id allocation failed");
+
     int n_tokens = tokenizer_encode(&tok, corpus, corpus_len, all_ids, (int)corpus_len);
     printf("total tokens = %d\n\n", n_tokens);
 
@@ -66,22 +70,7 @@ int main(void) {
     // ------------------------------------------------------------------
     // 5. Model + optimiser + gradients
     // ------------------------------------------------------------------
-    // Override config for the smoke test (much smaller)
-    // (In a real run you keep the values from config.h)
-#undef MODEL_DIM
-#undef MODEL_N_LAYERS
-#undef MODEL_N_HEADS
-#undef MODEL_FFN_DIM
-#undef MODEL_MAX_SEQ
-#undef MODEL_VOCAB_SIZE
-#define MODEL_VOCAB_SIZE  512
-#define MODEL_DIM         64
-#define MODEL_N_LAYERS    2
-#define MODEL_N_HEADS     2
-#define MODEL_HEAD_DIM    32
-#define MODEL_FFN_DIM     128
-#define MODEL_MAX_SEQ     64
-
+    // All translation units now use the same values from config.h.
     Model model;
     if (!model_init(&model, &arena, 42))
         die("model_init failed");
@@ -108,21 +97,26 @@ int main(void) {
     Rng rng;
     rng_seed(&rng, 1234);
 
-    uint16_t* batch_tokens = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
-    uint16_t* batch_targets = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
-    float* dlogits = arena_alloc(&temp, (size_t)BATCH * SEQ * model.vocab_size * sizeof(float));
+    uint16_t* batch_tokens;
+    uint16_t* batch_targets;
+    float* dlogits;
 
     printf("step | loss\n");
     printf("-----+--------\n");
 
     for (int step = 0; step < STEPS; step++) {
-        arena_reset(&temp);   // free all per-step scratch (activations stay valid because we re-init below if needed)
+        // Activations and batch buffers are scratch allocations.
+        arena_reset(&temp);
+        if (!activations_init(&act, &temp, BATCH, SEQ, &model))
+            die("activation allocation failed");
 
-        // Re-init activations after reset (simple approach)
-        activations_init(&act, &temp, BATCH, SEQ, &model);
-        dlogits = arena_alloc(&temp, (size_t)BATCH * SEQ * model.vocab_size * sizeof(float));
+        dlogits = arena_alloc(&temp,
+            (size_t)BATCH * SEQ * model.vocab_size * sizeof(float));
         batch_tokens = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
         batch_targets = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
+
+        if (!dlogits || !batch_tokens || !batch_targets)
+            die("training scratch allocation failed");
 
         // Sample random starting positions
         for (int b = 0; b < BATCH; b++) {
@@ -135,6 +129,7 @@ int main(void) {
 
         // Forward
         float* logits = model_forward(&model, &act, batch_tokens, BATCH, SEQ);
+        if (!logits) die("model_forward failed");
 
         // Loss + dlogits
         float loss = loss_cross_entropy(logits, batch_targets, dlogits,
