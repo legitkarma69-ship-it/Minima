@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x0A00
 #include <windows.h>
 #include <commdlg.h>
 #include <commctrl.h>
@@ -12,6 +13,7 @@
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #define IDC_CORPUS       1001
 #define IDC_ADD          1002
@@ -53,42 +55,205 @@ static BOOL g_use_saved_tokenizer;
 static BOOL g_fresh_used_saved_tokenizer;
 static wchar_t g_prebuilt_vocab[64],g_prebuilt_tokenizer_bytes[64],g_prebuilt_sampling[64];
 static wchar_t g_engine_path[MAX_PATH];
+static HWND g_tooltip;
+static HWND g_group_corpus, g_group_model, g_group_training;
+static HWND g_group_advanced, g_group_monitor, g_group_output;
+static UINT g_dpi = 96;
+static HFONT g_ui_font;
+static HPEN g_graph_grid_pen, g_graph_train_pen, g_graph_valid_pen;
+static float g_graph_train[512], g_graph_valid[512];
+static int g_graph_count;
+
+static int scale_px(int value) {
+    return MulDiv(value, (int)(g_dpi ? g_dpi : 96), 96);
+}
+
+static BOOL CALLBACK set_child_font(HWND child, LPARAM font) {
+    SendMessageW(child, WM_SETFONT, (WPARAM)font, TRUE);
+    return TRUE;
+}
+
+static void rebuild_ui_font(HWND hwnd) {
+    HFONT old_font = g_ui_font;
+    g_ui_font = CreateFontW(-scale_px(9), 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+    if (!g_ui_font) g_ui_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    EnumChildWindows(hwnd, set_child_font, (LPARAM)g_ui_font);
+    if (old_font && old_font != (HFONT)GetStockObject(DEFAULT_GUI_FONT))
+        DeleteObject(old_font);
+}
+
+typedef struct {
+    HWND parent;
+    UINT old_dpi;
+    UINT new_dpi;
+} DpiScaleContext;
+
+static BOOL CALLBACK scale_child_for_dpi(HWND child, LPARAM parameter) {
+    DpiScaleContext* context = (DpiScaleContext*)parameter;
+    RECT rect;
+    if (!GetWindowRect(child, &rect)) return TRUE;
+    MapWindowPoints(NULL, context->parent, (POINT*)&rect, 2);
+    const int x = MulDiv(rect.left, (int)context->new_dpi, (int)context->old_dpi);
+    const int y = MulDiv(rect.top, (int)context->new_dpi, (int)context->old_dpi);
+    const int width = MulDiv(rect.right - rect.left, (int)context->new_dpi, (int)context->old_dpi);
+    const int height = MulDiv(rect.bottom - rect.top, (int)context->new_dpi, (int)context->old_dpi);
+    MoveWindow(child, x, y, width, height, FALSE);
+    return TRUE;
+}
+
+static void layout_controls(HWND hwnd) {
+    RECT client;
+    GetClientRect(hwnd, &client);
+    const int width = client.right;
+    const int height = client.bottom;
+    const int pad = scale_px(12);
+    const int group_left = scale_px(8);
+
+    if (g_group_corpus) MoveWindow(g_group_corpus, group_left, scale_px(6), width - scale_px(16), scale_px(168), TRUE);
+    if (g_group_model) MoveWindow(g_group_model, group_left, scale_px(168), scale_px(585), scale_px(38), TRUE);
+    if (g_group_training) MoveWindow(g_group_training, group_left, scale_px(202), scale_px(585), scale_px(38), TRUE);
+    if (g_group_advanced) MoveWindow(g_group_advanced, group_left, scale_px(236), scale_px(585), scale_px(98), TRUE);
+    if (g_group_monitor) MoveWindow(g_group_monitor, scale_px(590), scale_px(150), width - scale_px(598), scale_px(205), TRUE);
+    if (g_group_output) MoveWindow(g_group_output, group_left, scale_px(375), width - scale_px(16), height - scale_px(380), TRUE);
+
+    if (g_corpus) MoveWindow(g_corpus, pad, scale_px(34), width - 2 * pad, scale_px(105), TRUE);
+    if (g_graph) MoveWindow(g_graph, scale_px(600), scale_px(170), width - scale_px(624), scale_px(175), TRUE);
+    if (g_log) MoveWindow(g_log, pad, scale_px(402), width - 2 * pad, height - scale_px(510), TRUE);
+    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(240), scale_px(26), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(225), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_STOP), width - scale_px(110), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
+}
+
+static void add_tooltip(HWND target, const wchar_t* text) {
+    if (!g_tooltip || !target || !text) return;
+    TOOLINFOW info;
+    ZeroMemory(&info, sizeof(info));
+    info.cbSize = sizeof(info);
+    info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    info.hwnd = g_window;
+    info.uId = (UINT_PTR)target;
+    info.lpszText = (LPWSTR)text;
+    SendMessageW(g_tooltip, TTM_ADDTOOLW, 0, (LPARAM)&info);
+}
+
+static void refresh_graph_metrics(void) {
+    g_graph_count = 0;
+    FILE* file = _wfopen(g_metrics_path, L"rt");
+    if (!file) return;
+
+    char line[512];
+    if (fseek(file, 0, SEEK_END) == 0) {
+        long end = ftell(file);
+        long start = end > 262144 ? end - 262144 : 0;
+        if (start > 0) {
+            fseek(file, start, SEEK_SET);
+            (void)fgets(line, sizeof(line), file);
+        } else {
+            rewind(file);
+            (void)fgets(line, sizeof(line), file);
+        }
+    }
+    while (fgets(line, sizeof(line), file)) {
+        double step, train, valid, lr, train_ppl, valid_ppl, elapsed;
+        if (sscanf_s(line, "%lf,%lf,%lf,%lf,%lf,%lf,%lf", &step, &train, &valid, &lr, &train_ppl, &valid_ppl, &elapsed) == 7) {
+            if (g_graph_count == 512) {
+                memmove(g_graph_train, g_graph_train + 1, 511 * sizeof(float));
+                memmove(g_graph_valid, g_graph_valid + 1, 511 * sizeof(float));
+                g_graph_count = 511;
+            }
+            g_graph_train[g_graph_count] = (float)train;
+            g_graph_valid[g_graph_count] = (float)valid;
+            ++g_graph_count;
+        }
+    }
+    fclose(file);
+}
 
 static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     (void)wp; (void)lp;
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps; HDC dc=BeginPaint(hwnd,&ps);
-        RECT r; GetClientRect(hwnd,&r); FillRect(dc,&r,(HBRUSH)(COLOR_WINDOW+1));
-        SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(40,40,40));
-        TextOutW(dc,8,6,L"Training / validation loss",26);
-        int left=42,top=30,right=r.right-12,bottom=r.bottom-24;
-        HPEN grid=CreatePen(PS_SOLID,1,RGB(220,220,220)); HPEN old=(HPEN)SelectObject(dc,grid);
-        for(int i=0;i<=4;i++){int y=top+(bottom-top)*i/4;MoveToEx(dc,left,y,NULL);LineTo(dc,right,y);}
-        SelectObject(dc,old);DeleteObject(grid);
-        float tr[512],va[512];int n=0;FILE* f=_wfopen(g_metrics_path,L"rt");
-        if(f){
-            char line[512];
-            if(fseek(f,0,SEEK_END)==0){
-                long end=ftell(f),start=end>262144?end-262144:0;
-                if(start>0){fseek(f,start,SEEK_SET);(void)fgets(line,sizeof(line),f);}
-                else {rewind(f);(void)fgets(line,sizeof(line),f);}
-            }
-            while(fgets(line,sizeof(line),f)){
-            double step,a,b,lr,tp,vp,elapsed;
-            if(sscanf_s(line,"%lf,%lf,%lf,%lf,%lf,%lf,%lf",&step,&a,&b,&lr,&tp,&vp,&elapsed)==7){
-                if(n==512){memmove(tr,tr+1,511*sizeof(float));memmove(va,va+1,511*sizeof(float));n=511;}
-                tr[n]=(float)a;va[n]=(float)b;n++;
-            }}fclose(f);}
-        if(n>1){float lo=tr[0],hi=tr[0];for(int i=0;i<n;i++){if(va[i]<lo)lo=va[i];if(tr[i]<lo)lo=tr[i];if(va[i]>hi)hi=va[i];if(tr[i]>hi)hi=tr[i];}
-            if(hi-lo<0.001f)hi=lo+0.001f;
-            HPEN p1=CreatePen(PS_SOLID,2,RGB(35,105,190)),p2=CreatePen(PS_SOLID,2,RGB(190,85,45));
-            for(int s=0;s<2;s++){SelectObject(dc,s?p2:p1);for(int i=0;i<n;i++){float v=s?va[i]:tr[i];int x=left+(right-left)*i/(n-1);int y=bottom-(int)((v-lo)/(hi-lo)*(bottom-top));if(i==0)MoveToEx(dc,x,y,NULL);else LineTo(dc,x,y);}}
-            SelectObject(dc,GetStockObject(BLACK_PEN));DeleteObject(p1);DeleteObject(p2);
-            wchar_t legend[96];swprintf_s(legend,_countof(legend),L"Train %.3f   Valid %.3f",tr[n-1],va[n-1]);TextOutW(dc,left,bottom+5,legend,(int)wcslen(legend));
-        }else TextOutW(dc,left,top+35,L"Waiting for training metrics...",31);
-        EndPaint(hwnd,&ps);return 0;
+    if (msg == WM_CREATE) {
+        g_graph_grid_pen = CreatePen(PS_SOLID, 1, RGB(220,220,220));
+        g_graph_train_pen = CreatePen(PS_SOLID, 2, RGB(35,105,190));
+        g_graph_valid_pen = CreatePen(PS_SOLID, 2, RGB(190,85,45));
+        return 0;
     }
-    return DefWindowProcW(hwnd,msg,wp,lp);
+    if (msg == WM_DESTROY) {
+        if (g_graph_grid_pen) { DeleteObject(g_graph_grid_pen); g_graph_grid_pen = NULL; }
+        if (g_graph_train_pen) { DeleteObject(g_graph_train_pen); g_graph_train_pen = NULL; }
+        if (g_graph_valid_pen) { DeleteObject(g_graph_valid_pen); g_graph_valid_pen = NULL; }
+        return 0;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+        const int width = rect.right - rect.left;
+        const int height = rect.bottom - rect.top;
+        HDC back = CreateCompatibleDC(dc);
+        HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+        HGDIOBJ old_bitmap = SelectObject(back, bitmap);
+        FillRect(back, &rect, (HBRUSH)(COLOR_WINDOW + 1));
+        SetBkMode(back, TRANSPARENT);
+        SetTextColor(back, RGB(40,40,40));
+        TextOutW(back, scale_px(8), scale_px(5), L"Training / validation loss", 26);
+
+        const int left = scale_px(58), top = scale_px(30);
+        const int right = width - scale_px(12), bottom = height - scale_px(27);
+        float low = 0.0f, high = 1.0f;
+        if (g_graph_count > 0) {
+            low = g_graph_train[0];
+            high = g_graph_train[0];
+            for (int i = 0; i < g_graph_count; ++i) {
+                if (g_graph_train[i] < low) low = g_graph_train[i];
+                if (g_graph_valid[i] < low) low = g_graph_valid[i];
+                if (g_graph_train[i] > high) high = g_graph_train[i];
+                if (g_graph_valid[i] > high) high = g_graph_valid[i];
+            }
+            if (high - low < 0.001f) high = low + 0.001f;
+        }
+
+        if (g_graph_grid_pen) SelectObject(back, g_graph_grid_pen);
+        for (int i = 0; i <= 4; ++i) {
+            const int y = top + (bottom - top) * i / 4;
+            MoveToEx(back, left, y, NULL);
+            LineTo(back, right, y);
+            wchar_t label[24];
+            const float value = high - (high - low) * (float)i / 4.0f;
+            swprintf_s(label, _countof(label), L"%.2f", value);
+            TextOutW(back, scale_px(3), y - scale_px(7), label, (int)wcslen(label));
+        }
+
+        if (g_graph_count > 1) {
+            for (int series = 0; series < 2; ++series) {
+                SelectObject(back, series ? g_graph_valid_pen : g_graph_train_pen);
+                for (int i = 0; i < g_graph_count; ++i) {
+                    const float value = series ? g_graph_valid[i] : g_graph_train[i];
+                    const int x = left + (right - left) * i / (g_graph_count - 1);
+                    const int y = bottom - (int)((value - low) / (high - low) * (bottom - top));
+                    if (i == 0) MoveToEx(back, x, y, NULL);
+                    else LineTo(back, x, y);
+                }
+            }
+            wchar_t legend[96];
+            swprintf_s(legend, _countof(legend), L"Train %.3f   Valid %.3f", g_graph_train[g_graph_count - 1], g_graph_valid[g_graph_count - 1]);
+            SetTextColor(back, RGB(35,105,190));
+            TextOutW(back, left, bottom + scale_px(5), legend, (int)wcslen(legend));
+        } else {
+            TextOutW(back, left, top + scale_px(35), L"Waiting for training metrics...", 31);
+        }
+
+        BitBlt(dc, 0, 0, width, height, back, 0, 0, SRCCOPY);
+        SelectObject(back, old_bitmap);
+        DeleteObject(bitmap);
+        DeleteDC(back);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 static void save_chat_text(const wchar_t* text) {
@@ -799,7 +964,23 @@ static void save_settings(void) {
 }
 
 static void create_controls(HWND hwnd) {
-    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    g_dpi = GetDpiForWindow(hwnd);
+    if (!g_dpi) g_dpi = 96;
+    rebuild_ui_font(hwnd);
+
+    g_group_corpus = CreateWindowW(L"BUTTON", L"Corpus", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 6, 920, 168, hwnd, NULL, NULL, NULL);
+    g_group_model = CreateWindowW(L"BUTTON", L"Model", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 168, 585, 38, hwnd, NULL, NULL, NULL);
+    g_group_training = CreateWindowW(L"BUTTON", L"Training", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 202, 585, 38, hwnd, NULL, NULL, NULL);
+    g_group_advanced = CreateWindowW(L"BUTTON", L"Advanced / generation", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 236, 585, 98, hwnd, NULL, NULL, NULL);
+    g_group_monitor = CreateWindowW(L"BUTTON", L"Monitor", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        590, 150, 340, 205, hwnd, NULL, NULL, NULL);
+    g_group_output = CreateWindowW(L"BUTTON", L"Output / chat", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 375, 920, 350, hwnd, NULL, NULL, NULL);
+    HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, hwnd, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
         12, 34, 520, 105, hwnd, (HMENU)IDC_CORPUS, NULL, NULL);
@@ -863,7 +1044,7 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,309,65,18,hwnd,NULL,NULL,NULL);
     g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,306,70,23,hwnd,NULL,NULL,NULL);
 
-    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,hwnd,(HMENU)IDC_SAVE_NOW,NULL,NULL);
@@ -891,6 +1072,27 @@ static void create_controls(HWND hwnd) {
         g_batch_size,g_sequence_length,g_total_steps };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
+    EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
+
+    g_tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT, CW_USEDEFAULT,
+        CW_USEDEFAULT, CW_USEDEFAULT, hwnd, NULL, GetModuleHandleW(NULL), NULL);
+    if (g_tooltip) {
+        SendMessageW(g_tooltip, TTM_SETMAXTIPWIDTH, 0, scale_px(320));
+        SendMessageW(g_tooltip, TTM_SETDELAYTIME, TTDT_INITIAL, 500);
+        add_tooltip(g_steps, L"Number of additional optimizer updates in this run.");
+        add_tooltip(g_total_steps, L"Global learning-rate schedule horizon for a fresh run. Resume restores the horizon stored in the checkpoint.");
+        add_tooltip(g_batch_size, L"Number of independent training sequences in each update.");
+        add_tooltip(g_sequence_length, L"Number of tokens processed per sequence. Must not exceed model context length.");
+        add_tooltip(g_lr, L"Base learning rate. The cosine or constant schedule is applied to this value.");
+        add_tooltip(g_warmup, L"Number of initial optimizer steps used for linear learning-rate warmup.");
+        add_tooltip(g_tokenizer_bytes, L"Maximum corpus bytes sampled when training the BPE tokenizer.");
+        add_tooltip(g_lr_schedule, L"Cosine decay reaches zero at the saved global schedule horizon. Constant keeps the base rate.");
+        add_tooltip(g_tokenizer_sampling, L"Spread samples across the corpus; prefix samples from the beginning.");
+        add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
+        add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
+        add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
+    }
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
@@ -936,25 +1138,42 @@ static void create_controls(HWND hwnd) {
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE:
-        g_window = hwnd; create_controls(hwnd); SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL); return 0;
+        g_window = hwnd;
+        create_controls(hwnd);
+        refresh_graph_metrics();
+        SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL);
+        return 0;
     case WM_TIMER:
-        if(wp==IDT_GRAPH_REFRESH && g_graph) InvalidateRect(g_graph,NULL,FALSE);
+        if(wp==IDT_GRAPH_REFRESH && g_graph) {
+            refresh_graph_metrics();
+            InvalidateRect(g_graph,NULL,FALSE);
+        }
         return 0;
     case WM_GETMINMAXINFO: {
         MINMAXINFO* info=(MINMAXINFO*)lp;
-        info->ptMinTrackSize.x=960;
-        info->ptMinTrackSize.y=780;
+        info->ptMinTrackSize.x=scale_px(960);
+        info->ptMinTrackSize.y=scale_px(780);
         return 0;
     }
-    case WM_SIZE: {
-        RECT r;
-        GetClientRect(hwnd, &r);
-        MoveWindow(g_corpus,12,34,r.right-24,95,TRUE);
-        MoveWindow(g_graph,r.right-320,170,285,175,TRUE);
-        MoveWindow(g_log,12,402,r.right-24,r.bottom-510,TRUE);
-        MoveWindow(g_chat_input,12,r.bottom-75,r.right-240,26,TRUE);
-        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),r.right-225,r.bottom-75,110,26,TRUE);
-        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),r.right-110,r.bottom-75,100,26,TRUE);
+    case WM_SIZE:
+        if (wp != SIZE_MINIMIZED) layout_controls(hwnd);
+        return 0;
+    case WM_DPICHANGED: {
+        const UINT old_dpi = g_dpi ? g_dpi : 96;
+        UINT new_dpi = HIWORD(wp);
+        if (!new_dpi) new_dpi = old_dpi;
+        RECT* suggested = (RECT*)lp;
+        SetWindowPos(hwnd, NULL, suggested->left, suggested->top,
+            suggested->right - suggested->left,
+            suggested->bottom - suggested->top,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        DpiScaleContext context = { hwnd, old_dpi, new_dpi };
+        EnumChildWindows(hwnd, scale_child_for_dpi, (LPARAM)&context);
+        g_dpi = new_dpi;
+        rebuild_ui_font(hwnd);
+        layout_controls(hwnd);
+        refresh_graph_metrics();
+        if (g_graph) InvalidateRect(g_graph, NULL, FALSE);
         return 0;
     }
     case WM_COMMAND:
@@ -1023,6 +1242,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        KillTimer(hwnd, IDT_GRAPH_REFRESH);
+        if (g_ui_font && g_ui_font != (HFONT)GetStockObject(DEFAULT_GUI_FONT)) {
+            DeleteObject(g_ui_font);
+            g_ui_font = NULL;
+        }
         PostQuitMessage(0);
         return 0;
     }
@@ -1031,6 +1255,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
     (void)previous; (void)command_line;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    g_dpi = GetDpiForSystem();
+    if (!g_dpi) g_dpi = 96;
     INITCOMMONCONTROLSEX controls = { sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS };
     InitCommonControlsEx(&controls);
 
@@ -1061,8 +1288,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if (!RegisterClassW(&wc)) return 1;
 
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"ProjectMinima",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 960, 780,
-        NULL, NULL, instance, NULL);
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+        scale_px(960), scale_px(780), NULL, NULL, instance, NULL);
     if (!hwnd) return 1;
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
