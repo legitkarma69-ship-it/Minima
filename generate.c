@@ -11,8 +11,13 @@
 
 bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq) {
     if (!cache || !arena || !model || max_seq <= 0 ||
-        max_seq > model->max_seq || model->n_layers <= 0 ||
-        model->dim <= 0)
+        max_seq > model->max_seq || max_seq > 512 ||
+        model->n_layers <= 0 || model->dim <= 0 ||
+        model->dim > 512 || model->ffn_dim <= 0 ||
+        model->ffn_dim > 1024 || model->vocab_size <= 0 ||
+        model->vocab_size > 8192 || model->n_heads <= 0 ||
+        model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim)
         return false;
 
     memset(cache, 0, sizeof(*cache));
@@ -313,7 +318,11 @@ int generate(Model* model, Tokenizer* tok, KVCache* cache,
         model->n_heads * model->head_dim != model->dim ||
         cache->n_layers != model->n_layers ||
         cache->dim != model->dim ||
-        cache->max_seq <= 0 || cache->max_seq > 512)
+        cache->n_heads != model->n_heads ||
+        cache->head_dim != model->head_dim ||
+        !cache->k_cache || !cache->v_cache ||
+        cache->max_seq <= 0 || cache->max_seq > 512 ||
+        tok->vocab_size != model->vocab_size)
         return 0;
 
     if (prompt_len > out_cap || prompt_len > cache->max_seq)
