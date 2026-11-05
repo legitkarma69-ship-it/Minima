@@ -36,6 +36,7 @@ typedef struct {
     uint64_t seed;
     size_t tokenizer_sample_bytes;
     const char* metrics_path;
+    const char* stop_file;
 } TrainOptions;
 
 static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
@@ -123,6 +124,14 @@ static float evaluate_loss(Model* model, Arena* temp,
     return (float)(loss_sum / validation_batches);
 }
 
+static bool stop_file_exists(const char* path) {
+    if (!path || !path[0]) return false;
+    FILE* f=fopen(path,"rb");
+    if (!f) return false;
+    fclose(f);
+    return true;
+}
+
 static int parse_arguments(int argc, char** argv, bool* resume,
     bool* diagnostics_only, int* steps, const char** corpus_paths, TrainOptions* o) {
     int path_count = 0;
@@ -131,7 +140,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
-    o->metrics_path="minima_metrics.csv";
+    o->metrics_path="minima_metrics.csv"; o->stop_file=NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -169,9 +178,11 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (++i >= argc) die("--lr requires a value");
             o->learning_rate=parse_float_value("--lr",argv[i],1e-7f,1.0f);
         }
-        else if (strcmp(argv[i], "--metrics") == 0) {
-            if (++i >= argc || !argv[i][0]) die("--metrics requires a path");
-            o->metrics_path=argv[i];
+        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0) {
+            const char* option=argv[i];
+            if (++i >= argc || !argv[i][0]) die("%s requires a path",option);
+            if (strcmp(option,"--metrics")==0) o->metrics_path=argv[i];
+            else o->stop_file=argv[i];
         }
         else if (argv[i][0] == '-') {
             die("unknown option: %s (use --help)", argv[i]);
@@ -691,7 +702,8 @@ int main(int argc, char** argv) {
         train_loss_count++;
 
         if ((local_step + 1) % options.log_interval == 0 ||
-            local_step == steps_to_run - 1) {
+            local_step == steps_to_run - 1 ||
+            stop_file_exists(options.stop_file)) {
             const float validation_loss = evaluate_loss(&model, &temp,
                 all_ids, train_tokens, validation_tokens, options.validation_batches);
             if (!isfinite(validation_loss))
@@ -707,6 +719,11 @@ int main(int argc, char** argv) {
                 expf((float)average_train_loss),expf(validation_loss),elapsed);
             fflush(metrics);
             train_loss_sum=0.0; train_loss_count=0;
+            if (stop_file_exists(options.stop_file)) {
+                printf("Cooperative stop requested; saving checkpoint and stopping after optimizer step %lld.\\n",
+                    (long long)opt.step);
+                break;
+            }
         }
     }
 
