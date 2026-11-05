@@ -18,6 +18,10 @@
 #define IDC_STOP         1007
 #define IDC_LOG          1008
 #define IDC_STATUS       1009
+#define IDC_CHAT_START   1010
+#define IDC_CHAT_INPUT   1011
+#define IDC_CHAT_SEND    1012
+#define IDC_CHAT_STOP    1013
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define IDT_GRAPH_REFRESH 1
@@ -25,8 +29,10 @@
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
 static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph;
+static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
 static wchar_t g_metrics_path[MAX_PATH];
-static HANDLE g_process, g_thread;
+static HANDLE g_process, g_thread, g_stdin_write;
+static BOOL g_chat_mode;
 static volatile LONG g_running;
 static BOOL g_close_when_done;
 static wchar_t g_engine_path[MAX_PATH];
@@ -197,37 +203,41 @@ static BOOL append_option(wchar_t* command, size_t capacity,
     return TRUE;
 }
 
-static void start_engine(void) {
+static void start_engine(BOOL chat_mode) {
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
 
-    wchar_t steps[32], command[32768];
-    GetWindowTextW(g_steps, steps, _countof(steps));
-    wchar_t* end = NULL;
-    long count = wcstol(steps, &end, 10);
-    if (!end || *end || count < 1 || count > 2147483647L) {
-        MessageBoxW(g_window, L"Enter a positive training-step count.", L"ProjectMinima", MB_ICONWARNING);
-        return;
+    wchar_t command[32768];
+    if(chat_mode){
+        _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%s\" --chat --resume",g_engine_path);
+        if(!append_option(command,_countof(command),L"--temperature",g_temperature) ||
+           !append_option(command,_countof(command),L"--top-k",g_top_k) ||
+           !append_option(command,_countof(command),L"--top-p",g_top_p) ||
+           !append_option(command,_countof(command),L"--repetition-penalty",g_repetition) ||
+           !append_option(command,_countof(command),L"--max-new-tokens",g_max_tokens)){
+            MessageBoxW(g_window,L"Check the generation settings.",L"ProjectMinima",MB_ICONWARNING);return;
+        }
+    } else {
+        wchar_t steps[32];GetWindowTextW(g_steps,steps,_countof(steps));
+        wchar_t* end=NULL;long count=wcstol(steps,&end,10);
+        if(!end||*end||count<1||count>2147483647L){MessageBoxW(g_window,L"Enter a positive training-step count.",L"ProjectMinima",MB_ICONWARNING);return;}
+        _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%s\" --steps %ld",g_engine_path,count);
+        if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED)wcscat_s(command,_countof(command),L" --resume");
+        if(!append_option(command,_countof(command),L"--lr",g_lr) ||
+           !append_option(command,_countof(command),L"--warmup",g_warmup) ||
+           !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
+           !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
+           !append_option(command,_countof(command),L"--checkpoint-interval",g_checkpoint_interval) ||
+           !append_option(command,_countof(command),L"--seed",g_seed) ||
+           !append_option(command,_countof(command),L"--tokenizer-sample-bytes",g_tokenizer_bytes)){
+            MessageBoxW(g_window,L"Check the training settings.",L"ProjectMinima",MB_ICONWARNING);return;
+        }
+        wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\"");
+        wchar_t stop_path[MAX_PATH];wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
+        wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
+        if(stop_slash)wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
+        DeleteFileW(stop_path);
     }
-
-    _snwprintf_s(command, _countof(command), _TRUNCATE, L"\"%s\" --steps %ld", g_engine_path, count);
-    if (SendMessageW(g_resume, BM_GETCHECK, 0, 0) == BST_CHECKED)
-        wcscat_s(command, _countof(command), L" --resume");
-    if (!append_option(command,_countof(command),L"--lr",g_lr) ||
-        !append_option(command,_countof(command),L"--warmup",g_warmup) ||
-        !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
-        !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
-        !append_option(command,_countof(command),L"--checkpoint-interval",g_checkpoint_interval) ||
-        !append_option(command,_countof(command),L"--seed",g_seed) ||
-        !append_option(command,_countof(command),L"--tokenizer-sample-bytes",g_tokenizer_bytes)) {
-        MessageBoxW(g_window,L"One or more training settings are empty or too long.",L"ProjectMinima",MB_ICONWARNING);
-        return;
-    }
-    wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\"");
-    wchar_t stop_path[MAX_PATH];
-    wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
-    wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
-    if (stop_slash) wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
-    DeleteFileW(stop_path);
+    g_chat_mode=chat_mode;
 
     int corpus_count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
@@ -240,12 +250,19 @@ static void start_engine(void) {
     }
 
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
-    HANDLE read_pipe = NULL, write_pipe = NULL;
-    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0)) {
+    HANDLE read_pipe=NULL,write_pipe=NULL,child_stdin=NULL;
+    if(!CreatePipe(&read_pipe,&write_pipe,&sa,0)){
         MessageBoxW(g_window, L"Could not create the engine output pipe.", L"ProjectMinima", MB_ICONERROR);
         return;
     }
-    SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(read_pipe,HANDLE_FLAG_INHERIT,0);
+    if(chat_mode){
+        if(!CreatePipe(&child_stdin,&g_stdin_write,&sa,0)){
+            CloseHandle(read_pipe);CloseHandle(write_pipe);
+            MessageBoxW(g_window,L"Could not create chat input pipe.",L"ProjectMinima",MB_ICONERROR);return;
+        }
+        SetHandleInformation(g_stdin_write,HANDLE_FLAG_INHERIT,0);
+    }
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -256,7 +273,7 @@ static void start_engine(void) {
     si.wShowWindow = SW_HIDE;
     si.hStdOutput = write_pipe;
     si.hStdError = write_pipe;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdInput = chat_mode ? child_stdin : GetStdHandle(STD_INPUT_HANDLE);
 
     wchar_t working_dir[MAX_PATH];
     wcscpy_s(working_dir, _countof(working_dir), g_engine_path);
@@ -265,16 +282,21 @@ static void start_engine(void) {
 
     if (!CreateProcessW(g_engine_path, command, NULL, NULL, TRUE,
         CREATE_NO_WINDOW, NULL, working_dir, &si, &pi)) {
-        CloseHandle(read_pipe);
-        CloseHandle(write_pipe);
-        MessageBoxW(g_window, L"Could not start Minima.exe. Make sure it is beside MinimaGUI.exe.", L"ProjectMinima", MB_ICONERROR);
+        CloseHandle(read_pipe);CloseHandle(write_pipe);
+        if(child_stdin)CloseHandle(child_stdin);
+        if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
+        MessageBoxW(g_window,L"Could not start Minima.exe. Make sure it is beside MinimaGUI.exe.",L"ProjectMinima",MB_ICONERROR);
         return;
     }
     CloseHandle(write_pipe);
+    if(child_stdin)CloseHandle(child_stdin);
     g_process = pi.hProcess;
     CloseHandle(pi.hThread);
     set_running(TRUE);
-    append_log(L"\r\n--- Starting Minima engine ---\r\n");
+    EnableWindow(g_chat_input,chat_mode);
+    EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),chat_mode);
+    EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
+    append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":L"\r\n--- Starting Minima training engine ---\r\n");
     g_thread = CreateThread(NULL, 0, reader_thread, read_pipe, 0, NULL);
     if (!g_thread) {
         TerminateProcess(g_process, 1);
@@ -294,6 +316,28 @@ static void request_cooperative_stop(void) {
     HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if (file!=INVALID_HANDLE_VALUE) CloseHandle(file);
     append_log(L"Stop requested. The engine will finish the current step and save a checkpoint.\\r\\n");
+}
+
+static void send_chat_message(void) {
+    if(!g_stdin_write || !g_chat_mode)return;
+    wchar_t wide[4096];GetWindowTextW(g_chat_input,wide,_countof(wide));
+    if(!wide[0])return;
+    int needed=WideCharToMultiByte(CP_UTF8,0,wide,-1,NULL,0,NULL,NULL);
+    if(needed<=1)return;
+    char* utf8=(char*)malloc((size_t)needed+2);if(!utf8)return;
+    WideCharToMultiByte(CP_UTF8,0,wide,-1,utf8,needed,NULL,NULL);
+    size_t len=strlen(utf8);utf8[len++]='\\n';
+    DWORD written=0;
+    append_log(L"\r\nYou: ");append_log(wide);append_log(L"\r\n");
+    WriteFile(g_stdin_write,utf8,(DWORD)len,&written,NULL);
+    free(utf8);SetWindowTextW(g_chat_input,L"");
+}
+
+static void stop_generation(void) {
+    if(g_process && g_chat_mode && InterlockedCompareExchange(&g_running,0,0)){
+        append_log(L"\r\nStopping generation...\r\n");
+        TerminateProcess(g_process,3);
+    }
 }
 
 static void stop_engine(void) {
@@ -332,19 +376,36 @@ static void create_controls(HWND hwnd) {
 
     CreateWindowW(L"STATIC",L"Tokenizer sample bytes",WS_CHILD|WS_VISIBLE,12,278,135,18,hwnd,NULL,NULL,NULL);
     g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,150,275,100,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,270,278,40,18,hwnd,NULL,NULL,NULL);
+    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,310,275,48,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,365,278,40,18,hwnd,NULL,NULL,NULL);
+    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,405,275,45,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,458,278,40,18,hwnd,NULL,NULL,NULL);
+    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,498,275,48,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,12,309,48,18,hwnd,NULL,NULL,NULL);
+    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,62,306,48,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,120,309,75,18,hwnd,NULL,NULL,NULL);
+    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,198,306,48,23,hwnd,NULL,NULL,NULL);
 
-    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,310,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,310,80,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
-    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,240,316,280,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
+    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,360,346,190,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL,NULL);
 
     g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,580,170,285,175,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Engine output / training metrics",WS_CHILD|WS_VISIBLE,12,350,300,20,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
     g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
-        12,372,850,280,hwnd,(HMENU)IDC_LOG,NULL,NULL);
+        12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
+    g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL,
+        12,665,700,26,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
+    EnableWindow(g_chat_input,FALSE);
+    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,720,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,835,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
-        g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph };
+        g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
+        g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 }
@@ -360,7 +421,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         RECT r;
         GetClientRect(hwnd, &r);
         MoveWindow(g_corpus,12,34,r.right-24,95,TRUE);
-        MoveWindow(g_log,12,372,r.right-24,r.bottom-384,TRUE);
+        MoveWindow(g_graph,r.right-320,170,285,175,TRUE);
+        MoveWindow(g_log,12,402,r.right-24,r.bottom-510,TRUE);
+        MoveWindow(g_chat_input,12,r.bottom-75,r.right-205,26,TRUE);
+        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),r.right-185,r.bottom-75,110,26,TRUE);
+        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),r.right-70,r.bottom-75,100,26,TRUE);
         return 0;
     }
     case WM_COMMAND:
@@ -373,8 +438,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
             return 0;
         }
-        case IDC_START: start_engine(); return 0;
+        case IDC_START: start_engine(FALSE); return 0;
         case IDC_STOP: stop_engine(); return 0;
+        case IDC_CHAT_START: start_engine(TRUE); return 0;
+        case IDC_CHAT_SEND: send_chat_message(); return 0;
+        case IDC_CHAT_STOP: stop_generation(); return 0;
         }
         break;
     case WM_APPEND_LOG:
@@ -384,16 +452,21 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ENGINE_EXIT:
         if (g_process) { CloseHandle(g_process); g_process = NULL; }
         if (g_thread) { CloseHandle(g_thread); g_thread = NULL; }
+        if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write=NULL; }
+        EnableWindow(g_chat_input,FALSE);
+        EnableWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),FALSE);
+        EnableWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),FALSE);
         set_running(FALSE);
         append_log(wp == 0 ? L"\r\n--- Engine exited successfully ---\r\n" : L"\r\n--- Engine exited with an error ---\r\n");
+        g_chat_mode=FALSE;
         if (g_close_when_done) DestroyWindow(hwnd);
         return 0;
     case WM_CLOSE:
         if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
-            if (MessageBoxW(hwnd,L"Training is running. Request a graceful stop, save a checkpoint, then close?",
+            if (MessageBoxW(hwnd,L"An engine process is running. Stop it and close?",
                 L"ProjectMinima",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
             g_close_when_done=TRUE;
-            request_cooperative_stop();
+            if(g_chat_mode)TerminateProcess(g_process,3);else request_cooperative_stop();
             return 0;
         }
         DestroyWindow(hwnd);
@@ -434,7 +507,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if (!RegisterClassW(&wc)) return 1;
 
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"ProjectMinima",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 900, 720,
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 960, 780,
         NULL, NULL, instance, NULL);
     if (!hwnd) return 1;
     ShowWindow(hwnd, show);
