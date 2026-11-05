@@ -26,6 +26,7 @@
 #define IDC_SAVE_NOW     1014
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
+#define WM_CHAT_READY    (WM_APP + 3)
 #define IDT_GRAPH_REFRESH 1
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
@@ -144,8 +145,10 @@ static DWORD WINAPI reader_thread(void* parameter) {
             carry[used++] = buffer[i];
             if (buffer[i] == '\n' || used >= 8000) {
                 carry[used] = 0;
-                if((used==11 && memcmp(carry,"CHAT_READY\n",11)==0) ||
-                   (used==12 && memcmp(carry,"CHAT_CLOSED\n",12)==0)){used=0;continue;}
+                if(used==11 && memcmp(carry,"CHAT_READY\n",11)==0){
+                    PostMessageW(g_window,WM_CHAT_READY,0,0);used=0;continue;
+                }
+                if(used==12 && memcmp(carry,"CHAT_CLOSED\n",12)==0){used=0;continue;}
                 UINT code_page=CP_UTF8;
                 int needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);
                 if(needed<=0){code_page=CP_ACP;needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);}
@@ -378,7 +381,7 @@ static void start_engine(BOOL chat_mode) {
     EnableWindow(GetDlgItem(g_window,IDC_STOP),!chat_mode);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     EnableWindow(g_chat_input,chat_mode);
-    EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),chat_mode);
+    EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":L"\r\n--- Starting Minima training engine ---\r\n");
     g_thread = CreateThread(NULL, 0, reader_thread, read_pipe, 0, NULL);
@@ -416,9 +419,14 @@ static void send_chat_message(void) {
     WideCharToMultiByte(CP_UTF8,0,wide,-1,utf8,needed,NULL,NULL);
     size_t len=strlen(utf8);utf8[len++]='\n';
     DWORD written=0;
+    if(!WriteFile(g_stdin_write,utf8,(DWORD)len,&written,NULL) || written!=(DWORD)len){
+        append_log(L"\r\nCould not send the complete chat message to the engine.\r\n");
+        EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),TRUE);
+        free(utf8);return;
+    }
     append_log(L"\r\nYou: ");append_log(wide);append_log(L"\r\n");
-    WriteFile(g_stdin_write,utf8,(DWORD)len,&written,NULL);
     free(utf8);SetWindowTextW(g_chat_input,L"");
+    EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
 }
 
 static void stop_generation(void) {
@@ -593,6 +601,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDC_SAVE_NOW: request_checkpoint_save(); return 0;
         }
         break;
+    case WM_CHAT_READY:
+        if(g_chat_mode && InterlockedCompareExchange(&g_running,0,0))
+            EnableWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),TRUE);
+        return 0;
     case WM_APPEND_LOG:
         append_log((const wchar_t*)lp);
         free((void*)lp);
@@ -604,9 +616,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         EnableWindow(g_chat_input,FALSE);
         EnableWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),FALSE);
         EnableWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),FALSE);
+        g_chat_mode=FALSE;
         set_running(FALSE);
         append_log(wp == 0 ? L"\r\n--- Engine exited successfully ---\r\n" : L"\r\n--- Engine exited with an error ---\r\n");
-        g_chat_mode=FALSE;
         if (g_close_when_done) DestroyWindow(hwnd);
         return 0;
     case WM_CLOSE:
