@@ -222,24 +222,28 @@ bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
 
     float x[512];
     float cached_logits[8192];
-    kvcache_reset(cache);
-    for (int i = 0; i < seq; i++)
-        forward_one(model, cache, tokens[i], x, cached_logits);
-
     float max_abs = 0.0f;
     float max_rel = 0.0f;
-    const float* expected = full_logits + (size_t)(seq - 1) * model->vocab_size;
 
-    for (int i = 0; i < model->vocab_size; i++) {
-        float diff = fabsf(expected[i] - cached_logits[i]);
-        float denom = fmaxf(fabsf(expected[i]), 1e-6f);
-        float rel = diff / denom;
-        if (diff > max_abs) max_abs = diff;
-        if (rel > max_rel) max_rel = rel;
+    // Compare every incremental prefix, not only the final prompt position.
+    // This catches errors in position handling and cache updates during prefill.
+    kvcache_reset(cache);
+    for (int pos = 0; pos < seq; pos++) {
+        forward_one(model, cache, tokens[pos], x, cached_logits);
+        const float* expected = full_logits +
+            (size_t)pos * model->vocab_size;
+
+        for (int i = 0; i < model->vocab_size; i++) {
+            const float diff = fabsf(expected[i] - cached_logits[i]);
+            const float denom = fmaxf(fabsf(expected[i]), 1e-6f);
+            const float rel = diff / denom;
+            if (diff > max_abs) max_abs = diff;
+            if (rel > max_rel) max_rel = rel;
+        }
     }
 
     printf("KV-cache parity check\n");
-    printf("  sequence length : %d\n", seq);
+    printf("  prefix positions: %d\n", seq);
     printf("  max abs error   : %.8e\n", max_abs);
     printf("  max rel error   : %.8e\n", max_rel);
     printf("  tolerance       : %.8e\n", tolerance);
