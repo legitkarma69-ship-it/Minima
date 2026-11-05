@@ -202,7 +202,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         params != (uint64_t)model_parameter_count(model) ||
         params != (uint64_t)opt->n_params ||
         saved_tokenizer_hash != tokenizer_hash ||
-        step < 0 || !isfinite(lr) || lr <= 0.0f ||
+        step < 0 || !isfinite(lr) || lr < 0.0f ||
         !isfinite(beta1) || beta1 < 0.0f || beta1 >= 1.0f ||
         !isfinite(beta2) || beta2 < 0.0f || beta2 >= 1.0f ||
         !isfinite(eps) || eps <= 0.0f ||
