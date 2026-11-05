@@ -47,6 +47,7 @@ typedef struct {
     ModelConfig model;
     const char* lr_schedule;
     bool tokenizer_spread;
+    bool tokenizer_only;
 } TrainOptions;
 
 static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
@@ -82,6 +83,7 @@ static void print_usage(const char* exe) {
     printf("  --lr-schedule cosine|constant --tokenizer-sampling spread|prefix\n");
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
+    printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
     printf("  --diagnostics-only --help\n");
 }
 
@@ -212,6 +214,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
     o->total_steps=0; o->total_steps_explicit=false;
+    o->tokenizer_only=false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -223,6 +226,9 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         }
         else if (strcmp(argv[i], "--diagnostics-only") == 0) {
             *diagnostics_only = true;
+        }
+        else if (strcmp(argv[i], "--retrain-tokenizer-only") == 0) {
+            o->tokenizer_only = true;
         }
         else if (strcmp(argv[i], "--chat") == 0) o->chat_mode=true;
         else if (strcmp(argv[i], "--steps") == 0 ||
@@ -322,6 +328,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         }
     }
     if (o->chat_mode && !*resume) die("--chat requires --resume");
+    if (o->tokenizer_only && (*resume || o->chat_mode || *diagnostics_only))
+        die("--retrain-tokenizer-only cannot be combined with resume, chat, or diagnostics-only");
     if (*diagnostics_only) {
         if (!*resume)
             die("--diagnostics-only requires --resume");
@@ -616,6 +624,9 @@ int main(int argc, char** argv) {
     uint8_t* corpus = NULL;
     size_t corpus_len = 0;
 
+    if (options.tokenizer_only && !have_corpus)
+        die("tokenizer rebuild requires actual corpus text; synthetic smoke text is not allowed");
+
     if (have_corpus) {
         corpus = loaded_corpus.data;
         corpus_len = loaded_corpus.length;
@@ -708,6 +719,14 @@ int main(int argc, char** argv) {
     }
     printf("Tokenizer statistics: merges=%d, max_token_bytes=%d, mean_token_bytes=%.2f\n",
         tok.n_merges,max_token_bytes,total_token_bytes/(double)tok.vocab_size);
+
+    if (options.tokenizer_only) {
+        printf("Tokenizer rebuild completed: minima.bpe was replaced.\n");
+        printf("The existing model checkpoint is now incompatible; start a fresh training run.\n");
+        arena_free(&temp);
+        arena_free(&arena);
+        return 0;
+    }
 
     // ------------------------------------------------------------------
     // 4. Encode the complete corpus and create held-out validation region
