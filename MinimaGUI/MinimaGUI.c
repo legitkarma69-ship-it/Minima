@@ -64,10 +64,15 @@ static DWORD WINAPI reader_thread(void* parameter) {
                 int needed = MultiByteToWideChar(CP_UTF8, 0, carry, (int)used, NULL, 0);
                 if (needed <= 0)
                     needed = MultiByteToWideChar(CP_ACP, 0, carry, (int)used, NULL, 0);
+                UINT code_page = CP_UTF8;
+                if (needed <= 0) {
+                    code_page = CP_ACP;
+                    needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
+                }
                 if (needed > 0) {
                     wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
                     if (wide) {
-                        MultiByteToWideChar(CP_UTF8, 0, carry, (int)used, wide, needed);
+                        MultiByteToWideChar(code_page, 0, carry, (int)used, wide, needed);
                         PostMessageW(g_window, WM_APPEND_LOG, 0, (LPARAM)wide);
                     }
                 }
@@ -77,11 +82,16 @@ static DWORD WINAPI reader_thread(void* parameter) {
     }
     if (used) {
         carry[used] = 0;
-        int needed = MultiByteToWideChar(CP_UTF8, 0, carry, (int)used, NULL, 0);
+        UINT code_page = CP_UTF8;
+        int needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
+        if (needed <= 0) {
+            code_page = CP_ACP;
+            needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
+        }
         if (needed > 0) {
             wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
             if (wide) {
-                MultiByteToWideChar(CP_UTF8, 0, carry, (int)used, wide, needed);
+                MultiByteToWideChar(code_page, 0, carry, (int)used, wide, needed);
                 PostMessageW(g_window, WM_APPEND_LOG, 0, (LPARAM)wide);
             }
         }
