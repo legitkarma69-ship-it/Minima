@@ -221,11 +221,17 @@ int tokenizer_encode(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
     uint16_t* out, int out_cap) {
 
-    if (text_len == 0 || out_cap <= 0) return 0;
+    if (!tok || (!text && text_len) || (!out && text_len) ||
+        out_cap < 0 || text_len > (size_t)INT_MAX)
+        return -1;
+    if (text_len == 0) return 0;
+    /* BPE can only reduce the byte-token count. If the output cannot hold
+       the byte-level worst case, fail before writing anything. */
+    if (!out || (size_t)out_cap < text_len) return -1;
 
-    // First pass: bytes → token ids
+    // First pass: bytes → token ids. Capacity is now guaranteed.
     int n = 0;
-    for (size_t i = 0; i < text_len && n < out_cap; i++) {
+    for (size_t i = 0; i < text_len; i++) {
         out[n++] = (uint16_t)(TOK_BYTE_START + text[i]);
     }
 
