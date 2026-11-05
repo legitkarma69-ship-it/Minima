@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <stdint.h>
 #include <math.h>
 
 #define BATCH     4
@@ -97,7 +98,9 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------
     // 2. Load plain-text training data
     // ------------------------------------------------------------------
-    const size_t max_corpus_bytes = 5u * 1024u * 1024u;
+    // No arbitrary corpus-size limit. Actual capacity is bounded by available
+    // memory, the arena size, and the tokenizer's current int-based API.
+    const size_t max_corpus_bytes = SIZE_MAX;
     Corpus loaded_corpus;
     bool have_corpus = false;
 
@@ -112,7 +115,7 @@ int main(int argc, char** argv) {
         const CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
             &arena, user_paths, (size_t)(argc - 1), max_corpus_bytes);
         if (load_result == CORPUS_LOAD_ERROR)
-            die("corpus loading failed (check file access and the 5 MiB total limit)");
+            die("corpus loading failed (check file access, available memory, and supported corpus size)");
         if (load_result == CORPUS_LOAD_EMPTY)
             die("the supplied corpus paths contained no usable text");
         have_corpus = true;
@@ -126,7 +129,7 @@ int main(int argc, char** argv) {
             &arena, project_paths, 2, max_corpus_bytes);
 
         if (load_result == CORPUS_LOAD_ERROR)
-            die("corpus loading failed (check file access and the 5 MiB total limit)");
+            die("corpus loading failed (check file access, available memory, and supported corpus size)");
 
         // Also support launching with the repository root as working directory.
         if (load_result == CORPUS_LOAD_EMPTY) {
@@ -137,7 +140,7 @@ int main(int argc, char** argv) {
             load_result = corpus_load_files(&loaded_corpus, &arena,
                 root_paths, 2, max_corpus_bytes);
             if (load_result == CORPUS_LOAD_ERROR)
-                die("corpus loading failed (check file access and the 5 MiB total limit)");
+                die("corpus loading failed (check file access, available memory, and supported corpus size)");
         }
         have_corpus = (load_result == CORPUS_LOAD_OK);
     }
@@ -175,7 +178,7 @@ int main(int argc, char** argv) {
     if (corpus_len < (size_t)BATCH * SEQ + 1)
         die("corpus too small: need at least %d bytes", BATCH * SEQ + 1);
     if (corpus_len > (size_t)INT_MAX)
-        die("corpus exceeds tokenizer's integer token-capacity limit");
+        die("corpus exceeds tokenizer's current INT_MAX byte/token-capacity limit");
 
     // ------------------------------------------------------------------
     // 3. Train BPE on a bounded, evenly distributed corpus sample
