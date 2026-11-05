@@ -1,0 +1,36 @@
+name: Windows x64 build
+
+on:
+  push:
+    branches: [master, feature/win32-ui-foundation]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Minima and Win32 GUI
+        run: msbuild Minima.sln /m /p:Configuration=Release /p:Platform=x64 /p:RestoreIgnoreFailedSources=true
+
+      - name: Verify engine CLI
+        shell: pwsh
+        run: |
+          & ".\x64\Release\Minima.exe" --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish Windows executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProjectMinima-Windows-x64
+          path: |
+            x64/Release/Minima.exe
+            x64/Release/MinimaGUI.exe
+          if-no-files-found: error
