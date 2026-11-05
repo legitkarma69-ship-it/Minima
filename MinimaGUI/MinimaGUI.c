@@ -117,6 +117,8 @@ static DWORD WINAPI reader_thread(void* parameter) {
     size_t used = 0;
     if (!carry) {
         CloseHandle(pipe);
+        if(g_process)TerminateProcess(g_process,1);
+        PostMessageW(g_window,WM_ENGINE_EXIT,1,0);
         return 1;
     }
 
