@@ -25,4 +25,15 @@ static int minima_protocol_marker(const char* line, size_t length) {
     return MINIMA_PROTOCOL_NONE;
 }
 
+typedef void (*MinimaProtocolReadyCallback)(void* context);
+
+/* Dispatch the readiness marker through the callback used by the GUI reader. */
+static int minima_protocol_dispatch(const char* line, size_t length,
+    MinimaProtocolReadyCallback ready_callback, void* context) {
+    const int marker = minima_protocol_marker(line, length);
+    if (marker == MINIMA_PROTOCOL_CHAT_READY && ready_callback)
+        ready_callback(context);
+    return marker;
+}
+
 #endif
