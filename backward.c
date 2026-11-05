@@ -309,6 +309,12 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
         const float* w_gate = model->ffn_gate +
             (size_t)layer * ffn_dim * dim;
 
+        // Recompute this layer's FFN-normalized input. x_norm was reused
+        // by later layers and by the final normalization during forward.
+        for (size_t i = 0; i < n; i++)
+            rmsnorm(act->x_norm + i * dim, x_ffn + i * dim,
+                model->rms2_scale + (size_t)layer * dim, dim, 1e-5f);
+
         // FFN down projection: d(ffn_out) = d(output) * W_down.
         memset(act->dffn, 0, ffn_count * sizeof(float));
         matmul_backward(act->dffn,
