@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.37827.9 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Minima", "Minima\Minima.vcxproj", "{BA948144-4E96-48F5-873D-AA79DDA54DFB}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MinimaGUI", "MinimaGUI\MinimaGUI.vcxproj", "{C17B8A90-5D9D-4D4D-AB42-93A0D29B2C31}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -21,6 +23,10 @@ Global
 		{BA948144-4E96-48F5-873D-AA79DDA54DFB}.Release|x64.Build.0 = Release|x64
 		{BA948144-4E96-48F5-873D-AA79DDA54DFB}.Release|x86.ActiveCfg = Release|Win32
 		{BA948144-4E96-48F5-873D-AA79DDA54DFB}.Release|x86.Build.0 = Release|Win32
+		{C17B8A90-5D9D-4D4D-AB42-93A0D29B2C31}.Debug|x64.ActiveCfg = Debug|x64
+		{C17B8A90-5D9D-4D4D-AB42-93A0D29B2C31}.Debug|x64.Build.0 = Debug|x64
+		{C17B8A90-5D9D-4D4D-AB42-93A0D29B2C31}.Release|x64.ActiveCfg = Release|x64
+		{C17B8A90-5D9D-4D4D-AB42-93A0D29B2C31}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

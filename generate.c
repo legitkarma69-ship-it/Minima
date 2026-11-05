@@ -351,121 +351,90 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
 // Sampling helpers
 // ------------------------------------------------------------------
 
-static int sample_top_k(const float* logits, int vocab, float temperature,
-    int top_k, Rng* rng) {
-    // Find top-k
-    int idx[256];          // enough for our small smoke-test vocab
-    float vals[256];
-    int n = 0;
-
-    for (int i = 0; i < vocab; i++) {
-        float v = logits[i] / temperature;
-        if (n < top_k) {
-            idx[n] = i;
-            vals[n] = v;
-            n++;
-        }
-        else {
-            // replace the current minimum
-            int min_i = 0;
-            for (int j = 1; j < top_k; j++)
-                if (vals[j] < vals[min_i]) min_i = j;
-            if (v > vals[min_i]) {
-                vals[min_i] = v;
-                idx[min_i] = i;
-            }
+static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
+    int top_k, float top_p, float repetition_penalty,
+    const uint16_t* history, int history_len, Rng* rng) {
+    int idx[256]; float vals[256]; int n=0;
+    uint8_t seen[8192]={0};
+    if(top_k<1)top_k=1;if(top_k>vocab)top_k=vocab;if(top_k>256)top_k=256;
+    if(repetition_penalty>1.0f)
+        for(int j=0;j<history_len;j++)if(history[j]<(uint16_t)vocab)seen[history[j]]=1;
+    for(int id=0;id<vocab;id++){
+        float value=logits[id];
+        if(seen[id])value=value>0.0f?value/repetition_penalty:value*repetition_penalty;
+        value/=temperature;
+        if(n<top_k){idx[n]=id;vals[n]=value;n++;}
+        else{
+            int min_i=0;for(int j=1;j<n;j++)if(vals[j]<vals[min_i])min_i=j;
+            if(value>vals[min_i]){idx[min_i]=id;vals[min_i]=value;}
         }
     }
-
-    // Softmax over the top-k
-    float max_v = vals[0];
-    for (int i = 1; i < n; i++)
-        if (vals[i] > max_v) max_v = vals[i];
-
-    float sum = 0.0f;
-    for (int i = 0; i < n; i++) {
-        vals[i] = expf(vals[i] - max_v);
-        sum += vals[i];
+    // Sort the retained candidates by descending adjusted logit.
+    for(int i=0;i<n;i++)for(int j=i+1;j<n;j++)if(vals[j]>vals[i]){
+        float tv=vals[i];vals[i]=vals[j];vals[j]=tv;
+        int ti=idx[i];idx[i]=idx[j];idx[j]=ti;
     }
-
-    float r = rng_f32(rng) * sum;
-    for (int i = 0; i < n; i++) {
-        r -= vals[i];
-        if (r <= 0.0f) return idx[i];
+    float maxv=vals[0], probs[256], sum=0.0f;
+    for(int i=0;i<n;i++){probs[i]=expf(vals[i]-maxv);sum+=probs[i];}
+    if(top_p<1.0f){
+        float cumulative=0.0f;int keep=0;
+        for(int i=0;i<n;i++){cumulative+=probs[i]/sum;keep++;if(cumulative>=top_p)break;}
+        n=keep;
     }
-    return idx[n - 1];
+    sum=0.0f;for(int i=0;i<n;i++)sum+=probs[i];
+    float draw=rng_f32(rng)*sum;
+    for(int i=0;i<n;i++){draw-=probs[i];if(draw<=0.0f)return idx[i];}
+    return idx[n-1];
 }
 
 // ------------------------------------------------------------------
 // Public generate
 // ------------------------------------------------------------------
 
-int generate(Model* model, Tokenizer* tok, KVCache* cache,
+int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
     const uint16_t* prompt_ids, int prompt_len,
-    uint16_t* out_ids, int out_cap,
-    int n_new,
-    float temperature, int top_k,
-    Rng* rng) {
+    uint16_t* out_ids, int out_cap, int n_new,
+    float temperature, int top_k, float top_p,
+    float repetition_penalty, Rng* rng) {
 
     if (!model || !tok || !cache || !prompt_ids || !out_ids || !rng ||
-        prompt_len <= 0 || out_cap <= 0 || n_new < 0 ||
-        !isfinite(temperature) || temperature <= 0.0f ||
-        model->dim <= 0 || model->dim > 512 ||
-        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
-        model->vocab_size <= 0 || model->vocab_size > 8192 ||
-        model->n_heads <= 0 || model->head_dim <= 0 ||
-        model->n_heads * model->head_dim != model->dim ||
-        cache->n_layers != model->n_layers ||
-        cache->dim != model->dim ||
-        cache->n_heads != model->n_heads ||
-        cache->head_dim != model->head_dim ||
-        !cache->k_cache || !cache->v_cache ||
-        cache->max_seq <= 0 || cache->max_seq > 512 ||
-        tok->vocab_size != model->vocab_size)
-        return 0;
+        prompt_len<=0 || out_cap<=0 || n_new<0 ||
+        !isfinite(temperature) || temperature<=0.0f ||
+        !isfinite(top_p) || top_p<=0.0f || top_p>1.0f ||
+        !isfinite(repetition_penalty) || repetition_penalty<1.0f ||
+        model->dim<=0 || model->dim>512 || model->ffn_dim<=0 || model->ffn_dim>1024 ||
+        model->vocab_size<=0 || model->vocab_size>8192 ||
+        model->n_heads<=0 || model->head_dim<=0 ||
+        model->n_heads*model->head_dim!=model->dim ||
+        cache->n_layers!=model->n_layers || cache->dim!=model->dim ||
+        cache->n_heads!=model->n_heads || cache->head_dim!=model->head_dim ||
+        !cache->k_cache || !cache->v_cache || cache->max_seq<=0 ||
+        cache->max_seq>512 || tok->vocab_size!=model->vocab_size) return 0;
 
-    if (prompt_len > out_cap || prompt_len > cache->max_seq)
-        return 0;
-
-    if (n_new > out_cap - prompt_len)
-        n_new = out_cap - prompt_len;
-    if (n_new > cache->max_seq - prompt_len)
-        n_new = cache->max_seq - prompt_len;
-    if (n_new <= 0) {
-        memcpy(out_ids, prompt_ids, (size_t)prompt_len * sizeof(uint16_t));
-        return prompt_len;
-    }
-
-    if (top_k < 1) top_k = 1;
-    if (top_k > model->vocab_size) top_k = model->vocab_size;
-    if (top_k > 256) top_k = 256;
-
-    for (int i = 0; i < prompt_len; i++) {
-        if (prompt_ids[i] >= model->vocab_size ||
-            prompt_ids[i] >= tok->vocab_size)
-            return 0;
-    }
+    if(prompt_len>out_cap || prompt_len>cache->max_seq)return 0;
+    if(n_new>out_cap-prompt_len)n_new=out_cap-prompt_len;
+    if(n_new>cache->max_seq-prompt_len)n_new=cache->max_seq-prompt_len;
+    if(n_new<=0){memcpy(out_ids,prompt_ids,(size_t)prompt_len*sizeof(uint16_t));return prompt_len;}
+    if(top_k<1)top_k=1;if(top_k>model->vocab_size)top_k=model->vocab_size;if(top_k>256)top_k=256;
+    for(int i=0;i<prompt_len;i++)if(prompt_ids[i]>=model->vocab_size||prompt_ids[i]>=tok->vocab_size)return 0;
 
     kvcache_reset(cache);
-
-    float x[512];
-    float logits[8192];
-
-    // Prefill the prompt. The final logits predict the next token.
-    for (int i = 0; i < prompt_len; i++) {
-        out_ids[i] = prompt_ids[i];
-        forward_one(model, cache, prompt_ids[i], x, logits);
+    float x[512],logits[8192];
+    for(int i=0;i<prompt_len;i++){out_ids[i]=prompt_ids[i];forward_one(model,cache,prompt_ids[i],x,logits);}
+    for(int i=0;i<n_new;i++){
+        int next=sample_top_k_top_p(logits,model->vocab_size,temperature,top_k,
+            top_p,repetition_penalty,out_ids,prompt_len+i,rng);
+        if(next<0||next>=tok->vocab_size)return 0;
+        out_ids[prompt_len+i]=(uint16_t)next;
+        forward_one(model,cache,(uint16_t)next,x,logits);
     }
+    return prompt_len+n_new;
+}
 
-    // Sample autoregressively, updating the cache after each new token.
-    for (int i = 0; i < n_new; i++) {
-        int next = sample_top_k(logits, model->vocab_size,
-            temperature, top_k, rng);
-        if (next < 0 || next >= tok->vocab_size) return 0;
-
-        out_ids[prompt_len + i] = (uint16_t)next;
-        forward_one(model, cache, (uint16_t)next, x, logits);
-    }
-
-    return prompt_len + n_new;
+int generate(Model* model, Tokenizer* tok, KVCache* cache,
+    const uint16_t* prompt_ids, int prompt_len,
+    uint16_t* out_ids, int out_cap, int n_new,
+    float temperature, int top_k, Rng* rng) {
+    return generate_ex(model,tok,cache,prompt_ids,prompt_len,out_ids,out_cap,
+        n_new,temperature,top_k,1.0f,1.0f,rng);
 }

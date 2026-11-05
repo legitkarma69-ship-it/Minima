@@ -37,19 +37,27 @@ static void fill_zero(float* p, size_t n) {
 // Public API
 // ------------------------------------------------------------------
 
-bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size) {
-    if (!m || !arena || vocab_size <= 0)
+bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig* config) {
+    if (!m || !arena || !config ||
+        config->vocab_size < 260 || config->vocab_size > 8192 ||
+        config->dim <= 0 || config->dim > 512 ||
+        config->n_layers <= 0 || config->n_layers > 16 ||
+        config->n_heads <= 0 || config->n_heads > 32 ||
+        config->dim % config->n_heads != 0 ||
+        config->ffn_dim <= 0 || config->ffn_dim > 1024 ||
+        config->max_seq < 32 || config->max_seq > 512)
         return false;
+    int vocab_size=config->vocab_size;
 
     memset(m, 0, sizeof(*m));
 
     m->vocab_size = vocab_size;
-    m->dim = MODEL_DIM;
-    m->n_layers = MODEL_N_LAYERS;
-    m->n_heads = MODEL_N_HEADS;
-    m->head_dim = MODEL_HEAD_DIM;
-    m->ffn_dim = MODEL_FFN_DIM;
-    m->max_seq = MODEL_MAX_SEQ;
+    m->dim = config->dim;
+    m->n_layers = config->n_layers;
+    m->n_heads = config->n_heads;
+    m->head_dim = config->dim / config->n_heads;
+    m->ffn_dim = config->ffn_dim;
+    m->max_seq = config->max_seq;
 
     Rng rng;
     rng_seed(&rng, seed);
@@ -109,6 +117,12 @@ bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size) {
     return true;
 }
 
+bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size) {
+    ModelConfig config = MODEL_CONFIG_DEFAULT;
+    config.vocab_size = vocab_size;
+    return model_init_config(m, arena, seed, &config);
+}
+
 size_t model_param_count(const Model* m) {
     return m->weight_bytes / sizeof(float);
 }
@@ -126,4 +140,10 @@ void model_summary(const Model* m) {
         model_param_count(m),
         model_param_count(m) / 1e6);
     printf("  weight mem : %.2f MB\n", m->weight_bytes / (1024.0 * 1024.0));
+    printf("  AdamW state: %.2f MB (two moment buffers)\n",
+        (2.0 * (double)m->weight_bytes) / (1024.0 * 1024.0));
+    printf("  gradients  : %.2f MB (one parameter-sized buffer)\n",
+        (double)m->weight_bytes / (1024.0 * 1024.0));
+    printf("  train core : %.2f MB (weights + AdamW + gradients; excludes activations)\n",
+        (4.0 * (double)m->weight_bytes) / (1024.0 * 1024.0));
 }
