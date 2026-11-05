@@ -288,8 +288,6 @@ static void start_engine(BOOL chat_mode) {
         if(stop_slash)wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
         DeleteFileW(stop_path);
     }
-    g_chat_mode=chat_mode;
-
     int corpus_count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
         wchar_t path[MAX_PATH * 2];
@@ -353,6 +351,7 @@ static void start_engine(BOOL chat_mode) {
     if(child_stdin)CloseHandle(child_stdin);
     g_process = pi.hProcess;
     CloseHandle(pi.hThread);
+    g_chat_mode=chat_mode;
     set_running(TRUE);
     EnableWindow(GetDlgItem(g_window,IDC_STOP),!chat_mode);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
