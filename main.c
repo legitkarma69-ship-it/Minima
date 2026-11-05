@@ -32,7 +32,7 @@
 
 typedef struct {
     float learning_rate;
-    int warmup_steps, log_interval, validation_batches, checkpoint_interval;
+    int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval;
     uint64_t seed;
     size_t tokenizer_sample_bytes;
     const char* metrics_path;
@@ -72,7 +72,7 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
 static void print_usage(const char* exe) {
     printf("Usage: %s [options] [corpus.txt ...]\n", exe);
     printf("  --resume --steps N --lr FLOAT --warmup N --log-interval N\n");
-    printf("  --validation-batches N --checkpoint-interval N --seed N\n");
+    printf("  --validation-batches N --validation-interval N --checkpoint-interval N --seed N\n");
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
     printf("  --heads N --ffn-dim N --max-seq N --metrics PATH --diagnostics-only\n");
 }
@@ -189,6 +189,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->model=default_model;
     o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
+    o->validation_interval=DEFAULT_LOG_INTERVAL;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL;
@@ -212,6 +213,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             strcmp(argv[i], "--warmup") == 0 ||
             strcmp(argv[i], "--log-interval") == 0 ||
             strcmp(argv[i], "--validation-batches") == 0 ||
+            strcmp(argv[i], "--validation-interval") == 0 ||
             strcmp(argv[i], "--checkpoint-interval") == 0 ||
             strcmp(argv[i], "--seed") == 0 ||
             strcmp(argv[i], "--tokenizer-sample-bytes") == 0 ||
@@ -237,6 +239,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--warmup")==0) o->warmup_steps=(int)v;
             else if (strcmp(opt,"--log-interval")==0) o->log_interval=(int)v;
             else if (strcmp(opt,"--validation-batches")==0) o->validation_batches=(int)v;
+            else if (strcmp(opt,"--validation-interval")==0) o->validation_interval=(int)v;
             else if (strcmp(opt,"--checkpoint-interval")==0) o->checkpoint_interval=(int)v;
             else if (strcmp(opt,"--seed")==0) o->seed=(uint64_t)v;
             else if (strcmp(opt,"--vocab-size")==0) o->model.vocab_size=(int)v;
@@ -757,13 +760,14 @@ int main(int argc, char** argv) {
     if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
     const clock_t training_started=clock();
     printf("Metrics CSV: %s\n",options.metrics_path);
-    printf("Settings: lr=%.7g schedule=%s warmup=%d log=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s\n",
-        options.learning_rate,options.lr_schedule,options.warmup_steps,options.log_interval,options.validation_batches,
+    printf("Settings: lr=%.7g schedule=%s warmup=%d log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s\n",
+        options.learning_rate,options.lr_schedule,options.warmup_steps,options.log_interval,options.validation_interval,options.validation_batches,
         options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes,
         options.tokenizer_spread?"spread":"prefix");
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
+    float last_validation_loss=NAN;
 
     if (diagnostics_only) {
         printf("Diagnostics-only mode: optimizer updates skipped.\n");
@@ -818,10 +822,14 @@ int main(int argc, char** argv) {
         if ((local_step + 1) % options.log_interval == 0 ||
             local_step == steps_to_run - 1 ||
             stop_file_exists(options.stop_file)) {
-            const float validation_loss = evaluate_loss(&model, &temp,
-                all_ids, train_tokens, validation_tokens, options.validation_batches);
-            if (!isfinite(validation_loss))
-                die("validation loss evaluation failed");
+            if ((opt.step % options.validation_interval)==0 ||
+                local_step==steps_to_run-1 || stop_file_exists(options.stop_file) ||
+                !isfinite(last_validation_loss)) {
+                last_validation_loss=evaluate_loss(&model,&temp,all_ids,train_tokens,
+                    validation_tokens,options.validation_batches);
+                if(!isfinite(last_validation_loss))die("validation loss evaluation failed");
+            }
+            const float validation_loss=last_validation_loss;
 
             const double average_train_loss =
                 train_loss_sum / (double)train_loss_count;
