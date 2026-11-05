@@ -129,6 +129,7 @@
   <ItemGroup>
     <ClCompile Include="..\arena.c" />
     <ClCompile Include="..\backward.c" />
+    <ClCompile Include="..\chat.c" />
     <ClCompile Include="..\corpus.c" />
     <ClCompile Include="..\checkpoint.c" />
     <ClCompile Include="..\forward.c" />
@@ -144,6 +145,7 @@
   <ItemGroup>
     <ClInclude Include="..\arena.h" />
     <ClInclude Include="..\backward.h" />
+    <ClInclude Include="..\chat.h" />
     <ClInclude Include="..\config.h" />
     <ClInclude Include="..\corpus.h" />
     <ClInclude Include="..\checkpoint.h" />
