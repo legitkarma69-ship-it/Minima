@@ -37,11 +37,12 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
 }
 
 static void print_usage(const char* exe) {
-    printf("Usage: %s [--resume] [--steps N] [corpus.txt ...]\n", exe);
-    printf("  --resume   Continue from minima.model and minima.bpe\n");
-    printf("  --steps N  Run N additional optimizer steps (default: %d)\n",
+    printf("Usage: %s [--resume] [--steps N] [--diagnostics-only] [corpus.txt ...]\n", exe);
+    printf("  --resume           Continue from minima.model and minima.bpe\n");
+    printf("  --steps N          Run N additional optimizer steps (default: %d)\n",
         DEFAULT_STEPS);
-    printf("  --help     Show this help\n");
+    printf("  --diagnostics-only Load the checkpoint and run diagnostics without training\n");
+    printf("  --help             Show this help\n");
 }
 
 static float evaluate_loss(Model* model, Arena* temp,
@@ -98,9 +99,10 @@ static float evaluate_loss(Model* model, Arena* temp,
 }
 
 static int parse_arguments(int argc, char** argv, bool* resume,
-    int* steps, const char** corpus_paths) {
+    bool* diagnostics_only, int* steps, const char** corpus_paths) {
     int path_count = 0;
     *resume = false;
+    *diagnostics_only = false;
     *steps = DEFAULT_STEPS;
 
     for (int i = 1; i < argc; i++) {
@@ -110,6 +112,9 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         }
         else if (strcmp(argv[i], "--resume") == 0) {
             *resume = true;
+        }
+        else if (strcmp(argv[i], "--diagnostics-only") == 0) {
+            *diagnostics_only = true;
         }
         else if (strcmp(argv[i], "--steps") == 0) {
             if (i + 1 >= argc) die("--steps requires a positive integer");
@@ -129,6 +134,11 @@ static int parse_arguments(int argc, char** argv, bool* resume,
                 die("too many corpus paths (maximum 32)");
             corpus_paths[path_count++] = argv[i];
         }
+    }
+    if (*diagnostics_only) {
+        if (!*resume)
+            die("--diagnostics-only requires --resume");
+        *steps = 0;
     }
     return path_count;
 }
@@ -316,15 +326,19 @@ static bool run_generation_benchmark(Model* model, Tokenizer* tok,
 
 int main(int argc, char** argv) {
     bool resume = false;
+    bool diagnostics_only = false;
     int steps_to_run = DEFAULT_STEPS;
     const char* user_paths[32];
     const int user_path_count = parse_arguments(argc, argv,
-        &resume, &steps_to_run, user_paths);
+        &resume, &diagnostics_only, &steps_to_run, user_paths);
 
     printf("ProjectMinima text-corpus training experiment\n");
     printf("Vocabulary target: %d\n", MODEL_VOCAB_SIZE);
-    printf("Steps this run: %d%s\n\n", steps_to_run,
-        resume ? " (resume)" : "");
+    if (diagnostics_only)
+        printf("Mode: diagnostics only (no optimizer updates)\n\n");
+    else
+        printf("Steps this run: %d%s\n\n", steps_to_run,
+            resume ? " (resume)" : "");
 
     if (!optim_check_adamw())
         die("AdamW numerical regression check failed");
@@ -558,10 +572,11 @@ int main(int argc, char** argv) {
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
-    float last_train_loss = NAN;
-    float last_validation_loss = NAN;
 
-    for (int local_step = 0; local_step < steps_to_run; local_step++) {
+    if (diagnostics_only) {
+        printf("Diagnostics-only mode: optimizer updates skipped.\n");
+    }
+    else for (int local_step = 0; local_step < steps_to_run; local_step++) {
         arena_reset(&temp);
         if (!activations_init(&act, &temp, BATCH, SEQ, &model))
             die("activation allocation failed");
@@ -612,8 +627,6 @@ int main(int argc, char** argv) {
 
             const double average_train_loss =
                 train_loss_sum / (double)train_loss_count;
-            last_train_loss = (float)average_train_loss;
-            last_validation_loss = validation_loss;
 
             printf("%5lld | %10.4f | %10.4f | %.7f\n",
                 (long long)opt.step, (float)average_train_loss,
@@ -634,13 +647,18 @@ int main(int argc, char** argv) {
     printf("\nTraining segment complete: %lld -> %lld\n",
         (long long)initial_step, (long long)final_step);
 
-    if (!isfinite(last_train_loss) || !isfinite(last_validation_loss))
+    const float final_train_loss = evaluate_loss(&model, &temp,
+        all_ids, 0, train_tokens);
+    const float final_validation_loss = evaluate_loss(&model, &temp,
+        all_ids, train_tokens, validation_tokens);
+    if (!isfinite(final_train_loss) || !isfinite(final_validation_loss))
         die("final loss diagnostics are unavailable");
-    printf("\nFinal loss and perplexity (last reporting window)\n");
-    printf("  train loss      : %.4f\n", last_train_loss);
-    printf("  train perplexity: %.2f\n", expf(last_train_loss));
-    printf("  valid loss      : %.4f\n", last_validation_loss);
-    printf("  valid perplexity: %.2f\n", expf(last_validation_loss));
+
+    printf("\nFinal evaluation loss and perplexity (fixed, evenly spaced windows)\n");
+    printf("  train loss      : %.4f\n", final_train_loss);
+    printf("  train perplexity: %.2f\n", expf(final_train_loss));
+    printf("  valid loss      : %.4f\n", final_validation_loss);
+    printf("  valid perplexity: %.2f\n", expf(final_validation_loss));
 
     // ------------------------------------------------------------------
     // 8. Tokenizer and checkpoint round-trip regression checks
