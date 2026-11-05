@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define DIAG_TOP_LIMIT 100
 #define DIAG_EVAL_WINDOWS 16
 #define DIAG_BUCKETS 5
 #define DIAG_GENERATION_TOKENS 32
