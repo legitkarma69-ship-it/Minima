@@ -34,7 +34,7 @@
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
 static HWND g_tab_controls[40];
 static int g_tab_control_count;
-static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
+static HWND g_lr, g_warmup, g_total_steps, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
@@ -331,6 +331,7 @@ static void start_engine(BOOL chat_mode) {
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED)wcscat_s(command,_countof(command),L" --resume");
         if(!append_option(command,_countof(command),L"--lr",g_lr) ||
            !append_option(command,_countof(command),L"--warmup",g_warmup) ||
+           !append_option(command,_countof(command),L"--total-steps",g_total_steps) ||
            !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
            !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
            !append_option(command,_countof(command),L"--validation-interval",g_validation_interval) ||
@@ -546,6 +547,7 @@ static void load_settings(void) {
     load_edit_setting(L"sequence",g_sequence_length,L"32");
     load_edit_setting(L"learning_rate",g_lr,L"0.0003");
     load_edit_setting(L"warmup",g_warmup,L"100");
+    load_edit_setting(L"total_steps",g_total_steps,L"2000");
     load_edit_setting(L"log_interval",g_log_interval,L"100");
     load_edit_setting(L"validation_interval",g_validation_interval,L"100");
     load_edit_setting(L"validation_batches",g_validation_batches,L"16");
@@ -586,6 +588,7 @@ static void save_settings(void) {
     save_edit_setting(L"sequence",g_sequence_length);
     save_edit_setting(L"learning_rate",g_lr);
     save_edit_setting(L"warmup",g_warmup);
+    save_edit_setting(L"total_steps",g_total_steps);
     save_edit_setting(L"log_interval",g_log_interval);
     save_edit_setting(L"validation_interval",g_validation_interval);
     save_edit_setting(L"validation_batches",g_validation_batches);
@@ -676,6 +679,8 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,309,95,18,hwnd,NULL,NULL,NULL);
     g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,306,95,100,hwnd,NULL,NULL,NULL);
     SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"spread");SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"prefix");SendMessageW(g_tokenizer_sampling,CB_SETCURSEL,0,0);
+    CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,309,65,18,hwnd,NULL,NULL,NULL);
+    g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,306,70,23,hwnd,NULL,NULL,NULL);
 
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
@@ -700,7 +705,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,
-        g_batch_size,g_sequence_length };
+        g_batch_size,g_sequence_length,g_total_steps };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 
@@ -711,7 +716,7 @@ static void create_controls(HWND hwnd) {
         g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
-        g_max_tokens,g_lr_schedule,g_tokenizer_sampling,
+        g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_total_steps,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_SAVE_NOW),
         g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
