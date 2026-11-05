@@ -314,7 +314,8 @@ static BOOL prebuilt_tokenizer_settings_match(void) {
     int index=(int)SendMessageW(g_tokenizer_sampling,CB_GETCURSEL,0,0);
     if(index<0)return FALSE;
     SendMessageW(g_tokenizer_sampling,CB_GETLBTEXT,(WPARAM)index,(LPARAM)sampling);
-    return wcscmp(vocab,g_prebuilt_vocab)==0 &&
+    return engine_sidecar_exists(L"minima.bpe") &&
+        wcscmp(vocab,g_prebuilt_vocab)==0 &&
         wcscmp(bytes,g_prebuilt_tokenizer_bytes)==0 &&
         wcscmp(sampling,g_prebuilt_sampling)==0;
 }
@@ -324,6 +325,10 @@ static void remember_prebuilt_tokenizer_settings(void) {
     int index=(int)SendMessageW(g_tokenizer_sampling,CB_GETCURSEL,0,0);
     g_prebuilt_sampling[0]=0;
     if(index>=0)SendMessageW(g_tokenizer_sampling,CB_GETLBTEXT,(WPARAM)index,(LPARAM)g_prebuilt_sampling);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"1",g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_vocab",g_prebuilt_vocab,g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer_bytes",g_prebuilt_tokenizer_bytes,g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_sampling",g_prebuilt_sampling,g_settings_path);
 }
 
 static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
@@ -332,6 +337,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED && g_use_saved_tokenizer);
     if(use_prebuilt_tokenizer && !prebuilt_tokenizer_settings_match()) {
         g_use_saved_tokenizer=FALSE; use_prebuilt_tokenizer=FALSE;
+        WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
         append_log(L"Tokenizer settings changed since rebuild; the next fresh run will rebuild it again.\r\n");
     }
     if(chat_mode && g_use_saved_tokenizer) {
@@ -730,6 +736,10 @@ static void load_settings(void) {
     load_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling,L"spread");
     SendMessageW(g_resume,BM_SETCHECK,
         GetPrivateProfileIntW(L"Training",L"resume",0,g_settings_path)?BST_CHECKED:BST_UNCHECKED,0);
+    g_use_saved_tokenizer=GetPrivateProfileIntW(L"Training",L"prebuilt_tokenizer",0,g_settings_path)?TRUE:FALSE;
+    GetPrivateProfileStringW(L"Training",L"prebuilt_vocab",L"",g_prebuilt_vocab,_countof(g_prebuilt_vocab),g_settings_path);
+    GetPrivateProfileStringW(L"Training",L"prebuilt_tokenizer_bytes",L"",g_prebuilt_tokenizer_bytes,_countof(g_prebuilt_tokenizer_bytes),g_settings_path);
+    GetPrivateProfileStringW(L"Training",L"prebuilt_sampling",L"",g_prebuilt_sampling,_countof(g_prebuilt_sampling),g_settings_path);
 
     int count=GetPrivateProfileIntW(L"Corpus",L"count",0,g_settings_path);
     if(count<0)count=0;if(count>32)count=32;
@@ -771,6 +781,7 @@ static void save_settings(void) {
     save_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling);
     WritePrivateProfileStringW(L"Training",L"resume",
         SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED?L"1":L"0",g_settings_path);
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",g_use_saved_tokenizer?L"1":L"0",g_settings_path);
     int count=(int)SendMessageW(g_corpus,LB_GETCOUNT,0,0);
     if(count>32)count=32;
     wchar_t number[16];
@@ -945,9 +956,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case IDC_ADD: g_use_saved_tokenizer=FALSE; add_corpus_files(); return 0;
+        case IDC_ADD: g_use_saved_tokenizer=FALSE; WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path); add_corpus_files(); return 0;
         case IDC_REMOVE: {
             g_use_saved_tokenizer=FALSE;
+            WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
             int selected[32];
             LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
             for (int i = (int)n - 1; i >= 0; --i)
@@ -980,6 +992,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if(wp==0 && g_fresh_used_saved_tokenizer) {
             g_use_saved_tokenizer=FALSE;
+            WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
             append_log(L"Fresh model training completed using the prebuilt tokenizer.\r\n");
         }
         g_tokenizer_rebuild_mode=FALSE; g_fresh_used_saved_tokenizer=FALSE;
