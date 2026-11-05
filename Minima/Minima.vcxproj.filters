@@ -18,9 +18,15 @@
     <ClCompile Include="..\corpus.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\checkpoint.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\corpus.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\checkpoint.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
