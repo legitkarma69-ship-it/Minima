@@ -172,10 +172,17 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
 
 // Simple cosine decay with linear warmup
 float optim_lr_cosine(float base_lr, int step, int warmup, int total) {
-    if (step < warmup)
+    if (!isfinite(base_lr) || base_lr < 0.0f || total <= 0 || step < 0)
+        return 0.0f;
+
+    if (warmup < 0) warmup = 0;
+    if (warmup >= total) warmup = total - 1;
+
+    if (warmup > 0 && step < warmup)
         return base_lr * (float)step / (float)warmup;
 
     float progress = (float)(step - warmup) / (float)(total - warmup);
+    if (progress < 0.0f) progress = 0.0f;
     if (progress > 1.0f) progress = 1.0f;
     return base_lr * 0.5f * (1.0f + cosf(3.14159265f * progress));
 }
