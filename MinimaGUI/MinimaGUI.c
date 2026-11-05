@@ -912,6 +912,7 @@ static void send_chat_message(void) {
     append_log(L"\r\nYou: ");append_log(wide);append_log(L"\r\n");
     free(utf8);SetWindowTextW(g_chat_input,L"");
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
+    EnableWindow(g_chat_test,FALSE);
 }
 
 static BOOL read_float_control(HWND control, float minimum, float maximum, float* value) {
