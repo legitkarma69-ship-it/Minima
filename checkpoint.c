@@ -217,7 +217,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !read_bytes(f, &version, sizeof(version), 1) ||
         version != CHECKPOINT_VERSION ||
         !read_bytes(f, dims, sizeof(uint32_t), 6) ||
-        !read_bytes(f, &params, sizeof(params), 1) ||
+        !read_bytes(f, &checkpoint_params, sizeof(checkpoint_params), 1) ||
         !read_bytes(f, &step, sizeof(step), 1) ||
         !read_bytes(f, &rng_state, sizeof(rng_state), 1) ||
         !read_bytes(f, &saved_tokenizer_hash, sizeof(saved_tokenizer_hash), 1) ||
