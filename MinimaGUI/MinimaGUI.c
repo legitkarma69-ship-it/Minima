@@ -1414,6 +1414,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_chat_mode, InterlockedCompareExchange(&g_running,0,0) != 0);
         EnableWindow(g_chat_test,
             g_chat_mode && InterlockedCompareExchange(&g_running,0,0) != 0);
+        if (g_chat_mode) SetWindowTextW(g_status, L"Chat running");
         return 0;
     case WM_APPEND_LOG:
         append_log((const wchar_t*)lp);
