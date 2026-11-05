@@ -20,22 +20,21 @@ static void adamw_update(float* param, float* m, float* v, const float* grad,
     size_t n, float lr, float beta1, float beta2,
     float eps, float weight_decay, float bias1, float bias2) {
 
-    float lr_t = lr * sqrtf(bias2) / bias1;   // bias-corrected learning rate
-
     for (size_t i = 0; i < n; i++) {
-        float g = grad[i];
+        const float g = grad[i];
 
-        // weight decay (AdamW style – applied to the parameter)
-        param[i] -= lr * weight_decay * param[i];
+        // Decoupled weight decay (AdamW).
+        param[i] *= 1.0f - lr * weight_decay;
 
-        // moments
+        // Exponential moving averages of gradient and squared gradient.
         m[i] = beta1 * m[i] + (1.0f - beta1) * g;
         v[i] = beta2 * v[i] + (1.0f - beta2) * g * g;
 
-        // update
-        float m_hat = m[i];           // already scaled by lr_t below
-        float v_hat = v[i];
-        param[i] -= lr_t * m_hat / (sqrtf(v_hat) + eps);
+        // Standard bias correction. Keep epsilon outside sqrt, after
+        // correcting the second moment.
+        const float m_hat = m[i] / bias1;
+        const float v_hat = v[i] / bias2;
+        param[i] -= lr * m_hat / (sqrtf(v_hat) + eps);
     }
 }
 
