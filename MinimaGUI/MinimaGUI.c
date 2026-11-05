@@ -499,139 +499,6 @@ static BOOL get_positive_control_value(HWND control, long* value) {
     GetWindowTextW(control,text,_countof(text));
     long parsed=wcstol(text,&end,10);
     if(!text[0] || !end || *end || parsed<1 || parsed>2147483647L)return FALSE;
-    *value=parsed;
-    return TRUE;
-}
-
-static BOOL add_file_size(const wchar_t* path, unsigned long long* total) {
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    if(!GetFileAttributesExW(path,GetFileExInfoStandard,&data) ||
-       (data.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY))return FALSE;
-    ULARGE_INTEGER size;
-    size.HighPart=data.nFileSizeHigh;
-    size.LowPart=data.nFileSizeLow;
-    if(*total>ULLONG_MAX-size.QuadPart)return FALSE;
-    *total+=size.QuadPart;
-    return TRUE;
-}
-
-static void apply_auto_settings(void) {
-    if(InterlockedCompareExchange(&g_running,0,0))return;
-    if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED) {
-        MessageBoxW(g_window,L"Automatic settings configure a fresh training schedule. Uncheck Resume first; an existing checkpoint's schedule cannot be changed automatically.",
-            L"ProjectMinima",MB_ICONINFORMATION);
-        return;
-    }
-
-    unsigned long long corpus_bytes=0;
-    int count=(int)SendMessageW(g_corpus,LB_GETCOUNT,0,0);
-    BOOL valid=TRUE;
-    if(count>0) {
-        for(int i=0;i<count;i++) {
-            wchar_t path[MAX_PATH*2];
-            SendMessageW(g_corpus,LB_GETTEXT,(WPARAM)i,(LPARAM)path);
-            if(!add_file_size(path,&corpus_bytes)){valid=FALSE;break;}
-        }
-    } else {
-        if(!add_file_size(L"..\\data\\books.txt",&corpus_bytes) ||
-           !add_file_size(L"..\\data\\chatlogs.txt",&corpus_bytes))valid=FALSE;
-    }
-    if(!valid || corpus_bytes<4096) {
-        MessageBoxW(g_window,L"Could not estimate the corpus size. Check that the selected text files exist and are accessible.",
-            L"ProjectMinima",MB_ICONWARNING);
-        return;
-    }
-
-    long batch=0,sequence=0;
-    if(!get_positive_control_value(g_batch_size,&batch) ||
-       !get_positive_control_value(g_sequence_length,&sequence)) {
-        MessageBoxW(g_window,L"Enter valid Batch and Seq values before applying automatic settings.",
-            L"ProjectMinima",MB_ICONWARNING);
-        return;
-    }
-
-    /* Current BPE experiments average about three source bytes per token.
-       This is an estimate only; the engine reports the exact token count. */
-    long double estimated_train_tokens=((long double)corpus_bytes/3.0L)*0.95L;
-    long double raw_steps=estimated_train_tokens/((long double)batch*(long double)sequence);
-    if(raw_steps<1.0L)raw_steps=1.0L;
-    if(raw_steps>2147483647.0L) {
-        MessageBoxW(g_window,L"The estimated training schedule exceeds the supported step limit.",
-            L"ProjectMinima",MB_ICONWARNING);
-        return;
-    }
-    long steps=(long)raw_steps;
-    if((long double)steps<raw_steps)steps++;
-    long warmup=steps/100;
-    if(warmup<10)warmup=10;
-    if(warmup>500)warmup=500;
-    long interval=steps/100;
-    if(interval<25)interval=25;
-    if(interval>1000)interval=1000;
-
-    unsigned long long sample=corpus_bytes/20;
-    if(sample<65536ULL)sample=65536ULL;
-    if(sample>1048576ULL)sample=1048576ULL;
-
-    wchar_t value[64];
-    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",steps);
-    SetWindowTextW(g_steps,value);
-    SetWindowTextW(g_total_steps,value);
-    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",warmup);
-    SetWindowTextW(g_warmup,value);
-    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",interval);
-    SetWindowTextW(g_log_interval,value);
-    SetWindowTextW(g_validation_interval,value);
-    SetWindowTextW(g_checkpoint_interval,value);
-    _snwprintf_s(value,_countof(value),_TRUNCATE,L"%llu",sample);
-    SetWindowTextW(g_tokenizer_bytes,value);
-
-    wchar_t message[320];
-    _snwprintf_s(message,_countof(message),_TRUNCATE,
-        L"Auto settings: %llu corpus bytes, approximately %.0Lf training tokens, %ld steps (about one token-pass). Batch, sequence length, and model size were left unchanged. Actual token counts may differ after BPE.",
-        corpus_bytes,estimated_train_tokens,steps);
-    append_log(L"\r\n");
-    append_log(message);
-    append_log(L"\r\n");
-}
-
-static void rebuild_tokenizer(void) {
-    if(InterlockedCompareExchange(&g_running,0,0))return;
-    if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED) {
-        MessageBoxW(g_window,L"Uncheck Resume before rebuilding the tokenizer. A new tokenizer changes token IDs and makes the existing model checkpoint incompatible.",
-            L"ProjectMinima",MB_ICONWARNING);
-        return;
-    }
-    if(MessageBoxW(g_window,
-        L"Rebuild minima.bpe using the current corpus and tokenizer settings?\r\n\r\nThe existing tokenizer will be backed up as minima.bpe.previous. The current model checkpoint will no longer match it. You must start a fresh training run afterward.",
-        L"Rebuild tokenizer",MB_YESNO|MB_ICONWARNING)!=IDYES)return;
-
-    wchar_t source[MAX_PATH],backup[MAX_PATH];
-    wcscpy_s(source,_countof(source),g_engine_path);
-    wchar_t* slash=wcsrchr(source,L'\\');
-    if(!slash)return;
-    wcscpy_s(slash+1,_countof(source)-(size_t)(slash+1-source),L"minima.bpe");
-    wcscpy_s(backup,_countof(backup),source);
-    wchar_t* backup_name=wcsrchr(backup,L'\\');
-    if(!backup_name)return;
-    wcscpy_s(backup_name+1,_countof(backup)-(size_t)(backup_name+1-backup),L"minima.bpe.previous");
-    if(GetFileAttributesW(source)!=INVALID_FILE_ATTRIBUTES) {
-        DeleteFileW(backup);
-        if(!CopyFileW(source,backup,TRUE)) {
-            MessageBoxW(g_window,L"Could not back up the existing tokenizer. Rebuild was cancelled to protect the current files.",
-                L"ProjectMinima",MB_ICONERROR);
-            return;
-        }
-        append_log(L"Previous tokenizer backed up to minima.bpe.previous.\r\n");
-    }
-    start_engine(FALSE,TRUE);
-}
-
-static BOOL get_positive_control_value(HWND control, long* value) {
-    wchar_t text[64],*end=NULL;
-    GetWindowTextW(control,text,_countof(text));
-    long parsed=wcstol(text,&end,10);
-    if(!text[0] || !end || *end || parsed<1 || parsed>2147483647L)return FALSE;
     *value=parsed; return TRUE;
 }
 static BOOL add_file_size(const wchar_t* path, unsigned long long* total) {
@@ -698,7 +565,7 @@ static void apply_auto_settings(void) {
     SetWindowTextW(g_log_interval,value); SetWindowTextW(g_validation_interval,value); SetWindowTextW(g_checkpoint_interval,value);
     _snwprintf_s(value,_countof(value),_TRUNCATE,L"%llu",sample); SetWindowTextW(g_tokenizer_bytes,value);
     wchar_t message[320];
-    _snwprintf_s(message,_countof(message),_TRUNCATE,L"Auto settings: %llu corpus bytes, approximately %.0Lf training tokens, %ld steps (about one token-pass). Batch, sequence length, and model size were left unchanged. Actual token counts may differ after BPE.",corpus_bytes,estimated_train_tokens,steps);
+    _snwprintf_s(message,_countof(message),_TRUNCATE,L"Auto settings: %llu corpus bytes, approximately %.0f training tokens, %ld steps (about one token-pass). Batch, sequence length, and model size were left unchanged. Actual token counts may differ after BPE.",corpus_bytes,(double)estimated_train_tokens,steps);
     append_log(L"\r\n"); append_log(message); append_log(L"\r\n");
 }
 static void rebuild_tokenizer(void) {
