@@ -243,7 +243,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             long lo=1, hi=INT_MAX;
             if(strcmp(opt,"--validation-batches")==0)hi=4096;
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
-            if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=67108864; }
+            if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=4194304; }
             if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=8192; }
             if (strcmp(opt,"--dim")==0) { lo=1; hi=512; }
             if (strcmp(opt,"--layers")==0) { lo=1; hi=16; }
@@ -499,6 +499,15 @@ static bool run_generation_benchmark(Model* model, Tokenizer* tok,
         if (bytes <= 0) return false;
         printf("    sampled (T=1.0, k=40): %s\n", output_text);
         print_repetition_stats(sample_ids, prompt_len, sample_len);
+
+        rng_seed(&sample_rng,15100u+(uint64_t)i);
+        sample_len=generate_ex(model,tok,cache,prompt_ids,prompt_len,sample_ids,64,
+            32,0.8f,40,0.9f,1.1f,&sample_rng);
+        if(sample_len<=prompt_len)return false;
+        bytes=tokenizer_decode(tok,sample_ids,sample_len,output_text,(int)sizeof(output_text));
+        if(bytes<=0)return false;
+        printf("    sampled (T=0.8, k=40, p=0.9, repetition=1.1): %s\n",output_text);
+        print_repetition_stats(sample_ids,prompt_len,sample_len);
     }
 
     printf("\nDeterministic greedy check: PASS (all prompts reproduced exactly)\n");
