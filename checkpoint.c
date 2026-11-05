@@ -36,27 +36,27 @@ static size_t model_parameter_count(const Model* m) {
 }
 
 #define MODEL_ARRAYS(F) \
-    F(tok_emb, (size_t)m->vocab_size * m->dim) \
-    F(pos_emb, (size_t)m->max_seq * m->dim) \
-    F(attn_qkv, (size_t)m->n_layers * 3 * m->dim * m->dim) \
-    F(attn_proj, (size_t)m->n_layers * m->dim * m->dim) \
-    F(ffn_up, (size_t)m->n_layers * m->ffn_dim * m->dim) \
-    F(ffn_gate, (size_t)m->n_layers * m->ffn_dim * m->dim) \
-    F(ffn_down, (size_t)m->n_layers * m->dim * m->ffn_dim) \
-    F(rms1_scale, (size_t)m->n_layers * m->dim) \
-    F(rms2_scale, (size_t)m->n_layers * m->dim) \
+    F(tok_emb, (size_t)m->vocab_size * m->dim); \
+    F(pos_emb, (size_t)m->max_seq * m->dim); \
+    F(attn_qkv, (size_t)m->n_layers * 3 * m->dim * m->dim); \
+    F(attn_proj, (size_t)m->n_layers * m->dim * m->dim); \
+    F(ffn_up, (size_t)m->n_layers * m->ffn_dim * m->dim); \
+    F(ffn_gate, (size_t)m->n_layers * m->ffn_dim * m->dim); \
+    F(ffn_down, (size_t)m->n_layers * m->dim * m->ffn_dim); \
+    F(rms1_scale, (size_t)m->n_layers * m->dim); \
+    F(rms2_scale, (size_t)m->n_layers * m->dim); \
     F(rms_final_scale, (size_t)m->dim)
 
 #define OPT_ARRAYS(F) \
-    F(tok_emb, (size_t)m->vocab_size * m->dim) \
-    F(pos_emb, (size_t)m->max_seq * m->dim) \
-    F(attn_qkv, (size_t)m->n_layers * 3 * m->dim * m->dim) \
-    F(attn_proj, (size_t)m->n_layers * m->dim * m->dim) \
-    F(ffn_up, (size_t)m->n_layers * m->ffn_dim * m->dim) \
-    F(ffn_gate, (size_t)m->n_layers * m->ffn_dim * m->dim) \
-    F(ffn_down, (size_t)m->n_layers * m->dim * m->ffn_dim) \
-    F(rms1_scale, (size_t)m->n_layers * m->dim) \
-    F(rms2_scale, (size_t)m->n_layers * m->dim) \
+    F(tok_emb, (size_t)m->vocab_size * m->dim); \
+    F(pos_emb, (size_t)m->max_seq * m->dim); \
+    F(attn_qkv, (size_t)m->n_layers * 3 * m->dim * m->dim); \
+    F(attn_proj, (size_t)m->n_layers * m->dim * m->dim); \
+    F(ffn_up, (size_t)m->n_layers * m->ffn_dim * m->dim); \
+    F(ffn_gate, (size_t)m->n_layers * m->ffn_dim * m->dim); \
+    F(ffn_down, (size_t)m->n_layers * m->dim * m->ffn_dim); \
+    F(rms1_scale, (size_t)m->n_layers * m->dim); \
+    F(rms2_scale, (size_t)m->n_layers * m->dim); \
     F(rms_final_scale, (size_t)m->dim)
 
 #define WRITE_MODEL(name, count) do { \
