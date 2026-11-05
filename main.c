@@ -623,7 +623,10 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < 80; i++)
             memcpy(corpus + i * smoke_len, smoke_text, smoke_len);
         corpus[corpus_len] = 0;
-        printf("No training text found; using synthetic smoke corpus.\n");
+        if(options.chat_mode)
+            printf("Chat mode: corpus loading skipped; using a tiny placeholder buffer for tokenizer setup.\n");
+        else
+            printf("No training text found; using synthetic smoke corpus.\n");
     }
 
     if (corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
