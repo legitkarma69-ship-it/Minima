@@ -176,6 +176,7 @@ float optim_lr_cosine(float base_lr, int64_t step, int64_t warmup, int64_t total
         return 0.0f;
 
     if (step <= 0) return 0.0f;
+    if (total == 1) return step == 1 ? base_lr : 0.0f;
     if (warmup < 0) warmup = 0;
     if (warmup >= total) warmup = total - 1;
     if (step >= total) return 0.0f;
