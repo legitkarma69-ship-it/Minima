@@ -527,6 +527,14 @@ int main(int argc, char** argv) {
     const uint64_t tokenizer_hash = tokenizer_fingerprint(&tok);
     if (!tokenizer_hash) die("failed to fingerprint tokenizer");
     printf("vocab size = %d\n", tok.vocab_size);
+    int max_token_bytes=0;
+    double total_token_bytes=0.0;
+    for (int ti=0; ti<tok.vocab_size; ++ti) {
+        if (tok.token_len[ti] > max_token_bytes) max_token_bytes=tok.token_len[ti];
+        total_token_bytes += tok.token_len[ti];
+    }
+    printf("Tokenizer statistics: merges=%d, max_token_bytes=%d, mean_token_bytes=%.2f\n",
+        tok.n_merges,max_token_bytes,total_token_bytes/(double)tok.vocab_size);
 
     // ------------------------------------------------------------------
     // 4. Encode the complete corpus and create held-out validation region
@@ -672,6 +680,11 @@ int main(int argc, char** argv) {
             optim_lr_cosine(options.learning_rate, local_step + 1,
                 warmup_steps, steps_to_run);
         optim_step(&opt, &model, &grads);
+        if (opt.step % options.checkpoint_interval == 0) {
+            if (!checkpoint_save("minima.model", &model, &opt, &rng, tokenizer_hash))
+                die("periodic checkpoint save failed");
+            printf("Checkpoint saved at optimizer step %lld\n", (long long)opt.step);
+        }
 
         train_loss_sum += loss;
         train_loss_count++;
