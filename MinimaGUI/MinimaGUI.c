@@ -79,6 +79,7 @@ static void set_running(BOOL running) {
     InterlockedExchange(&g_running, running ? 1 : 0);
     EnableWindow(GetDlgItem(g_window, IDC_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), running);
+    EnableWindow(GetDlgItem(g_window, IDC_CHAT_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_ADD), !running);
     EnableWindow(GetDlgItem(g_window, IDC_REMOVE), !running);
     EnableWindow(g_steps,!running);EnableWindow(g_resume,!running);
@@ -107,14 +108,9 @@ static DWORD WINAPI reader_thread(void* parameter) {
             carry[used++] = buffer[i];
             if (buffer[i] == '\n' || used >= 8000) {
                 carry[used] = 0;
-                int needed = MultiByteToWideChar(CP_UTF8, 0, carry, (int)used, NULL, 0);
-                if (needed <= 0)
-                    needed = MultiByteToWideChar(CP_ACP, 0, carry, (int)used, NULL, 0);
-                UINT code_page = CP_UTF8;
-                if (needed <= 0) {
-                    code_page = CP_ACP;
-                    needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
-                }
+                UINT code_page=CP_UTF8;
+                int needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);
+                if(needed<=0){code_page=CP_ACP;needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);}
                 if (needed > 0) {
                     wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
                     if (wide) {
@@ -218,7 +214,13 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--top-k",g_top_k) ||
            !append_option(command,_countof(command),L"--top-p",g_top_p) ||
            !append_option(command,_countof(command),L"--repetition-penalty",g_repetition) ||
-           !append_option(command,_countof(command),L"--max-new-tokens",g_max_tokens)){
+           !append_option(command,_countof(command),L"--max-new-tokens",g_max_tokens) ||
+           !append_option(command,_countof(command),L"--vocab-size",g_vocab) ||
+           !append_option(command,_countof(command),L"--dim",g_dim) ||
+           !append_option(command,_countof(command),L"--layers",g_layers) ||
+           !append_option(command,_countof(command),L"--heads",g_heads) ||
+           !append_option(command,_countof(command),L"--ffn-dim",g_ffn) ||
+           !append_option(command,_countof(command),L"--max-seq",g_max_seq)){
             MessageBoxW(g_window,L"Check the generation settings.",L"ProjectMinima",MB_ICONWARNING);return;
         }
     } else {
@@ -328,7 +330,7 @@ static void request_cooperative_stop(void) {
     if (slash) wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.stop");
     HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
     if (file!=INVALID_HANDLE_VALUE) CloseHandle(file);
-    append_log(L"Stop requested. The engine will finish the current step and save a checkpoint.\\r\\n");
+    append_log(L"Stop requested. The engine will finish the current step and save a checkpoint.\r\n");
 }
 
 static void send_chat_message(void) {
@@ -339,7 +341,7 @@ static void send_chat_message(void) {
     if(needed<=1)return;
     char* utf8=(char*)malloc((size_t)needed+2);if(!utf8)return;
     WideCharToMultiByte(CP_UTF8,0,wide,-1,utf8,needed,NULL,NULL);
-    size_t len=strlen(utf8);utf8[len++]='\\n';
+    size_t len=strlen(utf8);utf8[len++]='\n';
     DWORD written=0;
     append_log(L"\r\nYou: ");append_log(wide);append_log(L"\r\n");
     WriteFile(g_stdin_write,utf8,(DWORD)len,&written,NULL);
