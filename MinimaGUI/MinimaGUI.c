@@ -331,7 +331,7 @@ static void start_engine(BOOL chat_mode) {
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED)wcscat_s(command,_countof(command),L" --resume");
         if(!append_option(command,_countof(command),L"--lr",g_lr) ||
            !append_option(command,_countof(command),L"--warmup",g_warmup) ||
-           !append_option(command,_countof(command),L"--total-steps",g_total_steps) ||
+
            !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
            !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
            !append_option(command,_countof(command),L"--validation-interval",g_validation_interval) ||
@@ -349,6 +349,10 @@ static void start_engine(BOOL chat_mode) {
            !append_combo_option(command,_countof(command),L"--lr-schedule",g_lr_schedule) ||
            !append_combo_option(command,_countof(command),L"--tokenizer-sampling",g_tokenizer_sampling)){
             MessageBoxW(g_window,L"Check the training settings.",L"ProjectMinima",MB_ICONWARNING);return;
+        }
+        if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED &&
+           !append_option(command,_countof(command),L"--total-steps",g_total_steps)){
+            MessageBoxW(g_window,L"Check the total training-step horizon.",L"ProjectMinima",MB_ICONWARNING);return;
         }
         wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\" --save-file \"minima.save\"");
         wchar_t stop_path[MAX_PATH];wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
