@@ -5,6 +5,7 @@
 #include "optim.h"
 #include "forward.h"
 #include "backward.h"
+#include "gradcheck.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -85,15 +86,33 @@ int main(void) {
         die("gradients_init failed");
 
     // ------------------------------------------------------------------
-    // 6. Activations (fixed batch / seq for the test)
+    // 6. Numerical gradient check
     // ------------------------------------------------------------------
-    Activations act;
-    if (!activations_init(&act, &temp, BATCH, SEQ, &model))
-        die("activations_init failed");
+    // Use a fixed, deterministic batch so every finite-difference
+    // evaluation sees exactly the same tokens and targets.
+    uint16_t* check_tokens = arena_alloc(&arena,
+        (size_t)BATCH * SEQ * sizeof(uint16_t));
+    uint16_t* check_targets = arena_alloc(&arena,
+        (size_t)BATCH * SEQ * sizeof(uint16_t));
+    if (!check_tokens || !check_targets)
+        die("gradient-check batch allocation failed");
+
+    for (int b = 0; b < BATCH; b++) {
+        const int start = b * SEQ;
+        for (int t = 0; t < SEQ; t++) {
+            check_tokens[b * SEQ + t] = all_ids[start + t];
+            check_targets[b * SEQ + t] = all_ids[start + t + 1];
+        }
+    }
+
+    if (!gradient_check(&model, &grads, &temp,
+        check_tokens, check_targets, BATCH, SEQ))
+        die("numerical gradient check failed");
 
     // ------------------------------------------------------------------
     // 7. Training loop
     // ------------------------------------------------------------------
+    Activations act;
     Rng rng;
     rng_seed(&rng, 1234);
 
