@@ -508,6 +508,7 @@ static void create_controls(HWND hwnd) {
         12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
     g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL,
         12,665,700,26,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
+    SendMessageW(g_chat_input,EM_SETLIMITTEXT,2048,0);
     EnableWindow(g_chat_input,FALSE);
     CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,720,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,835,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
