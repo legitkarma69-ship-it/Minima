@@ -571,6 +571,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER:
         if(wp==IDT_GRAPH_REFRESH && g_graph) InvalidateRect(g_graph,NULL,FALSE);
         return 0;
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO* info=(MINMAXINFO*)lp;
+        info->ptMinTrackSize.x=960;
+        info->ptMinTrackSize.y=780;
+        return 0;
+    }
     case WM_SIZE: {
         RECT r;
         GetClientRect(hwnd, &r);
