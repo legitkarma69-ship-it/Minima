@@ -301,11 +301,14 @@ static bool frequency_loss_report(Model* model, Arena* temp,
                 float max_logit = row[0];
                 for (int v = 1; v < model->vocab_size; ++v)
                     if (row[v] > max_logit) max_logit = row[v];
+                if (!isfinite(max_logit)) return false;
                 double sum_exp = 0.0;
                 for (int v = 0; v < model->vocab_size; ++v)
                     sum_exp += exp((double)row[v] - (double)max_logit);
+                if (!(sum_exp > 0.0) || !isfinite(sum_exp)) return false;
                 const double loss = log(sum_exp) -
                     ((double)row[target] - (double)max_logit);
+                if (!isfinite(loss)) return false;
                 const int bucket = frequency_bucket(target, train_counts,
                     rank_by_id, active_tokens);
                 loss_sum[split][bucket] += loss;
