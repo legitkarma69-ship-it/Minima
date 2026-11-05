@@ -30,9 +30,10 @@ void gradients_zero(Gradients* g, const Model* model) {
 }
 
 bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
-    (void)model;
+    if (!model) return false;
     // Model and Gradients intentionally have identical parameter layouts.
-    return model_init(g, arena, 0);
+    // Match the model's runtime vocabulary exactly.
+    return model_init(g, arena, 0, model->vocab_size);
 }
 
 // ------------------------------------------------------------------
