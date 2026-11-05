@@ -207,6 +207,19 @@ static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* ar
     return TRUE;
 }
 
+static BOOL add_corpus_path(const wchar_t* path) {
+    int count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
+    if (count < 0 || count >= 32) return FALSE;
+    for (int i = 0; i < count; ++i) {
+        wchar_t existing[MAX_PATH * 2];
+        if (SendMessageW(g_corpus, LB_GETTEXT, i, (LPARAM)existing) >= 0 &&
+            _wcsicmp(existing, path) == 0)
+            return TRUE; /* Ignore duplicate selections. */
+    }
+    LRESULT result = SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)path);
+    return result != LB_ERR && result != LB_ERRSPACE;
+}
+
 static void add_corpus_files(void) {
     wchar_t file_buffer[32768] = { 0 };
     OPENFILENAMEW ofn;
@@ -220,17 +233,25 @@ static void add_corpus_files(void) {
         OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
     if (!GetOpenFileNameW(&ofn)) return;
 
+    BOOL limit_reached = FALSE;
     wchar_t* first = file_buffer;
     wchar_t* next = first + wcslen(first) + 1;
     if (!*next) {
-        SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)first);
-        return;
+        if (!add_corpus_path(first))
+            limit_reached = TRUE;
+    } else {
+        while (*next) {
+            wchar_t full[MAX_PATH * 2];
+            _snwprintf_s(full, _countof(full), _TRUNCATE, L"%s\\%s", first, next);
+            if (!add_corpus_path(full))
+                limit_reached = TRUE;
+            next += wcslen(next) + 1;
+        }
     }
-    while (*next) {
-        wchar_t full[MAX_PATH * 2];
-        _snwprintf_s(full, _countof(full), _TRUNCATE, L"%s\\%s", first, next);
-        SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)full);
-        next += wcslen(next) + 1;
+    if (limit_reached) {
+        MessageBoxW(g_window,
+            L"The corpus list supports up to 32 distinct files. Additional selections were not added.",
+            L"ProjectMinima", MB_ICONWARNING);
     }
 }
 
@@ -718,8 +739,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         switch (LOWORD(wp)) {
         case IDC_ADD: add_corpus_files(); return 0;
         case IDC_REMOVE: {
-            int selected[128];
-            LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 128, (LPARAM)selected);
+            int selected[32];
+            LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
             for (int i = (int)n - 1; i >= 0; --i)
                 SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
             return 0;
