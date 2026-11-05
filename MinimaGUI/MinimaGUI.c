@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x0A00
 #include <windows.h>
 #include <commdlg.h>
 #include <commctrl.h>
@@ -53,42 +54,192 @@ static BOOL g_use_saved_tokenizer;
 static BOOL g_fresh_used_saved_tokenizer;
 static wchar_t g_prebuilt_vocab[64],g_prebuilt_tokenizer_bytes[64],g_prebuilt_sampling[64];
 static wchar_t g_engine_path[MAX_PATH];
+static HWND g_group_corpus, g_group_model, g_group_training;
+static HWND g_group_advanced, g_group_monitor, g_group_output;
+static UINT g_dpi = 96;
+static HFONT g_ui_font;
+static HPEN g_graph_grid_pen, g_graph_train_pen, g_graph_valid_pen;
+static float g_graph_train[512], g_graph_valid[512];
+static int g_graph_count;
+
+static int scale_px(int value) {
+    return MulDiv(value, (int)(g_dpi ? g_dpi : 96), 96);
+}
+
+static BOOL CALLBACK set_child_font(HWND child, LPARAM font) {
+    SendMessageW(child, WM_SETFONT, (WPARAM)font, TRUE);
+    return TRUE;
+}
+
+static void rebuild_ui_font(HWND hwnd) {
+    HFONT old_font = g_ui_font;
+    g_ui_font = CreateFontW(-scale_px(9), 0, 0, 0, FW_NORMAL,
+        FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        L"Segoe UI");
+    if (!g_ui_font) g_ui_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    EnumChildWindows(hwnd, set_child_font, (LPARAM)g_ui_font);
+    if (old_font && old_font != (HFONT)GetStockObject(DEFAULT_GUI_FONT))
+        DeleteObject(old_font);
+}
+
+typedef struct {
+    HWND parent;
+    UINT old_dpi;
+    UINT new_dpi;
+} DpiScaleContext;
+
+static BOOL CALLBACK scale_child_for_dpi(HWND child, LPARAM parameter) {
+    DpiScaleContext* context = (DpiScaleContext*)parameter;
+    RECT rect;
+    if (!GetWindowRect(child, &rect)) return TRUE;
+    MapWindowPoints(NULL, context->parent, (POINT*)&rect, 2);
+    const int x = MulDiv(rect.left, (int)context->new_dpi, (int)context->old_dpi);
+    const int y = MulDiv(rect.top, (int)context->new_dpi, (int)context->old_dpi);
+    const int width = MulDiv(rect.right - rect.left, (int)context->new_dpi, (int)context->old_dpi);
+    const int height = MulDiv(rect.bottom - rect.top, (int)context->new_dpi, (int)context->old_dpi);
+    MoveWindow(child, x, y, width, height, FALSE);
+    return TRUE;
+}
+
+static void layout_controls(HWND hwnd) {
+    RECT client;
+    GetClientRect(hwnd, &client);
+    const int width = client.right;
+    const int height = client.bottom;
+    const int pad = scale_px(12);
+    const int group_left = scale_px(8);
+
+    if (g_group_corpus) MoveWindow(g_group_corpus, group_left, scale_px(6), width - scale_px(16), scale_px(168), TRUE);
+    if (g_group_model) MoveWindow(g_group_model, group_left, scale_px(168), scale_px(585), scale_px(38), TRUE);
+    if (g_group_training) MoveWindow(g_group_training, group_left, scale_px(202), scale_px(585), scale_px(38), TRUE);
+    if (g_group_advanced) MoveWindow(g_group_advanced, group_left, scale_px(236), scale_px(585), scale_px(98), TRUE);
+    if (g_group_monitor) MoveWindow(g_group_monitor, scale_px(590), scale_px(150), width - scale_px(598), scale_px(205), TRUE);
+    if (g_group_output) MoveWindow(g_group_output, group_left, scale_px(375), width - scale_px(16), height - scale_px(380), TRUE);
+
+    if (g_corpus) MoveWindow(g_corpus, pad, scale_px(34), width - 2 * pad, scale_px(105), TRUE);
+    if (g_graph) MoveWindow(g_graph, scale_px(600), scale_px(170), width - scale_px(624), scale_px(175), TRUE);
+    if (g_log) MoveWindow(g_log, pad, scale_px(402), width - 2 * pad, height - scale_px(510), TRUE);
+    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(240), scale_px(26), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(225), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
+    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_STOP), width - scale_px(110), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
+}
+
+static void refresh_graph_metrics(void) {
+    g_graph_count = 0;
+    FILE* file = _wfopen(g_metrics_path, L"rt");
+    if (!file) return;
+
+    char line[512];
+    if (fseek(file, 0, SEEK_END) == 0) {
+        long end = ftell(file);
+        long start = end > 262144 ? end - 262144 : 0;
+        if (start > 0) {
+            fseek(file, start, SEEK_SET);
+            (void)fgets(line, sizeof(line), file);
+        } else {
+            rewind(file);
+            (void)fgets(line, sizeof(line), file);
+        }
+    }
+    while (fgets(line, sizeof(line), file)) {
+        double step, train, valid, lr, train_ppl, valid_ppl, elapsed;
+        if (sscanf_s(line, "%lf,%lf,%lf,%lf,%lf,%lf,%lf", &step, &train, &valid, &lr, &train_ppl, &valid_ppl, &elapsed) == 7) {
+            if (g_graph_count == 512) {
+                memmove(g_graph_train, g_graph_train + 1, 511 * sizeof(float));
+                memmove(g_graph_valid, g_graph_valid + 1, 511 * sizeof(float));
+                g_graph_count = 511;
+            }
+            g_graph_train[g_graph_count] = (float)train;
+            g_graph_valid[g_graph_count] = (float)valid;
+            ++g_graph_count;
+        }
+    }
+    fclose(file);
+}
 
 static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     (void)wp; (void)lp;
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps; HDC dc=BeginPaint(hwnd,&ps);
-        RECT r; GetClientRect(hwnd,&r); FillRect(dc,&r,(HBRUSH)(COLOR_WINDOW+1));
-        SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(40,40,40));
-        TextOutW(dc,8,6,L"Training / validation loss",26);
-        int left=42,top=30,right=r.right-12,bottom=r.bottom-24;
-        HPEN grid=CreatePen(PS_SOLID,1,RGB(220,220,220)); HPEN old=(HPEN)SelectObject(dc,grid);
-        for(int i=0;i<=4;i++){int y=top+(bottom-top)*i/4;MoveToEx(dc,left,y,NULL);LineTo(dc,right,y);}
-        SelectObject(dc,old);DeleteObject(grid);
-        float tr[512],va[512];int n=0;FILE* f=_wfopen(g_metrics_path,L"rt");
-        if(f){
-            char line[512];
-            if(fseek(f,0,SEEK_END)==0){
-                long end=ftell(f),start=end>262144?end-262144:0;
-                if(start>0){fseek(f,start,SEEK_SET);(void)fgets(line,sizeof(line),f);}
-                else {rewind(f);(void)fgets(line,sizeof(line),f);}
-            }
-            while(fgets(line,sizeof(line),f)){
-            double step,a,b,lr,tp,vp,elapsed;
-            if(sscanf_s(line,"%lf,%lf,%lf,%lf,%lf,%lf,%lf",&step,&a,&b,&lr,&tp,&vp,&elapsed)==7){
-                if(n==512){memmove(tr,tr+1,511*sizeof(float));memmove(va,va+1,511*sizeof(float));n=511;}
-                tr[n]=(float)a;va[n]=(float)b;n++;
-            }}fclose(f);}
-        if(n>1){float lo=tr[0],hi=tr[0];for(int i=0;i<n;i++){if(va[i]<lo)lo=va[i];if(tr[i]<lo)lo=tr[i];if(va[i]>hi)hi=va[i];if(tr[i]>hi)hi=tr[i];}
-            if(hi-lo<0.001f)hi=lo+0.001f;
-            HPEN p1=CreatePen(PS_SOLID,2,RGB(35,105,190)),p2=CreatePen(PS_SOLID,2,RGB(190,85,45));
-            for(int s=0;s<2;s++){SelectObject(dc,s?p2:p1);for(int i=0;i<n;i++){float v=s?va[i]:tr[i];int x=left+(right-left)*i/(n-1);int y=bottom-(int)((v-lo)/(hi-lo)*(bottom-top));if(i==0)MoveToEx(dc,x,y,NULL);else LineTo(dc,x,y);}}
-            SelectObject(dc,GetStockObject(BLACK_PEN));DeleteObject(p1);DeleteObject(p2);
-            wchar_t legend[96];swprintf_s(legend,_countof(legend),L"Train %.3f   Valid %.3f",tr[n-1],va[n-1]);TextOutW(dc,left,bottom+5,legend,(int)wcslen(legend));
-        }else TextOutW(dc,left,top+35,L"Waiting for training metrics...",31);
-        EndPaint(hwnd,&ps);return 0;
+    if (msg == WM_CREATE) {
+        g_graph_grid_pen = CreatePen(PS_SOLID, 1, RGB(220,220,220));
+        g_graph_train_pen = CreatePen(PS_SOLID, 2, RGB(35,105,190));
+        g_graph_valid_pen = CreatePen(PS_SOLID, 2, RGB(190,85,45));
+        return 0;
     }
-    return DefWindowProcW(hwnd,msg,wp,lp);
+    if (msg == WM_DESTROY) {
+        if (g_graph_grid_pen) { DeleteObject(g_graph_grid_pen); g_graph_grid_pen = NULL; }
+        if (g_graph_train_pen) { DeleteObject(g_graph_train_pen); g_graph_train_pen = NULL; }
+        if (g_graph_valid_pen) { DeleteObject(g_graph_valid_pen); g_graph_valid_pen = NULL; }
+        return 0;
+    }
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC dc = BeginPaint(hwnd, &ps);
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+        const int width = rect.right - rect.left;
+        const int height = rect.bottom - rect.top;
+        HDC back = CreateCompatibleDC(dc);
+        HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+        HGDIOBJ old_bitmap = SelectObject(back, bitmap);
+        FillRect(back, &rect, (HBRUSH)(COLOR_WINDOW + 1));
+        SetBkMode(back, TRANSPARENT);
+        SetTextColor(back, RGB(40,40,40));
+        TextOutW(back, scale_px(8), scale_px(5), L"Training / validation loss", 26);
+
+        const int left = scale_px(58), top = scale_px(30);
+        const int right = width - scale_px(12), bottom = height - scale_px(27);
+        float low = 0.0f, high = 1.0f;
+        if (g_graph_count > 0) {
+            low = g_graph_train[0];
+            high = g_graph_train[0];
+            for (int i = 0; i < g_graph_count; ++i) {
+                if (g_graph_train[i] < low) low = g_graph_train[i];
+                if (g_graph_valid[i] < low) low = g_graph_valid[i];
+                if (g_graph_train[i] > high) high = g_graph_train[i];
+                if (g_graph_valid[i] > high) high = g_graph_valid[i];
+            }
+            if (high - low < 0.001f) high = low + 0.001f;
+        }
+
+        if (g_graph_grid_pen) SelectObject(back, g_graph_grid_pen);
+        for (int i = 0; i <= 4; ++i) {
+            const int y = top + (bottom - top) * i / 4;
+            MoveToEx(back, left, y, NULL);
+            LineTo(back, right, y);
+            wchar_t label[24];
+            const float value = high - (high - low) * (float)i / 4.0f;
+            swprintf_s(label, _countof(label), L"%.2f", value);
+            TextOutW(back, scale_px(3), y - scale_px(7), label, (int)wcslen(label));
+        }
+
+        if (g_graph_count > 1) {
+            for (int series = 0; series < 2; ++series) {
+                SelectObject(back, series ? g_graph_valid_pen : g_graph_train_pen);
+                for (int i = 0; i < g_graph_count; ++i) {
+                    const float value = series ? g_graph_valid[i] : g_graph_train[i];
+                    const int x = left + (right - left) * i / (g_graph_count - 1);
+                    const int y = bottom - (int)((value - low) / (high - low) * (bottom - top));
+                    if (i == 0) MoveToEx(back, x, y, NULL);
+                    else LineTo(back, x, y);
+                }
+            }
+            wchar_t legend[96];
+            swprintf_s(legend, _countof(legend), L"Train %.3f   Valid %.3f", g_graph_train[g_graph_count - 1], g_graph_valid[g_graph_count - 1]);
+            SetTextColor(back, RGB(35,105,190));
+            TextOutW(back, left, bottom + scale_px(5), legend, (int)wcslen(legend));
+        } else {
+            TextOutW(back, left, top + scale_px(35), L"Waiting for training metrics...", 31);
+        }
+
+        BitBlt(dc, 0, 0, width, height, back, 0, 0, SRCCOPY);
+        SelectObject(back, old_bitmap);
+        DeleteObject(bitmap);
+        DeleteDC(back);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 static void save_chat_text(const wchar_t* text) {
