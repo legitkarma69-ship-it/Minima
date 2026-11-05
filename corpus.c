@@ -1,6 +1,7 @@
 #include "corpus.h"
 
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -64,7 +65,13 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
         if (!paths[i] || !paths[i][0]) continue;
 
         FILE* f = fopen(paths[i], "rb");
-        if (!f) continue;
+        if (!f) {
+            // Missing optional paths are skipped so default path fallback works.
+            // Other failures (permissions, descriptor exhaustion, etc.) are real
+            // I/O errors and must not be misreported as an empty corpus.
+            if (errno == ENOENT) continue;
+            return CORPUS_LOAD_ERROR;
+        }
 
         if (fseek(f, 0, SEEK_END) != 0) {
             fclose(f);
