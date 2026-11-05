@@ -40,7 +40,8 @@ BPE learns its vocabulary from an evenly distributed 256 KiB sample taken only f
 ## Training output and checkpoints
 
 The default experiment has no fixed plaintext-size cap and runs 2,000 optimizer
-steps with batch size 4 and sequence length 32. It uses 100 warmup steps followed
+steps with batch size 4 and sequence length 32. The default BPE vocabulary target
+is 2,048 entries (including the four reserved tokens and 256 byte tokens). It uses 100 warmup steps followed
 by cosine learning-rate decay from a base rate of 3e-4. Training loss is averaged
 and validation loss is evaluated every 100 steps over 16 fixed, evenly spaced
 validation batches. This is still a small experimental model, not a claim that
@@ -52,12 +53,43 @@ After training, the program writes two files in its working directory:
 - `minima.model`: model weights, AdamW first and second moments, optimizer
   hyperparameters, and optimizer step count.
 
-The checkpoint format is versioned and checks the model architecture and
-vocabulary size when loading. The save/load round-trip is also exercised by the
-smoke test. The low-level load function is available, but a user-facing resume
-command is not wired into the program yet. Keep the tokenizer file paired with
-the model checkpoint; weights trained with a different tokenizer are not
-compatible.
+The checkpoint format is version 2. It stores model weights, both AdamW
+moment arrays, optimizer hyperparameters and global step, plus the training
+RNG state. It also stores fingerprints of the exact tokenizer and loaded corpus.
+Resume refuses to load if the model architecture, tokenizer, or corpus differs.
+Keep `minima.bpe` paired with `minima.model`.
+
+### Resuming training
+
+The command-line syntax is:
+
+```text
+Minima.exe [--resume] [--steps N] [corpus.txt ...]
+```
+
+- A normal run starts a new model and tokenizer and runs 2,000 steps by default.
+- `--steps N` changes the number of additional optimizer steps in that run.
+- `--resume --steps 2000` loads the existing tokenizer, model, AdamW moments,
+  global optimizer step, and training RNG state, then performs 2,000 more steps.
+- Corpus paths can follow the options. If none are supplied, the normal default
+  paths are used.
+
+A step-zero checkpoint is written before fresh training begins, then updated
+every 100 steps and at the end of each run. An interrupted run therefore loses
+at most 99 completed optimizer steps. The AdamW bias-correction counter and
+random training-sample sequence continue from their saved states.
+
+Each invocation is a separate training segment: its learning-rate schedule
+starts with a fresh warmup and cosine decay, while the AdamW optimizer step
+remains global. This is a deliberate warm restart, not an attempt to pretend
+that a newly extended schedule was known during the previous run. Resume also
+requires the same corpus contents and tokenizer. If you change the training
+text or vocabulary configuration, start a fresh run instead.
+
+The smoke test includes a deterministic generation benchmark using five fixed
+prompts and greedy top-k=1 decoding. Each prompt is generated twice from the
+same initial state and the token sequences are compared exactly. This checks
+repeatability; it does not measure generation quality by itself.
 
 ## Current implementation limits and checks
 
@@ -69,7 +101,8 @@ buffers are used; increasing the model configuration beyond them requires
 replacing the fixed inference workspaces with arena-backed buffers.
 
 The smoke test now includes an AdamW bias-correction regression check, tokenizer
-save/load encoding parity, checkpoint save/load verification, numerical
-gradient checks, and KV-cache parity across every prefix position in the test
-sequence. These checks are regression guards, not a substitute for evaluating
+save/load encoding and fingerprint parity, checkpoint save/load verification
+(including optimizer state and RNG restoration), numerical gradient checks,
+KV-cache parity across every prefix position in the test sequence, and the
+repeated deterministic multi-prompt generation benchmark. These checks are regression guards, not a substitute for evaluating
 training on held-out text.
