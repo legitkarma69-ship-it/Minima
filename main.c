@@ -37,6 +37,9 @@ typedef struct {
     size_t tokenizer_sample_bytes;
     const char* metrics_path;
     const char* stop_file;
+    float temperature, top_p, repetition_penalty;
+    int top_k, max_new_tokens;
+    bool chat_mode;
 } TrainOptions;
 
 static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
@@ -124,6 +127,49 @@ static float evaluate_loss(Model* model, Arena* temp,
     return (float)(loss_sum / validation_batches);
 }
 
+static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
+    const TrainOptions* options) {
+    uint16_t history[512], input_ids[512], prompt[512], output[512];
+    int history_len=0;
+    char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
+    puts("CHAT_READY");
+    puts("ProjectMinima chat. Type /quit to exit.");
+    for(;;){
+        fputs("You: ",stdout);fflush(stdout);
+        if(!fgets(line,sizeof(line),stdin))break;
+        size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\\n'||line[bytes-1]=='\\r'))line[--bytes]=0;
+        if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
+        if(!bytes){puts("CHAT_READY");continue;}
+        int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,512);
+        if(input_count<=0){puts("BOT: [input encoding failed]");puts("CHAT_READY");continue;}
+        if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
+        int prompt_len=history_len+input_count;
+        if(prompt_len>model->max_seq-1){
+            int drop=prompt_len-(model->max_seq-1);
+            if(drop<history_len){memmove(history,history+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
+            else history_len=0;
+            prompt_len=history_len+input_count;
+        }
+        memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
+        memcpy(prompt+history_len,input_ids,(size_t)input_count*sizeof(uint16_t));
+        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)opt->seed^(uint64_t)history_len);
+        int max_new=options->max_new_tokens;
+        if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
+        int total=generate_ex(model,tok,cache,prompt,prompt_len,output,512,max_new,
+            options->temperature,options->top_k,options->top_p,options->repetition_penalty,&rng);
+        if(total<=prompt_len){puts("BOT: [generation failed]");puts("CHAT_READY");continue;}
+        int decoded_bytes=tokenizer_decode(tok,output+prompt_len,total-prompt_len,decoded,(int)sizeof(decoded));
+        if(decoded_bytes<0)decoded[0]=0;
+        printf("BOT: %s\\n",decoded);
+        history_len=total;
+        if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
+        else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
+        puts("CHAT_READY");
+    }
+    puts("CHAT_CLOSED");
+    return 0;
+}
+
 static bool stop_file_exists(const char* path) {
     if (!path || !path[0]) return false;
     FILE* f=fopen(path,"rb");
@@ -141,6 +187,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL;
+    o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
+    o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -153,6 +201,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         else if (strcmp(argv[i], "--diagnostics-only") == 0) {
             *diagnostics_only = true;
         }
+        else if (strcmp(argv[i], "--chat") == 0) o->chat_mode=true;
         else if (strcmp(argv[i], "--steps") == 0 ||
             strcmp(argv[i], "--warmup") == 0 ||
             strcmp(argv[i], "--log-interval") == 0 ||
@@ -174,6 +223,19 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--seed")==0) o->seed=(uint64_t)v;
             else o->tokenizer_sample_bytes=(size_t)v;
         }
+        else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
+            const char* option=argv[i]; if(++i>=argc)die("%s requires a value",option);
+            long v=parse_long_value(option,argv[i],1,512);
+            if(strcmp(option,"--top-k")==0)o->top_k=(int)v;else o->max_new_tokens=(int)v;
+        }
+        else if (strcmp(argv[i], "--temperature") == 0 ||
+            strcmp(argv[i], "--top-p") == 0 ||
+            strcmp(argv[i], "--repetition-penalty") == 0) {
+            const char* option=argv[i];if(++i>=argc)die("%s requires a value",option);
+            if(strcmp(option,"--temperature")==0)o->temperature=parse_float_value(option,argv[i],0.05f,5.0f);
+            else if(strcmp(option,"--top-p")==0)o->top_p=parse_float_value(option,argv[i],0.01f,1.0f);
+            else o->repetition_penalty=parse_float_value(option,argv[i],1.0f,3.0f);
+        }
         else if (strcmp(argv[i], "--lr") == 0) {
             if (++i >= argc) die("--lr requires a value");
             o->learning_rate=parse_float_value("--lr",argv[i],1e-7f,1.0f);
@@ -193,6 +255,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             corpus_paths[path_count++] = argv[i];
         }
     }
+    if (o->chat_mode && !*resume) die("--chat requires --resume");
     if (*diagnostics_only) {
         if (!*resume)
             die("--diagnostics-only requires --resume");
@@ -590,6 +653,14 @@ int main(int argc, char** argv) {
             die("checkpoint load failed: model/tokenizer mismatch or invalid checkpoint");
         printf("Resumed checkpoint at optimizer step %lld\n\n",
             (long long)opt.step);
+    }
+
+    if (options.chat_mode) {
+        KVCache chat_cache;
+        if(!kvcache_init(&chat_cache,&arena,&model,model.max_seq))
+            die("chat KV cache initialization failed");
+        int chat_result=run_chat_console(&model,&tok,&chat_cache,&options);
+        arena_free(&temp);arena_free(&arena);return chat_result;
     }
 
     Gradients grads;
