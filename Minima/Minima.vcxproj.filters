@@ -15,6 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\diagnostics.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\chat.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -29,6 +32,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\diagnostics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\chat.h">
       <Filter>Header Files</Filter>
     </ClInclude>

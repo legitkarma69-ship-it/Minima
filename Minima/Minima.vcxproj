@@ -131,6 +131,7 @@
     <ClCompile Include="..\backward.c" />
     <ClCompile Include="..\chat.c" />
     <ClCompile Include="..\corpus.c" />
+    <ClCompile Include="..\diagnostics.c" />
     <ClCompile Include="..\checkpoint.c" />
     <ClCompile Include="..\forward.c" />
     <ClCompile Include="..\gradcheck.c" />
@@ -148,6 +149,7 @@
     <ClInclude Include="..\chat.h" />
     <ClInclude Include="..\config.h" />
     <ClInclude Include="..\corpus.h" />
+    <ClInclude Include="..\diagnostics.h" />
     <ClInclude Include="..\checkpoint.h" />
     <ClInclude Include="..\forward.h" />
     <ClInclude Include="..\gradcheck.h" />
