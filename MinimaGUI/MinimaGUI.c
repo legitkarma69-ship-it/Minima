@@ -30,6 +30,8 @@
 #define IDT_GRAPH_REFRESH 1
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
+static HWND g_tab_controls[40];
+static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
@@ -207,6 +209,20 @@ static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* ar
     return TRUE;
 }
 
+static BOOL add_corpus_path(const wchar_t* path) {
+    int count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
+    if (count < 0) return FALSE;
+    for (int i = 0; i < count; ++i) {
+        wchar_t existing[MAX_PATH * 2];
+        if (SendMessageW(g_corpus, LB_GETTEXT, i, (LPARAM)existing) >= 0 &&
+            _wcsicmp(existing, path) == 0)
+            return TRUE; /* Ignore duplicate selections. */
+    }
+    if (count >= 32) return FALSE;
+    LRESULT result = SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)path);
+    return result != LB_ERR && result != LB_ERRSPACE;
+}
+
 static void add_corpus_files(void) {
     wchar_t file_buffer[32768] = { 0 };
     OPENFILENAMEW ofn;
@@ -220,17 +236,25 @@ static void add_corpus_files(void) {
         OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
     if (!GetOpenFileNameW(&ofn)) return;
 
+    BOOL limit_reached = FALSE;
     wchar_t* first = file_buffer;
     wchar_t* next = first + wcslen(first) + 1;
     if (!*next) {
-        SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)first);
-        return;
+        if (!add_corpus_path(first))
+            limit_reached = TRUE;
+    } else {
+        while (*next) {
+            wchar_t full[MAX_PATH * 2];
+            _snwprintf_s(full, _countof(full), _TRUNCATE, L"%s\\%s", first, next);
+            if (!add_corpus_path(full))
+                limit_reached = TRUE;
+            next += wcslen(next) + 1;
+        }
     }
-    while (*next) {
-        wchar_t full[MAX_PATH * 2];
-        _snwprintf_s(full, _countof(full), _TRUNCATE, L"%s\\%s", first, next);
-        SendMessageW(g_corpus, LB_ADDSTRING, 0, (LPARAM)full);
-        next += wcslen(next) + 1;
+    if (limit_reached) {
+        MessageBoxW(g_window,
+            L"The corpus list supports up to 32 distinct files. Additional selections were not added.",
+            L"ProjectMinima", MB_ICONWARNING);
     }
 }
 
@@ -449,6 +473,10 @@ static void send_chat_message(void) {
 static void stop_generation(void) {
     if(g_process && g_chat_mode && InterlockedCompareExchange(&g_running,0,0)){
         append_log(L"\r\nStopping generation...\r\n");
+        EnableWindow(g_chat_input,FALSE);
+        EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
+        EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),FALSE);
+        SetWindowTextW(g_status,L"Stopping chat");
         TerminateProcess(g_process,3);
     }
 }
@@ -669,6 +697,25 @@ static void create_controls(HWND hwnd) {
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 
+    /* Make every interactive control reachable through normal keyboard tab navigation. */
+    HWND tab_controls[] = {
+        g_corpus, GetDlgItem(hwnd,IDC_ADD), GetDlgItem(hwnd,IDC_REMOVE),
+        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_steps,g_resume,
+        g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
+        g_validation_interval,g_validation_batches,g_checkpoint_interval,
+        g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
+        g_max_tokens,g_lr_schedule,g_tokenizer_sampling,
+        GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
+        GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_SAVE_NOW),
+        g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
+    };
+    g_tab_control_count=(int)_countof(tab_controls);
+    for(int i=0;i<g_tab_control_count;i++) {
+        g_tab_controls[i]=tab_controls[i];
+        LONG_PTR style=GetWindowLongPtrW(g_tab_controls[i],GWL_STYLE);
+        SetWindowLongPtrW(g_tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
+    }
+
     load_settings();
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
@@ -718,8 +765,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         switch (LOWORD(wp)) {
         case IDC_ADD: add_corpus_files(); return 0;
         case IDC_REMOVE: {
-            int selected[128];
-            LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 128, (LPARAM)selected);
+            int selected[32];
+            LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
             for (int i = (int)n - 1; i >= 0; --i)
                 SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
             return 0;
@@ -812,6 +859,24 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+        if(msg.message==WM_KEYDOWN && msg.wParam==VK_TAB &&
+           GetAncestor(GetFocus(),GA_ROOT)==hwnd) {
+            BOOL backwards=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+            int current=-1;
+            for(int i=0;i<g_tab_control_count;i++)
+                if(g_tab_controls[i]==GetFocus()){current=i;break;}
+            for(int offset=1;offset<=g_tab_control_count;offset++) {
+                int index=backwards
+                    ? (current-offset+g_tab_control_count*2)%g_tab_control_count
+                    : (current+offset)%g_tab_control_count;
+                HWND target=g_tab_controls[index];
+                if(IsWindowVisible(target) && IsWindowEnabled(target)) {
+                    SetFocus(target);
+                    break;
+                }
+            }
+            continue;
+        }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
