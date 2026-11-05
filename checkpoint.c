@@ -107,7 +107,7 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     if (!write_bytes(f, magic, 1, sizeof(magic)) ||
         !write_bytes(f, &version, sizeof(version), 1) ||
         !write_bytes(f, dims, sizeof(uint32_t), 6) ||
-        !write_bytes(f, &params, sizeof(params), 1) ||
+        !write_bytes(f, &checkpoint_params, sizeof(checkpoint_params), 1) ||
         !write_bytes(f, &step, sizeof(step), 1) ||
         !write_bytes(f, &rng_state, sizeof(rng_state), 1) ||
         !write_bytes(f, &tokenizer_hash, sizeof(tokenizer_hash), 1) ||
@@ -190,17 +190,15 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !opt->v_rms2_scale || !opt->v_rms_final_scale)
         return false;
 
-    const size_t params = model_parameter_count(model);
-    if (params > SIZE_MAX / (3 * sizeof(float))) return false;
-    float* staging = (float*)malloc(params * 3 * sizeof(float));
+    const size_t param_count = model_parameter_count(model);
+    if (param_count > SIZE_MAX / (3 * sizeof(float))) return false;
+    float* staging = (float*)malloc(param_count * 3 * sizeof(float));
     if (!staging) return false;
 
     Model staged_model = *model;
     Optim staged_opt = *opt;
     float* cursor = staging;
     Model* m = &staged_model;
-    Optim* opt_stage = &staged_opt;
-    (void)opt_stage;
     MODEL_ARRAYS(STAGE_MODEL);
     OPT_ARRAYS(STAGE_OPT_MOMENTS);
 
@@ -209,7 +207,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
 
     char magic[8];
     uint32_t version = 0, dims[6] = { 0 };
-    uint64_t params = 0;
+    uint64_t checkpoint_params = 0;
     int64_t step = 0;
     uint64_t rng_state = 0, saved_tokenizer_hash = 0;
     float lr, beta1, beta2, eps, weight_decay;
@@ -236,8 +234,8 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         dims[3] != (uint32_t)model->n_heads ||
         dims[4] != (uint32_t)model->ffn_dim ||
         dims[5] != (uint32_t)model->max_seq ||
-        params != (uint64_t)model_parameter_count(model) ||
-        params != (uint64_t)opt->n_params ||
+        checkpoint_params != (uint64_t)model_parameter_count(model) ||
+        checkpoint_params != (uint64_t)opt->n_params ||
         saved_tokenizer_hash != tokenizer_hash ||
         step < 0 || !isfinite(lr) || lr < 0.0f ||
         !isfinite(beta1) || beta1 < 0.0f || beta1 >= 1.0f ||
@@ -251,7 +249,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
 
     // Reject truncated files, unexpected trailing bytes, and non-finite state.
     if (fgetc(f) != EOF || ferror(f)) goto fail;
-    for (size_t i = 0; i < params * 3; ++i)
+    for (size_t i = 0; i < param_count * 3; ++i)
         if (!isfinite(staging[i])) goto fail;
 
     if (fclose(f) != 0) { free(staging); return false; }
