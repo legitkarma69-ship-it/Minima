@@ -113,8 +113,25 @@ jobs:
       - name: Verify checkpoint resume diagnostics
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
+          $output = & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --sequence-length 8 --max-seq 72 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "\`n"
+          if ($text -notmatch "Model-quality diagnostics complete") {
+            throw "Model-quality diagnostics did not complete."
+          }
+          $tokenRows = @(Import-Csv ".\minima_token_frequency.csv")
+          $frequencyRows = @(Import-Csv ".\minima_frequency_loss.csv")
+          $generationRows = @(Import-Csv ".\minima_generation_diagnostics.csv")
+          if ($tokenRows.Count -ne 300) {
+            throw "Tokenizer frequency report should contain all 300 vocabulary IDs."
+          }
+          if ($frequencyRows.Count -ne 10) {
+            throw "Frequency-loss report should contain 10 split/bucket rows."
+          }
+          if ($generationRows.Count -ne 40) {
+            throw "Generation report should contain 8 prompts x 5 deterministic modes."
+          }
 
 
       - name: Verify resumed global-step learning-rate schedule
