@@ -7,17 +7,19 @@
 #include "backward.h"
 #include "gradcheck.h"
 #include "generate.h"
+#include "corpus.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #define BATCH     4
 #define SEQ       32
 #define STEPS     80
 #define LR        3e-4f
 
-int main(void) {
+int main(int argc, char** argv) {
     printf("ProjectMinima smoke test - overfitting a short string\n\n");
 
     // ------------------------------------------------------------------
@@ -32,38 +34,112 @@ int main(void) {
         die("temp arena failed");
 
     // ------------------------------------------------------------------
-    // 2. Tiny synthetic corpus
+    // 2. Load plain-text training data
     // ------------------------------------------------------------------
-    const char* text =
-        "The quick brown fox jumps over the lazy dog. "
-        "Hello world from a tiny language model. "
-        "Pure C is enough for small transformers. ";
-    size_t text_len = strlen(text);
+    const size_t max_corpus_bytes = 64u * 1024u * 1024u;
+    Corpus loaded_corpus;
+    bool have_corpus = false;
 
-    // Repeat it so we have enough tokens
-    size_t corpus_len = text_len * 80;
-    uint8_t* corpus = arena_alloc(&arena, corpus_len + 1);
-    if (!corpus) die("corpus allocation failed");
+    if (argc > 1) {
+        if (!corpus_load_files(&loaded_corpus, &arena,
+            (const char* const*)(argv + 1), (size_t)(argc - 1),
+            max_corpus_bytes))
+            die("could not load usable text from the supplied corpus paths");
+        have_corpus = true;
+    }
+    else {
+        const char* project_paths[] = {
+            "../data/books.txt",
+            "../data/chatlogs.txt"
+        };
+        have_corpus = corpus_load_files(&loaded_corpus, &arena,
+            project_paths, 2, max_corpus_bytes);
 
-    for (size_t i = 0; i < 80; i++)
-        memcpy(corpus + i * text_len, text, text_len);
-    corpus[corpus_len] = 0;
+        // Also support launching with the repository root as working directory.
+        if (!have_corpus) {
+            const char* root_paths[] = {
+                "data/books.txt",
+                "data/chatlogs.txt"
+            };
+            have_corpus = corpus_load_files(&loaded_corpus, &arena,
+                root_paths, 2, max_corpus_bytes);
+        }
+    }
+
+    uint8_t* corpus = NULL;
+    size_t corpus_len = 0;
+
+    if (have_corpus) {
+        corpus = loaded_corpus.data;
+        corpus_len = loaded_corpus.length;
+        printf("\nCorpus: %zu bytes from %zu file(s)\n",
+            corpus_len, loaded_corpus.files_loaded);
+    }
+    else {
+        if (argc > 1)
+            die("the supplied corpus files contained no usable text");
+
+        // Empty placeholder files fall back to the deterministic smoke corpus.
+        const char* smoke_text =
+            "The quick brown fox jumps over the lazy dog. "
+            "Hello world from a tiny language model. "
+            "Pure C is enough for small transformers. ";
+        size_t smoke_len = strlen(smoke_text);
+        corpus_len = smoke_len * 80;
+        corpus = (uint8_t*)arena_alloc(&arena, corpus_len + 1);
+        if (!corpus) die("smoke corpus allocation failed");
+
+        for (size_t i = 0; i < 80; i++)
+            memcpy(corpus + i * smoke_len, smoke_text, smoke_len);
+        corpus[corpus_len] = 0;
+
+        printf("No training text found; using synthetic smoke corpus.\n");
+    }
+
+    if (corpus_len < (size_t)BATCH * SEQ + 1)
+        die("corpus too small: need at least %d bytes", BATCH * SEQ + 1);
+    if (corpus_len > (size_t)INT_MAX)
+        die("corpus exceeds tokenizer's integer token-capacity limit");
 
     // ------------------------------------------------------------------
-    // 3. Tokenizer
+    // 3. Train BPE on a bounded, evenly distributed corpus sample
+    // ------------------------------------------------------------------
+    const size_t tokenizer_sample_cap = 256u * 1024u;
+    size_t sample_len = corpus_len < tokenizer_sample_cap
+        ? corpus_len : tokenizer_sample_cap;
+    uint8_t* tokenizer_sample = (uint8_t*)arena_alloc(&arena, sample_len);
+    if (!tokenizer_sample) die("tokenizer sample allocation failed");
+
+    if (corpus_len <= tokenizer_sample_cap) {
+        memcpy(tokenizer_sample, corpus, sample_len);
+    }
+    else {
+        const size_t chunks = 64;
+        const size_t chunk_len = sample_len / chunks;
+        for (size_t i = 0; i < chunks; i++) {
+            size_t start = ((corpus_len - chunk_len) * i) / (chunks - 1);
+            memcpy(tokenizer_sample + i * chunk_len,
+                corpus + start, chunk_len);
+        }
+    }
+
+    printf("Tokenizer training sample: %zu bytes\n", sample_len);
+
+    // ------------------------------------------------------------------
+    // 4. Tokenizer and corpus encoding
     // ------------------------------------------------------------------
     Tokenizer tok;
-    if (!tokenizer_train(&tok, &arena, corpus, corpus_len, MODEL_VOCAB_SIZE))
+    if (!tokenizer_train(&tok, &arena, tokenizer_sample,
+        sample_len, MODEL_VOCAB_SIZE))
         die("tokenizer_train failed");
     printf("vocab size = %d\n", tok.vocab_size);
 
-    // ------------------------------------------------------------------
-    // 4. Tokenise the whole corpus once
-    // ------------------------------------------------------------------
-    uint16_t* all_ids = arena_alloc(&arena, corpus_len * sizeof(uint16_t));
+    uint16_t* all_ids = (uint16_t*)arena_alloc(&arena,
+        corpus_len * sizeof(uint16_t));
     if (!all_ids) die("token id allocation failed");
 
-    int n_tokens = tokenizer_encode(&tok, corpus, corpus_len, all_ids, (int)corpus_len);
+    int n_tokens = tokenizer_encode(&tok, corpus, corpus_len,
+        all_ids, (int)corpus_len);
     printf("total tokens = %d\n\n", n_tokens);
 
     if (n_tokens < BATCH * SEQ + 1)
