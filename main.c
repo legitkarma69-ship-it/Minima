@@ -433,7 +433,8 @@ int main(int argc, char** argv) {
     float* dlogits;
 
     const int warmup_steps = steps_to_run < WARMUP_STEPS
-        ? (steps_to_run > 1 ? steps_to_run / 10 : 0) : WARMUP_STEPS;
+        ? (steps_to_run / 10 > 0 ? steps_to_run / 10 :
+            (steps_to_run > 1 ? 1 : 0)) : WARMUP_STEPS;
     const int64_t initial_step = opt.step;
 
     printf(" step | train loss | valid loss | learning rate\n");
@@ -476,8 +477,9 @@ int main(int argc, char** argv) {
 
         // Each invocation is an additional training segment with its own
         // warmup + cosine decay. AdamW's bias-correction step remains global.
-        opt.lr = optim_lr_cosine(LR, local_step + 1,
-            warmup_steps, steps_to_run);
+        opt.lr = steps_to_run == 1 ? LR :
+            optim_lr_cosine(LR, local_step + 1,
+                warmup_steps, steps_to_run);
         optim_step(&opt, &model, &grads);
 
         train_loss_sum += loss;
