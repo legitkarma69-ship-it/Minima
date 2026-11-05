@@ -260,6 +260,25 @@ int main(int argc, char** argv) {
     printf("\nSaved tokenizer: minima.bpe\n");
     printf("Saved model + optimizer: minima.model (step %d)\n", STEPS);
 
+    // Exercise the loader by deliberately corrupting one saved value,
+    // then confirm the checkpoint restores both weights and AdamW moments.
+    float saved_weight = model.tok_emb[0];
+    float saved_moment = opt.m_tok_emb[0];
+    float saved_variance = opt.v_tok_emb[0];
+    model.tok_emb[0] += 1.0f;
+    opt.m_tok_emb[0] += 1.0f;
+    opt.v_tok_emb[0] += 1.0f;
+
+    if (!checkpoint_load("minima.model", &model, &opt))
+        die("checkpoint round-trip load failed");
+    if (model.tok_emb[0] != saved_weight ||
+        opt.m_tok_emb[0] != saved_moment ||
+        opt.v_tok_emb[0] != saved_variance ||
+        opt.step != STEPS)
+        die("checkpoint round-trip verification failed");
+
+    printf("Checkpoint round-trip: PASS (weights, optimizer moments, step)\\n");
+
     // ------------------------------------------------------------------
     // 9. Autoregressive generation smoke test
     // ------------------------------------------------------------------
