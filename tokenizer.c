@@ -27,12 +27,11 @@ typedef struct {
     int32_t  new_id;  // filled after merge decision
 } PairSlot;
 
-#define PAIR_HASH_SIZE  (1 << 18)   // 256 k slots – enough for 8k vocab
 
-static uint32_t pair_hash(uint16_t left, uint16_t right) {
+static size_t pair_hash(uint16_t left, uint16_t right, size_t table_size) {
     uint32_t k = ((uint32_t)left << 16) | right;
     k *= 0x9e3779b9u;
-    return k & (PAIR_HASH_SIZE - 1);
+    return (size_t)k & (table_size - 1);
 }
 
 // ------------------------------------------------------------------
@@ -43,8 +42,9 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len,
     int target_vocab) {
 
-    if (target_vocab < 260 || target_vocab > TOK_MAX_VOCAB)
-        die("vocab_size must be 260..%d", TOK_MAX_VOCAB);
+    if (!tok || !arena || !sample || sample_len == 0 ||
+        target_vocab < 260 || target_vocab > TOK_MAX_VOCAB)
+        return false;
 
     memset(tok, 0, sizeof(*tok));
 
@@ -80,15 +80,26 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
         ids[n++] = (uint16_t)(TOK_BYTE_START + sample[i]);
     }
 
-    // 4. Pair counting table (temporary, lives in arena)
-    PairSlot* table = arena_alloc_zero(arena, PAIR_HASH_SIZE * sizeof(PairSlot));
-    if (!table) die("arena OOM for pair table");
+    // 4. Pair counting table (temporary, lives in arena). Size it from
+    // the maximum possible number of adjacent pairs in this sample, keeping
+    // the load factor at or below 0.5 instead of relying on a fixed table.
+    if (sample_len > SIZE_MAX / 2) return false;
+    size_t pair_hash_size = (size_t)1 << 18;
+    const size_t required_slots = sample_len * 2;
+    while (pair_hash_size < required_slots) {
+        if (pair_hash_size > SIZE_MAX / 2) return false;
+        pair_hash_size *= 2;
+    }
+    if (pair_hash_size > SIZE_MAX / sizeof(PairSlot)) return false;
+    PairSlot* table = arena_alloc_zero(arena,
+        pair_hash_size * sizeof(PairSlot));
+    if (!table) return false;
 
     int merges_needed = target_vocab - tok->vocab_size;
 
     for (int m = 0; m < merges_needed; m++) {
         // Clear counts
-        for (int i = 0; i < PAIR_HASH_SIZE; i++) {
+        for (size_t i = 0; i < pair_hash_size; i++) {
             table[i].count = 0;
             table[i].key = 0;
         }
@@ -105,13 +116,13 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
                 len_a > TOK_MAX_TOKEN_LEN - len_b)
                 continue;
 
-            uint32_t h = pair_hash(a, b);
+            size_t h = pair_hash(a, b, pair_hash_size);
             // Linear probing must either find this pair or an empty slot.
             // A bounded 32-slot search silently loses counts under collisions.
             bool inserted = false;
             const uint32_t key = ((uint32_t)a << 16) | b;
-            for (uint32_t probe = 0; probe < PAIR_HASH_SIZE; probe++) {
-                uint32_t slot = (h + probe) & (PAIR_HASH_SIZE - 1);
+            for (size_t probe = 0; probe < pair_hash_size; probe++) {
+                size_t slot = (h + probe) & (pair_hash_size - 1);
                 if (table[slot].count == 0) {
                     table[slot].key = key;
                     table[slot].count = 1;
@@ -120,20 +131,20 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
                 }
                 if (table[slot].key == key) {
                     if (table[slot].count == INT32_MAX)
-                        die("BPE pair count overflow");
+                        return false;
                     table[slot].count++;
                     inserted = true;
                     break;
                 }
             }
             if (!inserted)
-                die("BPE pair hash table is full; increase PAIR_HASH_SIZE");
+                return false;
         }
 
         // Find most frequent pair
         int best_count = 0;
         uint16_t best_left = 0, best_right = 0;
-        for (int i = 0; i < PAIR_HASH_SIZE; i++) {
+        for (size_t i = 0; i < pair_hash_size; i++) {
             if (table[i].count > best_count) {
                 best_count = table[i].count;
                 best_left = (uint16_t)(table[i].key >> 16);
