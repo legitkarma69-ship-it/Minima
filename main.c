@@ -133,6 +133,58 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     return path_count;
 }
 
+static void print_repetition_stats(const uint16_t* ids,
+    int prompt_len, int total_len) {
+    const int n = total_len - prompt_len;
+    if (!ids || n <= 0) return;
+
+    int unique = 0;
+    int adjacent_repeats = 0;
+    for (int i = 0; i < n; i++) {
+        bool seen = false;
+        for (int j = 0; j < i; j++) {
+            if (ids[prompt_len + i] == ids[prompt_len + j]) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) unique++;
+        if (i > 0 && ids[prompt_len + i] == ids[prompt_len + i - 1])
+            adjacent_repeats++;
+    }
+
+    int repeated_ngram_len = 0;
+    int repeated_ngram_count = 1;
+    for (int width = 2; width <= 4 && width <= n; width++) {
+        for (int i = 0; i + width <= n; i++) {
+            int count = 1;
+            for (int j = i + 1; j + width <= n; j++) {
+                bool equal = true;
+                for (int k = 0; k < width; k++) {
+                    if (ids[prompt_len + i + k] !=
+                        ids[prompt_len + j + k]) {
+                        equal = false;
+                        break;
+                    }
+                }
+                if (equal) count++;
+            }
+            if (count > repeated_ngram_count) {
+                repeated_ngram_count = count;
+                repeated_ngram_len = width;
+            }
+        }
+    }
+
+    printf("      repetition: unique=%d/%d, adjacent-identical=%d, ",
+        unique, n, adjacent_repeats);
+    if (repeated_ngram_len > 0)
+        printf("most-repeated %d-token pattern occurs %d times\n",
+            repeated_ngram_len, repeated_ngram_count);
+    else
+        printf("no repeated 2-4 token pattern\n");
+}
+
 static bool run_generation_benchmark(Model* model, Tokenizer* tok,
     KVCache* cache) {
     static const char* prompts[] = {
@@ -143,10 +195,12 @@ static bool run_generation_benchmark(Model* model, Tokenizer* tok,
         "It was a dark"
     };
 
-    printf("\nDeterministic generation benchmark (greedy, top-k=1)\n");
+    printf("\nGeneration diagnostics\n");
+    printf("  Greedy decoding is tested for repeatability; sampled modes use fixed seeds.\n");
     uint16_t prompt_ids[64];
-    uint16_t output_ids[64];
+    uint16_t greedy_ids[64];
     uint16_t verify_ids[64];
+    uint16_t sample_ids[64];
     char output_text[64 * TOK_MAX_TOKEN_LEN + 1];
 
     for (size_t i = 0; i < sizeof(prompts) / sizeof(prompts[0]); i++) {
@@ -159,42 +213,67 @@ static bool run_generation_benchmark(Model* model, Tokenizer* tok,
             return false;
         }
 
-        kvcache_reset(cache);
-        Rng generation_rng;
-        rng_seed(&generation_rng, 5678u + (uint64_t)i);
-        const int generated_len = generate(model, tok, cache,
-            prompt_ids, prompt_len, output_ids, 64,
-            32, 1.0f, 1, &generation_rng);
-        if (generated_len <= prompt_len) {
-            printf("  [%zu] generation failed\n", i + 1);
+        printf("\n  [%zu] Prompt: \"%s\"\n", i + 1, prompts[i]);
+        if (!generation_inspect_next_tokens(model, tok, cache,
+            prompt_ids, prompt_len, 10)) {
+            printf("  next-token inspection failed\n");
             return false;
         }
 
-        // Repeat from the same cache state and RNG seed. Greedy top-k=1
-        // must reproduce the exact same token sequence.
-        kvcache_reset(cache);
+        // Greedy run and exact deterministic repeat.
+        Rng greedy_rng;
+        rng_seed(&greedy_rng, 5678u + (uint64_t)i);
+        const int greedy_len = generate(model, tok, cache,
+            prompt_ids, prompt_len, greedy_ids, 64,
+            32, 1.0f, 1, &greedy_rng);
+        if (greedy_len <= prompt_len) return false;
+
         Rng verify_rng;
         rng_seed(&verify_rng, 5678u + (uint64_t)i);
         const int verify_len = generate(model, tok, cache,
             prompt_ids, prompt_len, verify_ids, 64,
             32, 1.0f, 1, &verify_rng);
-        if (verify_len != generated_len ||
-            memcmp(output_ids, verify_ids,
-                (size_t)generated_len * sizeof(uint16_t)) != 0) {
-            printf("  [%zu] deterministic generation: FAIL\n", i + 1);
+        if (verify_len != greedy_len ||
+            memcmp(greedy_ids, verify_ids,
+                (size_t)greedy_len * sizeof(uint16_t)) != 0) {
+            printf("  deterministic greedy check: FAIL\n");
             return false;
         }
 
-        const int bytes = tokenizer_decode(tok, output_ids,
-            generated_len, output_text, (int)sizeof(output_text));
-        if (bytes <= 0) {
-            printf("  [%zu] decoding failed\n", i + 1);
-            return false;
-        }
-        printf("  [%zu] %s\n", i + 1, output_text);
+        int bytes = tokenizer_decode(tok, greedy_ids,
+            greedy_len, output_text, (int)sizeof(output_text));
+        if (bytes <= 0) return false;
+        printf("    greedy (T=1.0, k=1): %s\n", output_text);
+        print_repetition_stats(greedy_ids, prompt_len, greedy_len);
+
+        // Lower-temperature top-k sampling.
+        Rng sample_rng;
+        rng_seed(&sample_rng, 9100u + (uint64_t)i);
+        int sample_len = generate(model, tok, cache,
+            prompt_ids, prompt_len, sample_ids, 64,
+            32, 0.8f, 40, &sample_rng);
+        if (sample_len <= prompt_len) return false;
+        bytes = tokenizer_decode(tok, sample_ids,
+            sample_len, output_text, (int)sizeof(output_text));
+        if (bytes <= 0) return false;
+        printf("    sampled (T=0.8, k=40): %s\n", output_text);
+        print_repetition_stats(sample_ids, prompt_len, sample_len);
+
+        // Slightly warmer sampling shows whether diversity improves or
+        // merely turns repetition into noisy token selection.
+        rng_seed(&sample_rng, 12100u + (uint64_t)i);
+        sample_len = generate(model, tok, cache,
+            prompt_ids, prompt_len, sample_ids, 64,
+            32, 1.0f, 40, &sample_rng);
+        if (sample_len <= prompt_len) return false;
+        bytes = tokenizer_decode(tok, sample_ids,
+            sample_len, output_text, (int)sizeof(output_text));
+        if (bytes <= 0) return false;
+        printf("    sampled (T=1.0, k=40): %s\n", output_text);
+        print_repetition_stats(sample_ids, prompt_len, sample_len);
     }
 
-    printf("Determinism check: PASS (all prompts reproduced exactly)\n");
+    printf("\nDeterministic greedy check: PASS (all prompts reproduced exactly)\n");
     return true;
 }
 
@@ -442,6 +521,8 @@ int main(int argc, char** argv) {
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
+    float last_train_loss = NAN;
+    float last_validation_loss = NAN;
 
     for (int local_step = 0; local_step < steps_to_run; local_step++) {
         arena_reset(&temp);
@@ -494,6 +575,8 @@ int main(int argc, char** argv) {
 
             const double average_train_loss =
                 train_loss_sum / (double)train_loss_count;
+            last_train_loss = (float)average_train_loss;
+            last_validation_loss = validation_loss;
 
             printf("%5lld | %10.4f | %10.4f | %.7f\n",
                 (long long)opt.step, (float)average_train_loss,
@@ -513,6 +596,14 @@ int main(int argc, char** argv) {
     const int64_t final_step = opt.step;
     printf("\nTraining segment complete: %lld -> %lld\n",
         (long long)initial_step, (long long)final_step);
+
+    if (!isfinite(last_train_loss) || !isfinite(last_validation_loss))
+        die("final loss diagnostics are unavailable");
+    printf("\nFinal loss and perplexity (last reporting window)\n");
+    printf("  train loss      : %.4f\n", last_train_loss);
+    printf("  train perplexity: %.2f\n", expf(last_train_loss));
+    printf("  valid loss      : %.4f\n", last_validation_loss);
+    printf("  valid perplexity: %.2f\n", expf(last_validation_loss));
 
     // ------------------------------------------------------------------
     // 8. Tokenizer and checkpoint round-trip regression checks
