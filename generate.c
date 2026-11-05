@@ -1,4 +1,5 @@
 #include "generate.h"
+#include "forward.h"
 #include "util.h"
 #include <math.h>
 #include <string.h>
