@@ -36,13 +36,6 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
     return hash;
 }
 
-static uint64_t corpus_fingerprint(const uint8_t* data, size_t length) {
-    if (!data || length == 0) return 0;
-    uint64_t hash = 14695981039346656037ULL;
-    hash = hash_bytes(hash, data, length);
-    return hash ? hash : 1;
-}
-
 static void print_usage(const char* exe) {
     printf("Usage: %s [--resume] [--steps N] [corpus.txt ...]\n", exe);
     printf("  --resume   Continue from minima.model and minima.bpe\n");
@@ -305,9 +298,6 @@ int main(int argc, char** argv) {
     if (corpus_len > (size_t)INT_MAX)
         die("corpus exceeds tokenizer's current INT_MAX byte/token-capacity limit");
 
-    const uint64_t corpus_hash = corpus_fingerprint(corpus, corpus_len);
-    if (!corpus_hash) die("failed to fingerprint training corpus");
-
     // ------------------------------------------------------------------
     // 3. Load or train tokenizer
     // ------------------------------------------------------------------
@@ -396,7 +386,7 @@ int main(int argc, char** argv) {
 
     if (resume) {
         if (!checkpoint_load("minima.model", &model, &opt,
-            &rng, tokenizer_hash, corpus_hash))
+            &rng, tokenizer_hash))
             die("checkpoint load failed: model, tokenizer, or corpus does not match");
         printf("Resumed checkpoint at optimizer step %lld\n\n",
             (long long)opt.step);
@@ -431,7 +421,7 @@ int main(int argc, char** argv) {
     // Create a valid step-zero checkpoint before training starts. If the
     // process is interrupted early, --resume still has a matching baseline.
     if (!resume && !checkpoint_save("minima.model", &model, &opt,
-        &rng, tokenizer_hash, corpus_hash))
+        &rng, tokenizer_hash))
         die("initial checkpoint save failed");
 
     // ------------------------------------------------------------------
@@ -513,7 +503,7 @@ int main(int argc, char** argv) {
             // Save at every reporting interval so an interrupted run loses
             // at most LOG_INTERVAL - 1 optimizer steps.
             if (!checkpoint_save("minima.model", &model, &opt,
-                &rng, tokenizer_hash, corpus_hash))
+                &rng, tokenizer_hash))
                 die("periodic checkpoint save failed");
         }
     }
@@ -558,7 +548,7 @@ int main(int argc, char** argv) {
     rng.state ^= 0x55aa55aa55aa55aaULL;
 
     if (!checkpoint_load("minima.model", &model, &opt,
-        &rng, tokenizer_hash, corpus_hash))
+        &rng, tokenizer_hash))
         die("checkpoint round-trip load failed");
     if (model.tok_emb[0] != saved_weight ||
         opt.m_tok_emb[0] != saved_moment ||
