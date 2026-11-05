@@ -129,6 +129,7 @@
   <ItemGroup>
     <ClCompile Include="..\arena.c" />
     <ClCompile Include="..\backward.c" />
+    <ClCompile Include="..\chat.c" />
     <ClCompile Include="..\corpus.c" />
     <ClCompile Include="..\checkpoint.c" />
     <ClCompile Include="..\forward.c" />
@@ -138,11 +139,13 @@
     <ClCompile Include="..\model.c" />
     <ClCompile Include="..\optim.c" />
     <ClCompile Include="..\tokenizer.c" />
+    <ClCompile Include="..\train.c" />
     <ClCompile Include="..\util.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\arena.h" />
     <ClInclude Include="..\backward.h" />
+    <ClInclude Include="..\chat.h" />
     <ClInclude Include="..\config.h" />
     <ClInclude Include="..\corpus.h" />
     <ClInclude Include="..\checkpoint.h" />
@@ -152,6 +155,7 @@
     <ClInclude Include="..\model.h" />
     <ClInclude Include="..\optim.h" />
     <ClInclude Include="..\tokenizer.h" />
+    <ClInclude Include="..\train.h" />
     <ClInclude Include="..\util.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -10,6 +10,8 @@
 #include "corpus.h"
 #include "checkpoint.h"
 #include "config.h"
+#include "train.h"
+#include "chat.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -87,116 +89,6 @@ static void print_usage(const char* exe) {
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
     printf("  --use-existing-tokenizer (fresh model using a previously rebuilt minima.bpe)\n");
     printf("  --diagnostics-only --help\n");
-}
-
-static float evaluate_loss(Model* model, Arena* temp,
-    const uint16_t* all_ids, int validation_start, int validation_tokens,
-    int validation_batches, int batch_size, int seq_len) {
-
-    if (!model || !temp || !all_ids ||
-        validation_start < 0 || validation_tokens < batch_size * seq_len + 1 || validation_batches < 1)
-        return NAN;
-
-    arena_reset(temp);
-
-    Activations act;
-    if (!activations_init(&act, temp, batch_size, seq_len, model))
-        return NAN;
-
-    float* dlogits = arena_alloc(temp,
-        (size_t)batch_size * seq_len * model->vocab_size * sizeof(float));
-    uint16_t* batch_tokens = arena_alloc(temp,
-        (size_t)batch_size * seq_len * sizeof(uint16_t));
-    uint16_t* batch_targets = arena_alloc(temp,
-        (size_t)batch_size * seq_len * sizeof(uint16_t));
-
-    if (!dlogits || !batch_tokens || !batch_targets)
-        return NAN;
-
-    const size_t span = (size_t)validation_tokens - seq_len - 1;
-    double loss_sum = 0.0;
-
-    // Evaluate fixed, evenly spaced windows across the held-out region.
-    for (int eval_batch = 0; eval_batch < validation_batches; eval_batch++) {
-        for (int b = 0; b < batch_size; b++) {
-            const size_t sample_index = (size_t)eval_batch * batch_size + b;
-            const size_t sample_count = (size_t)validation_batches * batch_size;
-            const size_t offset = sample_count > 1
-                ? (span * sample_index) / (sample_count - 1) : 0;
-            const int start = validation_start + (int)offset;
-
-            for (int t = 0; t < seq_len; t++) {
-                batch_tokens[b * seq_len + t] = all_ids[start + t];
-                batch_targets[b * seq_len + t] = all_ids[start + t + 1];
-            }
-        }
-
-        float* logits = model_forward(model, &act,
-            batch_tokens, batch_size, seq_len);
-        if (!logits) return NAN;
-
-        const float loss = loss_cross_entropy(logits, batch_targets,
-            dlogits, batch_size, seq_len, model->vocab_size);
-        if (!isfinite(loss)) return NAN;
-        loss_sum += loss;
-    }
-
-    return (float)(loss_sum / validation_batches);
-}
-
-static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
-    const TrainOptions* options) {
-    uint16_t history[512], input_ids[8192], prompt[512], output[512];
-    int history_len=0;
-    char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
-    puts("CHAT_READY");
-    puts("ProjectMinima chat. Type /quit to exit.");
-    for(;;){
-        if(!fgets(line,sizeof(line),stdin))break;
-        size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\n'||line[bytes-1]=='\r'))line[--bytes]=0;
-        if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
-        if(!bytes){puts("CHAT_READY");continue;}
-        int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,(int)(sizeof(input_ids)/sizeof(input_ids[0])));
-        if(input_count<=0){puts("BOT: [input encoding failed]");puts("CHAT_READY");continue;}
-        if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
-        uint16_t separator[4];
-        int separator_count=history_len
-            ? tokenizer_encode(tok,(const uint8_t*)"\n",1,separator,4) : 0;
-        int prompt_len=history_len+separator_count+input_count;
-        if(prompt_len>model->max_seq-1){
-            int drop=prompt_len-(model->max_seq-1);
-            if(drop<history_len){memmove(history,history+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
-            else {history_len=0;separator_count=0;}
-            prompt_len=history_len+separator_count+input_count;
-        }
-        memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
-        if(separator_count)memcpy(prompt+history_len,separator,(size_t)separator_count*sizeof(uint16_t));
-        memcpy(prompt+history_len+separator_count,input_ids,(size_t)input_count*sizeof(uint16_t));
-        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)options->seed^(uint64_t)history_len);
-        int max_new=options->max_new_tokens;
-        if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
-        int total=generate_ex(model,tok,cache,prompt,prompt_len,output,512,max_new,
-            options->temperature,options->top_k,options->top_p,options->repetition_penalty,&rng);
-        if(total<=prompt_len){puts("BOT: [generation failed]");puts("CHAT_READY");continue;}
-        int decoded_bytes=tokenizer_decode(tok,output+prompt_len,total-prompt_len,decoded,(int)sizeof(decoded));
-        if(decoded_bytes<0)decoded[0]=0;
-        printf("BOT: %s\n",decoded);
-        history_len=total;
-        if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
-        else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
-        puts("CHAT_READY");
-    }
-    puts("CHAT_CLOSED");
-    return 0;
-}
-
-static bool stop_file_exists(const char* path) {
-    if (!path || !path[0]) return false;
-    FILE* f=fopen(path,"rb"); if(!f)return false; fclose(f); return true;
-}
-static bool consume_file_signal(const char* path) {
-    if(!stop_file_exists(path))return false;
-    remove(path);return true;
 }
 
 static int parse_arguments(int argc, char** argv, bool* resume,
@@ -343,196 +235,6 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         *steps = 0;
     }
     return path_count;
-}
-
-static void print_repetition_stats(const uint16_t* ids,
-    int prompt_len, int total_len) {
-    const int n = total_len - prompt_len;
-    if (!ids || n <= 0) return;
-
-    int unique = 0;
-    int adjacent_repeats = 0;
-    for (int i = 0; i < n; i++) {
-        bool seen = false;
-        for (int j = 0; j < i; j++) {
-            if (ids[prompt_len + i] == ids[prompt_len + j]) {
-                seen = true;
-                break;
-            }
-        }
-        if (!seen) unique++;
-        if (i > 0 && ids[prompt_len + i] == ids[prompt_len + i - 1])
-            adjacent_repeats++;
-    }
-
-    int frequent_ids[5] = { -1, -1, -1, -1, -1 };
-    int frequent_counts[5] = { 0, 0, 0, 0, 0 };
-    for (int i = 0; i < n; i++) {
-        const uint16_t id = ids[prompt_len + i];
-        bool counted = false;
-        for (int j = 0; j < i; j++) {
-            if (ids[prompt_len + j] == id) {
-                counted = true;
-                break;
-            }
-        }
-        if (counted) continue;
-
-        int count = 0;
-        for (int j = i; j < n; j++)
-            if (ids[prompt_len + j] == id) count++;
-
-        for (int slot = 0; slot < 5; slot++) {
-            if (count > frequent_counts[slot]) {
-                for (int move = 4; move > slot; move--) {
-                    frequent_counts[move] = frequent_counts[move - 1];
-                    frequent_ids[move] = frequent_ids[move - 1];
-                }
-                frequent_counts[slot] = count;
-                frequent_ids[slot] = id;
-                break;
-            }
-        }
-    }
-
-    printf("      most frequent token IDs:");
-    for (int i = 0; i < 5 && frequent_ids[i] >= 0; i++) {
-        printf(" %d=%d(%.1f%%)", frequent_ids[i], frequent_counts[i],
-            100.0 * (double)frequent_counts[i] / (double)n);
-    }
-    putchar('\n');
-
-    int repeated_ngram_len = 0;
-    int repeated_ngram_count = 1;
-    for (int width = 2; width <= 4 && width <= n; width++) {
-        for (int i = 0; i + width <= n; i++) {
-            int count = 1;
-            for (int j = i + 1; j + width <= n; j++) {
-                bool equal = true;
-                for (int k = 0; k < width; k++) {
-                    if (ids[prompt_len + i + k] !=
-                        ids[prompt_len + j + k]) {
-                        equal = false;
-                        break;
-                    }
-                }
-                if (equal) count++;
-            }
-            if (count > repeated_ngram_count) {
-                repeated_ngram_count = count;
-                repeated_ngram_len = width;
-            }
-        }
-    }
-
-    printf("      repetition: unique=%d/%d, adjacent-identical=%d, ",
-        unique, n, adjacent_repeats);
-    if (repeated_ngram_len > 0)
-        printf("most-repeated %d-token pattern occurs %d times\n",
-            repeated_ngram_len, repeated_ngram_count);
-    else
-        printf("no repeated 2-4 token pattern\n");
-}
-
-static bool run_generation_benchmark(Model* model, Tokenizer* tok,
-    KVCache* cache) {
-    static const char* prompts[] = {
-        "The quick brown fox",
-        "Once upon a time",
-        "In the beginning",
-        "The meaning of life",
-        "It was a dark"
-    };
-
-    printf("\nGeneration diagnostics\n");
-    printf("  Greedy decoding is tested for repeatability; sampled modes use fixed seeds.\n");
-    uint16_t prompt_ids[64];
-    uint16_t greedy_ids[64];
-    uint16_t verify_ids[64];
-    uint16_t sample_ids[64];
-    char output_text[64 * TOK_MAX_TOKEN_LEN + 1];
-
-    for (size_t i = 0; i < sizeof(prompts) / sizeof(prompts[0]); i++) {
-        const size_t prompt_bytes = strlen(prompts[i]);
-        const int prompt_len = tokenizer_encode(tok,
-            (const uint8_t*)prompts[i], prompt_bytes,
-            prompt_ids, (int)(sizeof(prompt_ids) / sizeof(prompt_ids[0])));
-        if (prompt_len <= 0) {
-            printf("  [%zu] prompt encoding failed\n", i + 1);
-            return false;
-        }
-
-        printf("\n  [%zu] Prompt: \"%s\"\n", i + 1, prompts[i]);
-        if (!generation_inspect_next_tokens(model, tok, cache,
-            prompt_ids, prompt_len, 10)) {
-            printf("  next-token inspection failed\n");
-            return false;
-        }
-
-        // Greedy run and exact deterministic repeat.
-        Rng greedy_rng;
-        rng_seed(&greedy_rng, 5678u + (uint64_t)i);
-        const int greedy_len = generate(model, tok, cache,
-            prompt_ids, prompt_len, greedy_ids, 64,
-            32, 1.0f, 1, &greedy_rng);
-        if (greedy_len <= prompt_len) return false;
-
-        Rng verify_rng;
-        rng_seed(&verify_rng, 5678u + (uint64_t)i);
-        const int verify_len = generate(model, tok, cache,
-            prompt_ids, prompt_len, verify_ids, 64,
-            32, 1.0f, 1, &verify_rng);
-        if (verify_len != greedy_len ||
-            memcmp(greedy_ids, verify_ids,
-                (size_t)greedy_len * sizeof(uint16_t)) != 0) {
-            printf("  deterministic greedy check: FAIL\n");
-            return false;
-        }
-
-        int bytes = tokenizer_decode(tok, greedy_ids,
-            greedy_len, output_text, (int)sizeof(output_text));
-        if (bytes <= 0) return false;
-        printf("    greedy (T=1.0, k=1): %s\n", output_text);
-        print_repetition_stats(greedy_ids, prompt_len, greedy_len);
-
-        // Lower-temperature top-k sampling.
-        Rng sample_rng;
-        rng_seed(&sample_rng, 9100u + (uint64_t)i);
-        int sample_len = generate(model, tok, cache,
-            prompt_ids, prompt_len, sample_ids, 64,
-            32, 0.8f, 40, &sample_rng);
-        if (sample_len <= prompt_len) return false;
-        bytes = tokenizer_decode(tok, sample_ids,
-            sample_len, output_text, (int)sizeof(output_text));
-        if (bytes <= 0) return false;
-        printf("    sampled (T=0.8, k=40): %s\n", output_text);
-        print_repetition_stats(sample_ids, prompt_len, sample_len);
-
-        // Slightly warmer sampling shows whether diversity improves or
-        // merely turns repetition into noisy token selection.
-        rng_seed(&sample_rng, 12100u + (uint64_t)i);
-        sample_len = generate(model, tok, cache,
-            prompt_ids, prompt_len, sample_ids, 64,
-            32, 1.0f, 40, &sample_rng);
-        if (sample_len <= prompt_len) return false;
-        bytes = tokenizer_decode(tok, sample_ids,
-            sample_len, output_text, (int)sizeof(output_text));
-        if (bytes <= 0) return false;
-        printf("    sampled (T=1.0, k=40): %s\n", output_text);
-        print_repetition_stats(sample_ids, prompt_len, sample_len);
-
-        rng_seed(&sample_rng,15100u+(uint64_t)i);
-        sample_len=generate_ex(model,tok,cache,prompt_ids,prompt_len,sample_ids,64,
-            32,0.8f,40,0.9f,1.1f,&sample_rng);
-        if(sample_len<=prompt_len)return false;
-        bytes=tokenizer_decode(tok,sample_ids,sample_len,output_text,(int)sizeof(output_text));
-        if(bytes<=0)return false;
-        printf("    sampled (T=0.8, k=40, p=0.9, repetition=1.1): %s\n",output_text);
-        print_repetition_stats(sample_ids,prompt_len,sample_len);
-    }
-
-    printf("\nDeterministic greedy check: PASS (all prompts reproduced exactly)\n");
-    return true;
 }
 
 int main(int argc, char** argv) {
@@ -794,7 +496,15 @@ int main(int argc, char** argv) {
         KVCache chat_cache;
         if(!kvcache_init(&chat_cache,&arena,&model,model.max_seq))
             die("chat KV cache initialization failed");
-        int chat_result=run_chat_console(&model,&tok,&chat_cache,&options);
+        ChatOptions chat_options = {
+            .seed = options.seed,
+            .temperature = options.temperature,
+            .top_p = options.top_p,
+            .repetition_penalty = options.repetition_penalty,
+            .top_k = options.top_k,
+            .max_new_tokens = options.max_new_tokens
+        };
+        int chat_result=chat_run_console(&model,&tok,&chat_cache,&chat_options);
         arena_free(&temp);arena_free(&arena);return chat_result;
     }
 
@@ -842,146 +552,26 @@ int main(int argc, char** argv) {
         &rng, tokenizer_hash))
         die("initial checkpoint save failed");
 
-    // ------------------------------------------------------------------
-    // 7. Continue training; optimizer step and RNG state are global
-    // ------------------------------------------------------------------
-    Activations act;
-    uint16_t* batch_tokens;
-    uint16_t* batch_targets;
-    float* dlogits;
-
-    const int64_t initial_step = opt.step;
-    if (!diagnostics_only && steps_to_run > 0 &&
-        (int64_t)steps_to_run > opt.schedule_total_steps - opt.step)
-        die("requested %d steps exceed the remaining LR schedule horizon (%lld steps remain)",
-            steps_to_run, (long long)(opt.schedule_total_steps - opt.step));
-
-    printf(" step | train loss | valid loss | learning rate\n");
-    printf("------+------------+------------+--------------\n");
-    FILE* metrics=fopen(options.metrics_path,"a");
-    if (!metrics) die("could not open metrics CSV: %s",options.metrics_path);
-    if (fseek(metrics,0,SEEK_END)!=0) die("could not seek metrics CSV");
-    if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
-    const clock_t training_started=clock();
-    printf("Metrics CSV: %s\n",options.metrics_path);
-    printf("Settings: lr=%.7g schedule=%s warmup=%lld total_steps=%lld log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s batch=%d seq=%d\n",
-        opt.schedule_base_lr,opt.schedule_type==0?"cosine":"constant",(long long)opt.schedule_warmup_steps,(long long)opt.schedule_total_steps,options.log_interval,options.validation_interval,options.validation_batches,
-        options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes,
-        options.tokenizer_spread?"spread":"prefix",options.batch_size,options.sequence_length);
-    printf("Estimated activations + logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
-        (double)activation_bytes/(1024.0*1024.0),
-        2.0*model.n_layers*model.max_seq*model.dim*sizeof(float)/(1024.0*1024.0));
-
-    double train_loss_sum = 0.0;
-    int train_loss_count = 0;
-    float last_validation_loss=NAN;
-
-    if (diagnostics_only) {
-        printf("Diagnostics-only mode: optimizer updates skipped.\n");
-    }
-    else for (int local_step = 0; local_step < steps_to_run; local_step++) {
-        arena_reset(&temp);
-        if (!activations_init(&act, &temp, options.batch_size, options.sequence_length, &model))
-            die("activation allocation failed");
-
-        dlogits = arena_alloc(&temp,
-            (size_t)options.batch_size * options.sequence_length * model.vocab_size * sizeof(float));
-        batch_tokens = arena_alloc(&temp, options.batch_size * options.sequence_length * sizeof(uint16_t));
-        batch_targets = arena_alloc(&temp, options.batch_size * options.sequence_length * sizeof(uint16_t));
-        if (!dlogits || !batch_tokens || !batch_targets)
-            die("training scratch allocation failed");
-
-        for (int b = 0; b < options.batch_size; b++) {
-            const int start = rng_int(&rng, 0, train_tokens - options.sequence_length - 1);
-            for (int t = 0; t < options.sequence_length; t++) {
-                batch_tokens[b * options.sequence_length + t] = all_ids[start + t];
-                batch_targets[b * options.sequence_length + t] = all_ids[start + t + 1];
-            }
-        }
-
-        float* logits = model_forward(&model, &act,
-            batch_tokens, options.batch_size, options.sequence_length);
-        if (!logits) die("model_forward failed");
-
-        const float loss = loss_cross_entropy(logits, batch_targets, dlogits,
-            options.batch_size, options.sequence_length, model.vocab_size);
-        if (!isfinite(loss)) die("training loss became non-finite");
-
-        gradients_zero(&grads, &model);
-        model_backward(&model, &grads, &act, dlogits,
-            batch_tokens, options.batch_size, options.sequence_length);
-
-        // Use the next absolute optimizer step, independent of process restarts.
-        const int64_t scheduled_step = opt.step + 1;
-        opt.lr = opt.schedule_type == 1 ? opt.schedule_base_lr :
-            optim_lr_cosine(opt.schedule_base_lr, scheduled_step,
-                opt.schedule_warmup_steps, opt.schedule_total_steps);
-        optim_step(&opt, &model, &grads);
-        const bool manual_save_requested=consume_file_signal(options.save_file);
-        if (opt.step % options.checkpoint_interval == 0 || manual_save_requested) {
-            if (!checkpoint_save("minima.model", &model, &opt, &rng, tokenizer_hash))
-                die("checkpoint save failed");
-            printf("Checkpoint saved at optimizer step %lld\n",(long long)opt.step);
-        }
-
-        train_loss_sum += loss;
-        train_loss_count++;
-
-        if ((local_step + 1) % options.log_interval == 0 ||
-            local_step == steps_to_run - 1 ||
-            stop_file_exists(options.stop_file)) {
-            if ((opt.step % options.validation_interval)==0 ||
-                local_step==steps_to_run-1 || stop_file_exists(options.stop_file) ||
-                !isfinite(last_validation_loss)) {
-                last_validation_loss=evaluate_loss(&model,&temp,all_ids,train_tokens,
-                    validation_tokens,options.validation_batches,
-                    options.batch_size,options.sequence_length);
-                if(!isfinite(last_validation_loss))die("validation loss evaluation failed");
-            }
-            const float validation_loss=last_validation_loss;
-
-            const double average_train_loss =
-                train_loss_sum / (double)train_loss_count;
-
-            const double elapsed=(double)(clock()-training_started)/CLOCKS_PER_SEC;
-            printf("%5lld | %10.4f | %10.4f | %.7f\n",(long long)opt.step,(float)average_train_loss,validation_loss,opt.lr);
-            fprintf(metrics,"%lld,%.7f,%.7f,%.9g,%.7f,%.7f,%.3f\n",
-                (long long)opt.step,(float)average_train_loss,validation_loss,opt.lr,
-                expf((float)average_train_loss),expf(validation_loss),elapsed);
-            fflush(metrics);
-            train_loss_sum=0.0; train_loss_count=0;
-            if (stop_file_exists(options.stop_file)) {
-                printf("Cooperative stop requested; saving checkpoint and stopping after optimizer step %lld.\n",
-                    (long long)opt.step);
-                break;
-            }
-        }
-    }
-
+    TrainRunOptions train_options = {
+        .steps = steps_to_run,
+        .log_interval = options.log_interval,
+        .validation_batches = options.validation_batches,
+        .validation_interval = options.validation_interval,
+        .checkpoint_interval = options.checkpoint_interval,
+        .batch_size = options.batch_size,
+        .sequence_length = options.sequence_length,
+        .seed = options.seed,
+        .tokenizer_sample_bytes = options.tokenizer_sample_bytes,
+        .tokenizer_spread = options.tokenizer_spread,
+        .diagnostics_only = diagnostics_only,
+        .activation_bytes = activation_bytes,
+        .metrics_path = options.metrics_path,
+        .stop_file = options.stop_file,
+        .save_file = options.save_file
+    };
+    train_run(&model, &opt, &grads, &temp, all_ids,
+        train_tokens, validation_tokens, &rng, tokenizer_hash, train_options);
     const int64_t final_step = opt.step;
-    if (!diagnostics_only && (final_step == initial_step || final_step % options.checkpoint_interval != 0))
-        if (!checkpoint_save("minima.model",&model,&opt,&rng,tokenizer_hash)) die("final checkpoint save failed");
-    const double training_seconds=(double)(clock()-training_started)/CLOCKS_PER_SEC;
-    fclose(metrics);
-    printf("\nTraining segment complete: %lld -> %lld\n",
-        (long long)initial_step, (long long)final_step);
-
-    const float final_train_loss = evaluate_loss(&model, &temp,
-        all_ids, 0, train_tokens, options.validation_batches, options.batch_size, options.sequence_length);
-    const float final_validation_loss = evaluate_loss(&model, &temp,
-        all_ids, train_tokens, validation_tokens, options.validation_batches, options.batch_size, options.sequence_length);
-    if (!isfinite(final_train_loss) || !isfinite(final_validation_loss))
-        die("final loss diagnostics are unavailable");
-
-    printf("\nFinal evaluation loss and perplexity (fixed, evenly spaced windows)\n");
-    printf("  train loss      : %.4f\n", final_train_loss);
-    printf("  train perplexity: %.2f\n", expf(final_train_loss));
-    printf("  valid loss      : %.4f\n", final_validation_loss);
-    printf("  valid perplexity: %.2f\n", expf(final_validation_loss));
-    printf("  training duration: %.2f seconds\n",training_seconds);
-    printf("  total optimizer steps: %lld\n",(long long)opt.step);
-    printf("  checkpoint status: %s (minima.model)\n",
-        diagnostics_only ? "unchanged" : "saved");
 
     // ------------------------------------------------------------------
     // 8. Tokenizer and checkpoint round-trip regression checks
@@ -1129,7 +719,7 @@ int main(int argc, char** argv) {
         check_tokens, options.sequence_length, 1e-4f))
         die("KV-cache parity check failed");
 
-    if (!run_generation_benchmark(&model, &tok, &cache))
+    if (!chat_run_generation_benchmark(&model, &tok, &cache))
         die("deterministic generation benchmark failed");
 
     printf("\nSmoke test finished.\n");
