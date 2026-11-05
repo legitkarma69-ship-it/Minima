@@ -22,6 +22,9 @@
 
 int main(int argc, char** argv) {
     printf("ProjectMinima text-corpus training smoke test\n\n");
+    if (!optim_check_adamw())
+        die("AdamW numerical regression check failed");
+    printf("AdamW bias-correction check: PASS\n");
 
     // ------------------------------------------------------------------
     // 1. Arenas
