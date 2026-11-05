@@ -4,6 +4,15 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
+#include <errno.h>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <stdio.h>
+#endif
 
 #define CHECKPOINT_MAGIC "MINIMA02"
 #define CHECKPOINT_VERSION 2u
@@ -79,7 +88,12 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         !model->rms_final_scale || opt->n_params != model_parameter_count(model))
         return false;
 
-    FILE* f = fopen(path, "wb");
+    char temp_path[1024];
+    const int path_len = snprintf(temp_path, sizeof(temp_path), "%s.tmp", path);
+    if (path_len < 0 || (size_t)path_len >= sizeof(temp_path))
+        return false;
+
+    FILE* f = fopen(temp_path, "wb");
     if (!f) return false;
 
     const char magic[8] = CHECKPOINT_MAGIC;
@@ -111,11 +125,29 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     MODEL_ARRAYS(WRITE_MODEL);
     OPT_ARRAYS(WRITE_OPT_MOMENTS);
 
-    if (fclose(f) != 0) return false;
+    if (fflush(f) != 0) goto fail;
+    if (fclose(f) != 0) {
+        remove(temp_path);
+        return false;
+    }
+
+#ifdef _WIN32
+    if (!MoveFileExA(temp_path, path,
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        remove(temp_path);
+        return false;
+    }
+#else
+    if (rename(temp_path, path) != 0) {
+        remove(temp_path);
+        return false;
+    }
+#endif
     return true;
 
 fail:
     fclose(f);
+    remove(temp_path);
     return false;
 }
 
