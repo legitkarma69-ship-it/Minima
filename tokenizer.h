@@ -41,7 +41,8 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
     int vocab_size);
 
 // ---------- Encode / Decode ----------
-// Encode text → token ids. Returns number of tokens written.
+// Encode text → token ids. Returns number of tokens written, 0 for empty input,
+// or -1 for invalid arguments / insufficient output capacity.
 // `out` must have room for at least `text_len` tokens (worst case).
 int  tokenizer_encode(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
