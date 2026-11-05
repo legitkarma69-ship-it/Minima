@@ -28,7 +28,7 @@ typedef struct {
     float* dx;              // [batch * seq, dim]
     float* dx_tmp;          // [batch * seq, dim]
     float* dx_norm;         // [batch * seq, dim]
-    float* datt n;          // [batch * seq, dim]
+    float* dattn;          // [batch * seq, dim]
     float* dqkv;            // [batch * seq, 3 * dim]
     float* dffn;            // [batch * seq, ffn_dim]
     float* dup;             // [batch * seq, ffn_dim]
