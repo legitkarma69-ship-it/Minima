@@ -1,43 +1,66 @@
-# ProjectMinima Win32 frontend
+# ProjectMinima Win32 desktop frontend
 
-This is the first UI integration layer. It is a separate native Win32 C application and launches the existing `Minima.exe` engine as a child process. It does not link UI code into the model or training implementation.
+The frontend is a separate native Win32 application written in C. It launches `Minima.exe` as a child process and communicates through standard input/output plus small filesystem signals. The UI does not link into or execute model/training code. Training and inference remain in the engine process, so the window stays responsive.
 
 ## Build
 
-1. Open the repository's `Minima.sln` in Visual Studio 2022.
-2. Select `x64` and build both `Minima` and `MinimaGUI`.
-3. Keep `Minima.exe` and `MinimaGUI.exe` in the same output directory.
-4. Launch `MinimaGUI.exe`.
+1. Open `Minima.sln` in Visual Studio 2022.
+2. Select the x64 platform.
+3. Build the `Minima` and `MinimaGUI` projects.
+4. Keep `Minima.exe` and `MinimaGUI.exe` in the same output directory.
+5. Launch `MinimaGUI.exe`.
 
-The GUI starts the engine with its own directory as the working directory. Keep the existing data folder and checkpoint/tokenizer files in the locations expected by the engine.
+The engine working directory is the executable directory. Keep the `data` folder and checkpoint/tokenizer files in the locations expected by the engine.
 
-## Implemented in this foundation
+## Training controls
 
-- Native Win32 controls only; no external UI framework.
-- Multi-select corpus file picker and remove-selected action.
-- Additional training-step input.
-- Resume existing checkpoint option.
-- Start and stop controls.
-- Background child process; the UI thread remains responsive.
-- Redirected engine stdout/stderr displayed in a live log.
-- Engine stdout/stderr are unbuffered so progress reaches the GUI promptly.
-- Exit status reporting.
+- Add/remove multiple corpus files.
+- Set additional optimizer steps and choose whether to resume.
+- Configure vocabulary size, embedding dimension, layers, attention heads, FFN dimension, and model context length.
+- Configure batch size and training sequence length.
+- Configure learning rate, warmup, and cosine or constant learning-rate schedule.
+- Configure training-log interval, validation interval, validation batch count, and checkpoint interval independently.
+- Choose the random seed.
+- Configure tokenizer sample byte limit and either evenly spread sampling or prefix sampling.
+- Start training, request a graceful stop, or request an immediate checkpoint save.
 
-## Not yet wired to runtime engine APIs
+Runtime model limits are validated by the engine: vocabulary 260-8192, dimension 1-512, layers 1-16, heads 1-32 (dimension must divide evenly by heads), FFN dimension 1-1024, and context length 32-512. Batch size is 1-16 and training sequence length is 8-512 and cannot exceed context length. The engine also rejects excessively large logits scratch configurations.
 
-The current engine still defines model architecture, batch/sequence sizes, tokenizer target, and several training settings as compile-time constants. This frontend intentionally does not display fake controls for settings that the engine cannot yet honor.
+Changing vocabulary or model architecture makes an existing checkpoint incompatible. Resume and chat must use the same model configuration and tokenizer as the checkpoint.
 
-The following require the next engine refactor before they can be exposed as functional UI controls:
+## Results and monitoring
 
-- Runtime vocabulary/model architecture configuration.
-- Tokenizer sample size and sampling strategy configuration.
-- Learning-rate schedule configuration, validation cadence, checkpoint cadence, and random seed.
-- Structured training metric callbacks and plotted loss/perplexity charts.
-- Structured model/tokenizer/checkpoint/gradient diagnostics.
-- In-process or separate-process interactive inference, chat history, cancellation, top-p and repetition penalty.
+The GUI displays engine output, including:
 
-The stop button currently force-terminates the child process after confirmation. The engine's most recent periodic checkpoint remains usable, but steps since that checkpoint can be lost. A cooperative cancellation request and final checkpoint are planned before treating Stop as a graceful operation.
+- Training and validation loss.
+- Learning rate and optimizer step.
+- Training and validation perplexity.
+- Total optimizer steps and elapsed training CPU time.
+- Parameter count and weight, optimizer, and gradient memory estimates.
+- Estimated logits scratch and KV-cache memory.
+- Tokenizer vocabulary, merge count, and token-length statistics.
+- Numerical gradient-check results.
+- Checkpoint save and compatibility status.
 
-## Architecture rule
+The engine appends structured rows to `minima_metrics.csv`. The lightweight GDI graph reads that CSV and plots training and validation loss. It refreshes once per second and does not participate in training.
 
-The UI is a controller, not part of the model. Future communication should use a small engine API or a versioned local IPC protocol. Training/inference must remain on worker threads or in a separate process; the UI thread must never execute model work.
+## Chat
+
+- Start chat loads the existing checkpoint and tokenizer.
+- The GUI provides a text input and Generate/Send button.
+- Temperature, top-k, top-p, repetition penalty, and maximum new tokens are configurable.
+- Chat history is appended to `minima_chat.txt` and reloaded when the GUI starts.
+- Stop generation terminates the inference child process. This does not affect checkpoint weights.
+
+Chat requires `minima.model` and `minima.bpe`. Set the model configuration controls to match the checkpoint before starting chat if it was trained with non-default architecture settings.
+
+## Process and persistence behavior
+
+- Training output is redirected to the GUI log and flushed by the engine.
+- Training runs in a separate process.
+- Stop training creates `minima.stop`; the engine finishes its current optimizer step, evaluates, saves a checkpoint, and exits.
+- Save checkpoint creates `minima.save`; the engine saves at the next optimizer-step boundary.
+- Automatic checkpoints are written at the configured interval and at the end of a training segment.
+- `minima_metrics.csv`, `minima_chat.txt`, and signal files are stored beside the executables.
+
+The UI is deliberately a controller. It must not own model weights, perform forward/backward passes, or block the window thread with training or generation work.
