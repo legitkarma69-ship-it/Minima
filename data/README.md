@@ -55,8 +55,9 @@ After training, the program writes two files in its working directory:
 
 The checkpoint format is version 2. It stores model weights, both AdamW
 moment arrays, optimizer hyperparameters and global step, plus the training
-RNG state. It also stores fingerprints of the exact tokenizer and loaded corpus.
-Resume refuses to load if the model architecture, tokenizer, or corpus differs.
+RNG state. It also stores a fingerprint of the exact tokenizer. Resume refuses to load
+if the model architecture or tokenizer differs, but the corpus may be expanded
+or updated between training segments.
 Keep `minima.bpe` paired with `minima.model`.
 
 ### Resuming training
@@ -83,9 +84,11 @@ random training-sample sequence continue from their saved states.
 Each invocation is a separate training segment: its learning-rate schedule
 starts with a fresh warmup and cosine decay, while the AdamW optimizer step
 remains global. This is a deliberate warm restart, not an attempt to pretend
-that a newly extended schedule was known during the previous run. Resume also
-requires the same corpus contents and tokenizer. If you change the training
-text or vocabulary configuration, start a fresh run instead. The previous
+that a newly extended schedule was known during the previous run. Resume
+requires the same tokenizer, but it can use updated or expanded training text.
+The new corpus is encoded with the saved tokenizer, and the 95/5
+train/validation split is recalculated from that corpus. If you change the
+vocabulary configuration, start a fresh run instead. The previous
 512-entry tokenizer/checkpoint from earlier experiments is incompatible with
 the new 2,048-entry configuration; the first run must be a fresh run, without
 `--resume`.
