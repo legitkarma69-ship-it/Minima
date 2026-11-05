@@ -6,11 +6,15 @@
 #include "arena.h"
 #include <stdint.h>
 
-// Gradient container – identical layout to Model
+// Gradient container â€“ identical layout to Model
 typedef Model Gradients;
 
-// Allocate gradient buffers (call once after model_init)
+// Allocate gradient buffers using every runtime dimension from model.
 bool gradients_init(Gradients* g, Arena* arena, const Model* model);
+
+// Verify all gradient tensor extents and dimensions against the runtime model.
+bool gradients_check_layout(const Gradients* g, const Model* model,
+    const Arena* arena);
 
 // Zero all gradients (call at the start of every training step)
 void gradients_zero(Gradients* g, const Model* model);
