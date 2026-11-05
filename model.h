@@ -41,6 +41,7 @@ typedef struct {
 // Allocate all weight tensors from the arena and initialise them.
 // Returns true on success.
 bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size);
+bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig* config);
 
 // Convenience: number of parameters
 size_t model_param_count(const Model* m);
