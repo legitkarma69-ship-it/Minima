@@ -272,7 +272,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         }
         else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
             const char* option=argv[i]; if(++i>=argc)die("%s requires a value",option);
-            long v=parse_long_value(option,argv[i],1,512);
+            long v=parse_long_value(option,argv[i],1,
+                strcmp(option,"--top-k")==0?256:512);
             if(strcmp(option,"--top-k")==0)o->top_k=(int)v;else o->max_new_tokens=(int)v;
         }
         else if (strcmp(argv[i], "--temperature") == 0 ||
