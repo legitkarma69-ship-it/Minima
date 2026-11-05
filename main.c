@@ -40,6 +40,7 @@ typedef struct {
     float temperature, top_p, repetition_penalty;
     int top_k, max_new_tokens;
     bool chat_mode;
+    ModelConfig model;
 } TrainOptions;
 
 static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
@@ -70,7 +71,8 @@ static void print_usage(const char* exe) {
     printf("Usage: %s [options] [corpus.txt ...]\n", exe);
     printf("  --resume --steps N --lr FLOAT --warmup N --log-interval N\n");
     printf("  --validation-batches N --checkpoint-interval N --seed N\n");
-    printf("  --tokenizer-sample-bytes N --metrics PATH --diagnostics-only\n");
+    printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
+    printf("  --heads N --ffn-dim N --max-seq N --metrics PATH --diagnostics-only\n");
 }
 
 static float evaluate_loss(Model* model, Arena* temp,
@@ -181,6 +183,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     bool* diagnostics_only, int* steps, const char** corpus_paths, TrainOptions* o) {
     int path_count = 0;
     *resume = false; *diagnostics_only = false; *steps = DEFAULT_STEPS;
+    ModelConfig default_model=MODEL_CONFIG_DEFAULT;
+    o->model=default_model;
     o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
@@ -207,12 +211,24 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             strcmp(argv[i], "--validation-batches") == 0 ||
             strcmp(argv[i], "--checkpoint-interval") == 0 ||
             strcmp(argv[i], "--seed") == 0 ||
-            strcmp(argv[i], "--tokenizer-sample-bytes") == 0) {
+            strcmp(argv[i], "--tokenizer-sample-bytes") == 0 ||
+            strcmp(argv[i], "--vocab-size") == 0 ||
+            strcmp(argv[i], "--dim") == 0 ||
+            strcmp(argv[i], "--layers") == 0 ||
+            strcmp(argv[i], "--heads") == 0 ||
+            strcmp(argv[i], "--ffn-dim") == 0 ||
+            strcmp(argv[i], "--max-seq") == 0) {
             const char* opt=argv[i];
             if (++i >= argc) die("%s requires a value", opt);
             long lo=1, hi=INT_MAX;
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=67108864; }
+            if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=8192; }
+            if (strcmp(opt,"--dim")==0) { lo=1; hi=512; }
+            if (strcmp(opt,"--layers")==0) { lo=1; hi=16; }
+            if (strcmp(opt,"--heads")==0) { lo=1; hi=32; }
+            if (strcmp(opt,"--ffn-dim")==0) { lo=1; hi=1024; }
+            if (strcmp(opt,"--max-seq")==0) { lo=32; hi=512; }
             long v=parse_long_value(opt,argv[i],lo,hi);
             if (strcmp(opt,"--steps")==0) *steps=(int)v;
             else if (strcmp(opt,"--warmup")==0) o->warmup_steps=(int)v;
@@ -220,6 +236,12 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--validation-batches")==0) o->validation_batches=(int)v;
             else if (strcmp(opt,"--checkpoint-interval")==0) o->checkpoint_interval=(int)v;
             else if (strcmp(opt,"--seed")==0) o->seed=(uint64_t)v;
+            else if (strcmp(opt,"--vocab-size")==0) o->model.vocab_size=(int)v;
+            else if (strcmp(opt,"--dim")==0) o->model.dim=(int)v;
+            else if (strcmp(opt,"--layers")==0) o->model.n_layers=(int)v;
+            else if (strcmp(opt,"--heads")==0) o->model.n_heads=(int)v;
+            else if (strcmp(opt,"--ffn-dim")==0) o->model.ffn_dim=(int)v;
+            else if (strcmp(opt,"--max-seq")==0) o->model.max_seq=(int)v;
             else o->tokenizer_sample_bytes=(size_t)v;
         }
         else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
@@ -457,7 +479,7 @@ int main(int argc, char** argv) {
         &resume, &diagnostics_only, &steps_to_run, user_paths, &options);
 
     printf("ProjectMinima text-corpus training experiment\n");
-    printf("Vocabulary target: %d\n", MODEL_VOCAB_SIZE);
+    printf("Vocabulary target: %d\n", options.model.vocab_size);
     if (options.chat_mode)
         printf("Mode: interactive chat (checkpoint resume)\n\n");
     else if (diagnostics_only)
@@ -561,7 +583,7 @@ int main(int argc, char** argv) {
     if (resume) {
         if (!tokenizer_load(&tok, &arena, "minima.bpe"))
             die("resume requested, but minima.bpe could not be loaded");
-        if (tok.vocab_size != MODEL_VOCAB_SIZE)
+        if (tok.vocab_size != options.model.vocab_size)
             die("saved tokenizer vocabulary does not match MODEL_VOCAB_SIZE; start a fresh run");
         printf("Loaded tokenizer: minima.bpe (vocab = %d)\n", tok.vocab_size);
     }
@@ -592,9 +614,9 @@ int main(int argc, char** argv) {
 
         printf("Tokenizer training sample: %zu bytes\n", sample_len);
         if (!tokenizer_train(&tok, &arena, tokenizer_sample,
-            sample_len, MODEL_VOCAB_SIZE))
+            sample_len, options.model.vocab_size))
             die("tokenizer_train failed");
-        if (tok.vocab_size != MODEL_VOCAB_SIZE)
+        if (tok.vocab_size != options.model.vocab_size)
             die("BPE could not reach the configured vocabulary size");
         if (!tokenizer_save(&tok, "minima.bpe"))
             die("failed to save tokenizer to minima.bpe");
@@ -637,7 +659,8 @@ int main(int argc, char** argv) {
     // 5. Model, optimizer, gradients, and optional checkpoint restore
     // ------------------------------------------------------------------
     Model model;
-    if (!model_init(&model, &arena, options.seed, tok.vocab_size))
+    options.model.vocab_size=tok.vocab_size;
+    if (!model_init_config(&model, &arena, options.seed, &options.model))
         die("model_init failed");
     model_summary(&model);
 
