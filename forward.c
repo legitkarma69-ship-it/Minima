@@ -8,7 +8,7 @@
 // Basic kernels (scalar for clarity – replace with SIMD later)
 // ------------------------------------------------------------------
 
-static void rmsnorm(float* out, const float* x, const float* scale,
+void rmsnorm(float* out, const float* x, const float* scale,
     int dim, float eps) {
     float ss = 0.0f;
     for (int i = 0; i < dim; i++)
@@ -19,7 +19,7 @@ static void rmsnorm(float* out, const float* x, const float* scale,
         out[i] = x[i] * ss * scale[i];
 }
 
-static void matmul(float* out, const float* x, const float* w,
+void matmul(float* out, const float* x, const float* w,
     int n, int d_in, int d_out) {
     // x: [n, d_in]   w: [d_out, d_in]   out: [n, d_out]
     for (int i = 0; i < n; i++) {
@@ -48,7 +48,7 @@ static void matmul_add(float* out, const float* x, const float* w,
     }
 }
 
-static float silu(float x) {
+float silu(float x) {
     return x / (1.0f + expf(-x));
 }
 
