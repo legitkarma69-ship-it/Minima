@@ -38,6 +38,42 @@ static void adamw_update(float* param, float* m, float* v, const float* grad,
     }
 }
 
+// Small scalar regression test for bias correction and decoupled decay.
+bool optim_check_adamw(void) {
+    float actual_param = 1.25f;
+    float actual_m = 0.0f;
+    float actual_v = 0.0f;
+    const float gradients[] = { 0.5f, -0.25f, 0.125f };
+    const float lr = 0.01f, beta1 = 0.9f, beta2 = 0.999f;
+    const float eps = 1e-8f, weight_decay = 0.02f;
+    float expected_param = actual_param;
+    float expected_m = 0.0f, expected_v = 0.0f;
+
+    for (int step = 1; step <= 3; step++) {
+        const float g = gradients[step - 1];
+        const float bias1 = 1.0f - powf(beta1, (float)step);
+        const float bias2 = 1.0f - powf(beta2, (float)step);
+
+        adamw_update(&actual_param, &actual_m, &actual_v, &g, 1,
+            lr, beta1, beta2, eps, weight_decay, bias1, bias2);
+
+        expected_m = beta1 * expected_m + (1.0f - beta1) * g;
+        expected_v = beta2 * expected_v + (1.0f - beta2) * g * g;
+        expected_param *= 1.0f - lr * weight_decay;
+        expected_param -= lr * (expected_m / bias1) /
+            (sqrtf(expected_v / bias2) + eps);
+
+        if (!isfinite(actual_param) || !isfinite(actual_m) ||
+            !isfinite(actual_v) ||
+            fabsf(actual_param - expected_param) > 1e-7f ||
+            fabsf(actual_m - expected_m) > 1e-7f ||
+            fabsf(actual_v - expected_v) > 1e-7f)
+            return false;
+    }
+
+    return true;
+}
+
 // ------------------------------------------------------------------
 // Public API
 // ------------------------------------------------------------------
