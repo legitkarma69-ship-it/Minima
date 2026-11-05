@@ -877,7 +877,8 @@ int main(int argc, char** argv) {
                 local_step==steps_to_run-1 || stop_file_exists(options.stop_file) ||
                 !isfinite(last_validation_loss)) {
                 last_validation_loss=evaluate_loss(&model,&temp,all_ids,train_tokens,
-                    validation_tokens,options.validation_batches);
+                    validation_tokens,options.validation_batches,
+                    options.batch_size,options.sequence_length);
                 if(!isfinite(last_validation_loss))die("validation loss evaluation failed");
             }
             const float validation_loss=last_validation_loss;
