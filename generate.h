@@ -4,6 +4,7 @@
 #include "model.h"
 #include "tokenizer.h"
 #include "arena.h"
+#include "util.h"
 #include <stdint.h>
 
 // Simple KV cache for autoregressive generation
