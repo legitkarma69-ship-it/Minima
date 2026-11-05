@@ -4,6 +4,7 @@
 #include "tokenizer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <math.h>
 #include <string.h>
@@ -77,7 +78,7 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
         if(strncmp(line,"/test ",6)==0) {
             ChatOptions requested = *options;
             if (!parse_test_settings(line, &requested)) {
-                puts("TEST_ERROR: invalid sampling settings; expected /test temperature top_k top_p repetition_penalty max_tokens");
+                printf("TEST_ERROR: invalid sampling settings: [%s]\\n", line);
                 puts("CHAT_READY");
                 continue;
             }
