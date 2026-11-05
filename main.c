@@ -387,7 +387,7 @@ int main(int argc, char** argv) {
     if (resume) {
         if (!checkpoint_load("minima.model", &model, &opt,
             &rng, tokenizer_hash))
-            die("checkpoint load failed: model, tokenizer, or corpus does not match");
+            die("checkpoint load failed: model/tokenizer mismatch or invalid checkpoint");
         printf("Resumed checkpoint at optimizer step %lld\n\n",
             (long long)opt.step);
     }
