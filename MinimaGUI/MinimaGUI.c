@@ -130,7 +130,7 @@ static DWORD WINAPI reader_thread(void* parameter) {
     HANDLE pipe = (HANDLE)parameter;
     char buffer[2048];
     DWORD got;
-    char* carry = (char*)calloc(1, 8192);
+    char* carry = (char*)calloc(1, 65536);
     size_t used = 0;
     if (!carry) {
         CloseHandle(pipe);
@@ -141,9 +141,9 @@ static DWORD WINAPI reader_thread(void* parameter) {
 
     while (ReadFile(pipe, buffer, sizeof(buffer), &got, NULL) && got) {
         for (DWORD i = 0; i < got; ++i) {
-            if (used + 2 >= 8192) used = 0;
+            if (used + 2 >= 65536) used = 0;
             carry[used++] = buffer[i];
-            if (buffer[i] == '\n' || used >= 8000) {
+            if (buffer[i] == '\n' || used >= 60000) {
                 carry[used] = 0;
                 if(used==11 && memcmp(carry,"CHAT_READY\n",11)==0){
                     PostMessageW(g_window,WM_CHAT_READY,0,0);used=0;continue;
