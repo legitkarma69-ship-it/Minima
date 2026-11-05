@@ -117,14 +117,6 @@ static BOOL CALLBACK scale_child_for_dpi(HWND child, LPARAM parameter) {
     return TRUE;
 }
 
-static BOOL is_action_control(HWND child) {
-    const int id = GetDlgCtrlID(child);
-    return id == IDC_START || id == IDC_STOP || id == IDC_CHAT_START ||
-        id == IDC_SAVE_NOW || id == IDC_REBUILD_TOKENIZER ||
-        id == IDC_AUTO_SETTINGS || id == IDC_STATUS ||
-        id == IDC_ADVANCED_TOGGLE;
-}
-
 static void layout_controls(HWND hwnd);
 
 static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
