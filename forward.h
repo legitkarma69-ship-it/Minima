@@ -5,24 +5,38 @@
 #include "arena.h"
 #include <stdint.h>
 
-// Temporary activation storage for one forward pass.
-// Allocated once from a temp arena and reused.
+// Forward-pass caches and backward-pass scratch storage.
+// All buffers are allocated from the caller's temporary arena.
 typedef struct {
+    // Final residual stream and reusable normalization workspace.
+    float* x;               // [batch * seq, dim]
+    float* x_norm;          // [batch * seq, dim]
 
-        float* x;           // residual stream [batch*seq*dim]  – kept after forward
-        float* x_norm;      // after each RMSNorm
-        float* qkv;         // [batch*seq*3*dim]
-        float* attn_out;
-        float* ffn_buf;     // up-projection result
-        float* gate_buf;    // gate projection (new)
-        float* logits;
-        float* resid_attn;  // [n_layers, batch*seq*dim]  input to attention block
-        float* resid_ffn;   // [n_layers, batch*seq*dim]  input to FFN block
-    } Activations;
+    // Per-layer forward caches.
+    float* qkv;             // [layers, batch * seq, 3 * dim]
+    float* attn_out;        // [layers, batch * seq, dim]
+    float* ffn_buf;         // [layers, batch * seq, ffn_dim], SwiGLU output
+    float* up_buf;          // [layers, batch * seq, ffn_dim], up projection
+    float* gate_buf;        // [layers, batch * seq, ffn_dim], gate projection
+    float* resid_attn;      // [layers, batch * seq, dim], input to attention block
+    float* resid_ffn;       // [layers, batch * seq, dim], input to FFN block
 
+    // Final output.
+    float* logits;          // [batch * seq, vocab]
 
-// Allocate all activation buffers for a given batch size and sequence length.
-// Call once at startup (or when batch/seq changes).
+    // Backward-pass scratch buffers. These never alias forward caches.
+    float* dx;              // [batch * seq, dim]
+    float* dx_tmp;          // [batch * seq, dim]
+    float* dx_norm;         // [batch * seq, dim]
+    float* datt n;          // [batch * seq, dim]
+    float* dqkv;            // [batch * seq, 3 * dim]
+    float* dffn;            // [batch * seq, ffn_dim]
+    float* dup;             // [batch * seq, ffn_dim]
+    float* dgate;           // [batch * seq, ffn_dim]
+} Activations;
+
+// Allocate all activation and gradient-workspace buffers.
+// The caller must reset/reallocate the temp arena between training steps.
 bool activations_init(Activations* act, Arena* temp_arena,
     int batch, int seq, const Model* model);
 
@@ -34,8 +48,8 @@ void matmul(float* out, const float* x, const float* w,
 float silu(float x);
 
 // Full forward pass.
-// tokens: [batch, seq]  (uint16_t token ids)
-// Returns pointer to logits [batch * seq * vocab] (also stored in act->logits)
+// tokens: [batch, seq] (uint16_t token ids)
+// Returns logits [batch * seq, vocab], or NULL for invalid dimensions/input.
 float* model_forward(Model* model, Activations* act,
     const uint16_t* tokens, int batch, int seq);
 
