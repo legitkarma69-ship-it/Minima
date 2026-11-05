@@ -660,10 +660,12 @@ int main(int argc, char** argv) {
             const size_t chunks = 64;
             const size_t chunk_len = sample_len / chunks;
             for (size_t i = 0; i < chunks; i++) {
+                const size_t dst = i * chunk_len;
+                const size_t this_len = (i == chunks - 1)
+                    ? sample_len - dst : chunk_len;
                 const size_t start =
-                    ((train_corpus_len - chunk_len) * i) / (chunks - 1);
-                memcpy(tokenizer_sample + i * chunk_len,
-                    corpus + start, chunk_len);
+                    ((train_corpus_len - this_len) * i) / (chunks - 1);
+                memcpy(tokenizer_sample + dst, corpus + start, this_len);
             }
         }
 
