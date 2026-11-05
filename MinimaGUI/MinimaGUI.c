@@ -123,7 +123,7 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window, IDC_REMOVE), !running);
     EnableWindow(g_steps,!running);EnableWindow(g_resume,!running);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
-    HWND fields[]={g_lr,g_warmup,g_log_interval,g_validation_batches,g_checkpoint_interval,
+    HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
