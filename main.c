@@ -564,6 +564,8 @@ int main(int argc, char** argv) {
         printf("Mode: interactive chat (checkpoint resume)\n\n");
     else if (diagnostics_only)
         printf("Mode: diagnostics only (no optimizer updates)\n\n");
+    else if (options.tokenizer_only)
+        printf("Mode: tokenizer rebuild only (no model training)\n\n");
     else
         printf("Steps this run: %d%s\n\n", steps_to_run,
             resume ? " (resume)" : "");
