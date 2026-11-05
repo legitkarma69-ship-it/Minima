@@ -6,6 +6,41 @@
 
 #define CORPUS_MAX_PATHS 32
 
+static bool is_text_whitespace(uint8_t c) {
+    return c == ' ' || c == '\\t' || c == '\\n' ||
+        c == '\\r' || c == '\\v' || c == '\\f';
+}
+
+// Empty files and files containing only whitespace (including Windows CRLF
+// line endings or a UTF-8 BOM) are not usable training sources.
+static bool file_has_text(FILE* f, bool* has_text) {
+    if (!f || !has_text) return false;
+
+    *has_text = false;
+
+    uint8_t prefix[3];
+    size_t prefix_len = fread(prefix, 1, sizeof(prefix), f);
+    if (ferror(f)) return false;
+
+    size_t start = (prefix_len == 3 &&
+        prefix[0] == 0xEF && prefix[1] == 0xBB && prefix[2] == 0xBF)
+        ? 3 : 0;
+
+    for (size_t i = start; i < prefix_len; i++) {
+        if (!is_text_whitespace(prefix[i])) *has_text = true;
+    }
+
+    uint8_t buffer[4096];
+    size_t got;
+    while ((got = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+        for (size_t i = 0; i < got; i++) {
+            if (!is_text_whitespace(buffer[i])) *has_text = true;
+        }
+    }
+
+    return !ferror(f);
+}
+
 typedef struct {
     const char* path;
     size_t size;
@@ -41,9 +76,14 @@ bool corpus_load_files(Corpus* corpus, Arena* arena,
             fclose(f);
             return false;
         }
+        bool has_text = false;
+        if (end > 0 && !file_has_text(f, &has_text)) {
+            fclose(f);
+            return false;
+        }
         fclose(f);
 
-        if (end == 0) continue;
+        if (end == 0 || !has_text) continue;
         size_t bytes = (size_t)end;
         if (bytes > max_bytes || total > max_bytes - bytes)
             return false;
