@@ -109,9 +109,12 @@ int main(int argc, char** argv) {
         for (int i = 1; i < argc; i++)
             user_paths[i - 1] = argv[i];
 
-        if (!corpus_load_files(&loaded_corpus, &arena,
-            user_paths, (size_t)(argc - 1), max_corpus_bytes))
-            die("could not load usable text from the supplied corpus paths");
+        const CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
+            &arena, user_paths, (size_t)(argc - 1), max_corpus_bytes);
+        if (load_result == CORPUS_LOAD_ERROR)
+            die("corpus loading failed (check file access and the 5 MiB total limit)");
+        if (load_result == CORPUS_LOAD_EMPTY)
+            die("the supplied corpus paths contained no usable text");
         have_corpus = true;
     }
     else {
@@ -119,18 +122,24 @@ int main(int argc, char** argv) {
             "../data/books.txt",
             "../data/chatlogs.txt"
         };
-        have_corpus = corpus_load_files(&loaded_corpus, &arena,
-            project_paths, 2, max_corpus_bytes);
+        CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
+            &arena, project_paths, 2, max_corpus_bytes);
+
+        if (load_result == CORPUS_LOAD_ERROR)
+            die("corpus loading failed (check file access and the 5 MiB total limit)");
 
         // Also support launching with the repository root as working directory.
-        if (!have_corpus) {
+        if (load_result == CORPUS_LOAD_EMPTY) {
             const char* root_paths[] = {
                 "data/books.txt",
                 "data/chatlogs.txt"
             };
-            have_corpus = corpus_load_files(&loaded_corpus, &arena,
+            load_result = corpus_load_files(&loaded_corpus, &arena,
                 root_paths, 2, max_corpus_bytes);
+            if (load_result == CORPUS_LOAD_ERROR)
+                die("corpus loading failed (check file access and the 5 MiB total limit)");
         }
+        have_corpus = (load_result == CORPUS_LOAD_OK);
     }
 
     uint8_t* corpus = NULL;
