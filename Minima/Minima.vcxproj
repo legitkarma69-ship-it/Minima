@@ -102,7 +102,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -125,6 +125,26 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\arena.c" />
+    <ClCompile Include="..\backward.c" />
+    <ClCompile Include="..\forward.c" />
+    <ClCompile Include="..\generate.c" />
+    <ClCompile Include="..\main.c" />
+    <ClCompile Include="..\model.c" />
+    <ClCompile Include="..\optim.c" />
+    <ClCompile Include="..\tokenizer.c" />
+    <ClCompile Include="..\util.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\arena.h" />
+    <ClInclude Include="..\backward.h" />
+    <ClInclude Include="..\config.h" />
+    <ClInclude Include="..\forward.h" />
+    <ClInclude Include="..\generate.h" />
+    <ClInclude Include="..\model.h" />
+    <ClInclude Include="..\optim.h" />
+    <ClInclude Include="..\tokenizer.h" />
+    <ClInclude Include="..\util.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
