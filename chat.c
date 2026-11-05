@@ -4,23 +4,100 @@
 #include "tokenizer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <math.h>
 #include <string.h>
 #include <time.h>
+
+static const char* skip_setting_space(const char* p) {
+    while (*p == ' ' || *p == '\t') ++p;
+    return p;
+}
+
+static bool parse_test_settings(const char* line, ChatOptions* settings) {
+    if (!line || !settings || strncmp(line, "/test ", 6) != 0)
+        return false;
+
+    const char* p = line + 6;
+    char* end = NULL;
+    errno = 0;
+    const float temperature = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(temperature)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long top_k = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || top_k < 1 || top_k > 256)
+        return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const float top_p = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(top_p)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const float repetition = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(repetition)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long max_tokens = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || max_tokens < 1 || max_tokens > 512)
+        return false;
+    p = skip_setting_space(end);
+    if (*p != '\0') return false;
+
+    if (temperature < 0.05f || temperature > 5.0f ||
+        top_p < 0.01f || top_p > 1.0f ||
+        repetition < 1.0f || repetition > 3.0f)
+        return false;
+
+    settings->temperature = temperature;
+    settings->top_k = (int)top_k;
+    settings->top_p = top_p;
+    settings->repetition_penalty = repetition;
+    settings->max_new_tokens = (int)max_tokens;
+    return true;
+}
 
 int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
     const ChatOptions* options) {
     uint16_t history[512], input_ids[8192], prompt[512], output[512];
     int history_len=0;
     char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
+    ChatOptions active_options = *options;
+    bool test_pending = false;
     puts("CHAT_READY");
     puts("ProjectMinima chat. Type /quit to exit.");
     for(;;){
         if(!fgets(line,sizeof(line),stdin))break;
         size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\n'||line[bytes-1]=='\r'))line[--bytes]=0;
         if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
-        if(!bytes){puts("CHAT_READY");continue;}
+        if(strncmp(line,"/test ",6)==0) {
+            ChatOptions requested = *options;
+            if (!parse_test_settings(line, &requested)) {
+                printf("TEST_ERROR: invalid sampling settings: [%s]\n", line);
+                puts("CHAT_READY");
+                continue;
+            }
+            active_options = requested;
+            history_len = 0;
+            test_pending = true;
+            continue;
+        }
+        if(!bytes){
+            if (test_pending) {
+                active_options = *options;
+                test_pending = false;
+                history_len = 0;
+            }
+            puts("CHAT_READY");
+            continue;
+        }
         int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,(int)(sizeof(input_ids)/sizeof(input_ids[0])));
-        if(input_count<=0){puts("BOT: [input encoding failed]");puts("CHAT_READY");continue;}
+        if(input_count<=0){puts(test_pending ? "TEST: [input encoding failed]" : "BOT: [input encoding failed]");active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;}
         if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
         uint16_t separator[4];
         int separator_count=history_len
@@ -35,18 +112,29 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
         memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
         if(separator_count)memcpy(prompt+history_len,separator,(size_t)separator_count*sizeof(uint16_t));
         memcpy(prompt+history_len+separator_count,input_ids,(size_t)input_count*sizeof(uint16_t));
-        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)options->seed^(uint64_t)history_len);
-        int max_new=options->max_new_tokens;
+        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)active_options.seed^(uint64_t)history_len);
+        int max_new=active_options.max_new_tokens;
         if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
         int total=generate_ex(model,tok,cache,prompt,prompt_len,output,512,max_new,
-            options->temperature,options->top_k,options->top_p,options->repetition_penalty,&rng);
-        if(total<=prompt_len){puts("BOT: [generation failed]");puts("CHAT_READY");continue;}
+            active_options.temperature,active_options.top_k,active_options.top_p,
+            active_options.repetition_penalty,&rng);
+        if(total<=prompt_len){
+            puts(test_pending ? "TEST: [generation failed]" : "BOT: [generation failed]");
+            active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;
+        }
         int decoded_bytes=tokenizer_decode(tok,output+prompt_len,total-prompt_len,decoded,(int)sizeof(decoded));
         if(decoded_bytes<0)decoded[0]=0;
-        printf("BOT: %s\n",decoded);
-        history_len=total;
-        if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
-        else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
+        printf("%s: %s\n", test_pending ? "TEST" : "BOT", decoded);
+        if (test_pending) {
+            /* A test is isolated: it neither consumes nor changes chat history. */
+            history_len = 0;
+            active_options = *options;
+            test_pending = false;
+        } else {
+            history_len=total;
+            if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
+            else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
+        }
         puts("CHAT_READY");
     }
     puts("CHAT_CLOSED");
