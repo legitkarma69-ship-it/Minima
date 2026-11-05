@@ -7,8 +7,8 @@
 #define CORPUS_MAX_PATHS 32
 
 static bool is_text_whitespace(uint8_t c) {
-    return c == ' ' || c == '\\t' || c == '\\n' ||
-        c == '\\r' || c == '\\v' || c == '\\f';
+    return c == ' ' || c == '\t' || c == '\n' ||
+        c == '\r' || c == '\v' || c == '\f';
 }
 
 // Empty files and files containing only whitespace (including Windows CRLF
