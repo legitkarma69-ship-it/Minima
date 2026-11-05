@@ -53,7 +53,14 @@ static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         for(int i=0;i<=4;i++){int y=top+(bottom-top)*i/4;MoveToEx(dc,left,y,NULL);LineTo(dc,right,y);}
         SelectObject(dc,old);DeleteObject(grid);
         float tr[512],va[512];int n=0;FILE* f=_wfopen(g_metrics_path,L"rt");
-        if(f){char line[512];(void)fgets(line,sizeof(line),f);while(fgets(line,sizeof(line),f)){
+        if(f){
+            char line[512];
+            if(fseek(f,0,SEEK_END)==0){
+                long end=ftell(f),start=end>262144?end-262144:0;
+                if(start>0){fseek(f,start,SEEK_SET);(void)fgets(line,sizeof(line),f);}
+                else {rewind(f);(void)fgets(line,sizeof(line),f);}
+            }
+            while(fgets(line,sizeof(line),f)){
             double step,a,b,lr,tp,vp,elapsed;
             if(sscanf_s(line,"%lf,%lf,%lf,%lf,%lf,%lf,%lf",&step,&a,&b,&lr,&tp,&vp,&elapsed)==7){
                 if(n==512){memmove(tr,tr+1,511*sizeof(float));memmove(va,va+1,511*sizeof(float));n=511;}
