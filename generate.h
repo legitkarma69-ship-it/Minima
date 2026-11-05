@@ -24,6 +24,11 @@ typedef struct {
 bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq);
 void kvcache_reset(KVCache* cache);
 
+// Verify that incremental KV-cache inference matches a full causal
+// forward pass for the final token in a sequence.
+bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
+    const uint16_t* tokens, int seq, float tolerance);
+
 // Generate `n_new` tokens starting from the prompt.
 // Writes the generated token ids into `out_ids` (including the prompt).
 // Returns total number of tokens written.
