@@ -380,15 +380,16 @@ static void start_engine(BOOL chat_mode) {
     }
 }
 
-static void request_cooperative_stop(void) {
+static BOOL request_cooperative_stop(void) {
     wchar_t path[MAX_PATH];
     wcscpy_s(path,_countof(path),g_engine_path);
     wchar_t* slash=wcsrchr(path,L'\\');
     if (slash) wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.stop");
     HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-    if(file==INVALID_HANDLE_VALUE){append_log(L"Could not create stop signal file.\r\n");return;}
+    if(file==INVALID_HANDLE_VALUE){append_log(L"Could not create stop signal file.\r\n");return FALSE;}
     CloseHandle(file);
     append_log(L"Stop requested. The engine will finish the current step and save a checkpoint.\r\n");
+    return TRUE;
 }
 
 static void send_chat_message(void) {
@@ -590,8 +591,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
             if (MessageBoxW(hwnd,L"An engine process is running. Stop it and close?",
                 L"ProjectMinima",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
-            g_close_when_done=TRUE;
-            if(g_chat_mode)TerminateProcess(g_process,3);else request_cooperative_stop();
+            if(g_chat_mode){g_close_when_done=TRUE;TerminateProcess(g_process,3);}
+            else {if(!request_cooperative_stop())return 0;g_close_when_done=TRUE;}
             return 0;
         }
         DestroyWindow(hwnd);
