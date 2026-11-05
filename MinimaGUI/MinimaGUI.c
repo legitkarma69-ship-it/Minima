@@ -23,6 +23,7 @@
 #define IDC_CHAT_INPUT   1011
 #define IDC_CHAT_SEND    1012
 #define IDC_CHAT_STOP    1013
+#define IDC_SAVE_NOW     1014
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define IDT_GRAPH_REFRESH 1
@@ -95,6 +96,7 @@ static void set_running(BOOL running) {
     InterlockedExchange(&g_running, running ? 1 : 0);
     EnableWindow(GetDlgItem(g_window, IDC_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), running);
+    EnableWindow(GetDlgItem(g_window, IDC_SAVE_NOW), running && !g_chat_mode);
     EnableWindow(GetDlgItem(g_window, IDC_CHAT_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_ADD), !running);
     EnableWindow(GetDlgItem(g_window, IDC_REMOVE), !running);
@@ -278,7 +280,7 @@ static void start_engine(BOOL chat_mode) {
         !append_option(command,_countof(command),L"--max-seq",g_max_seq)){
             MessageBoxW(g_window,L"Check the training settings.",L"ProjectMinima",MB_ICONWARNING);return;
         }
-        wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\"");
+        wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\" --save-file \"minima.save\"");
         wchar_t stop_path[MAX_PATH];wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
         wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
         if(stop_slash)wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
@@ -400,6 +402,15 @@ static void stop_generation(void) {
     }
 }
 
+static void request_checkpoint_save(void) {
+    if(!g_process || g_chat_mode)return;
+    wchar_t path[MAX_PATH];wcscpy_s(path,_countof(path),g_engine_path);
+    wchar_t* slash=wcsrchr(path,L'\\');
+    if(slash)wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.save");
+    HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(file!=INVALID_HANDLE_VALUE){CloseHandle(file);append_log(L"Checkpoint save requested.\\r\\n");}
+}
+
 static void stop_engine(void) {
     if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
         if (MessageBoxW(g_window,L"Request a graceful stop after the current training step?",
@@ -474,7 +485,8 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
-    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,360,346,190,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,hwnd,(HMENU)IDC_SAVE_NOW,NULL,NULL);
+    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,470,346,110,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL,NULL);
 
     g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,hwnd,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
@@ -543,6 +555,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDC_CHAT_START: start_engine(TRUE); return 0;
         case IDC_CHAT_SEND: send_chat_message(); return 0;
         case IDC_CHAT_STOP: stop_generation(); return 0;
+        case IDC_SAVE_NOW: request_checkpoint_save(); return 0;
         }
         break;
     case WM_APPEND_LOG:
