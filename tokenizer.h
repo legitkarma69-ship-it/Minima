@@ -53,6 +53,9 @@ int  tokenizer_decode(const Tokenizer* tok,
     const uint16_t* ids, int n_ids,
     char* out, int out_cap);
 
+// Stable fingerprint of vocabulary strings and ordered merge rules.
+uint64_t tokenizer_fingerprint(const Tokenizer* tok);
+
 // ---------- Persistence ----------
 bool tokenizer_save(const Tokenizer* tok, const char* path);
 bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path);
