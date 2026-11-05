@@ -171,12 +171,15 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
 }
 
 // Simple cosine decay with linear warmup
-float optim_lr_cosine(float base_lr, int step, int warmup, int total) {
+float optim_lr_cosine(float base_lr, int64_t step, int64_t warmup, int64_t total) {
     if (!isfinite(base_lr) || base_lr < 0.0f || total <= 0 || step < 0)
         return 0.0f;
 
+    if (step <= 0) return 0.0f;
+    if (total == 1) return step == 1 ? base_lr : 0.0f;
     if (warmup < 0) warmup = 0;
     if (warmup >= total) warmup = total - 1;
+    if (step >= total) return 0.0f;
 
     if (warmup > 0 && step < warmup)
         return base_lr * (float)step / (float)warmup;
@@ -185,4 +188,22 @@ float optim_lr_cosine(float base_lr, int step, int warmup, int total) {
     if (progress < 0.0f) progress = 0.0f;
     if (progress > 1.0f) progress = 1.0f;
     return base_lr * 0.5f * (1.0f + cosf(3.14159265f * progress));
+}
+
+/* A split invocation must produce exactly the same LR at every global step. */
+bool optim_check_lr_schedule(void) {
+    const float base = 3e-4f;
+    const int64_t total = 10000, warmup = 100;
+    float uninterrupted[10000];
+    for (int64_t step = 1; step <= total; ++step)
+        uninterrupted[step - 1] = optim_lr_cosine(base, step, warmup, total);
+    for (int64_t split = 1; split < total; split += 137) {
+        for (int64_t step = split + 1; step <= total; ++step)
+            if (optim_lr_cosine(base, step, warmup, total) != uninterrupted[step - 1])
+                return false;
+    }
+    return uninterrupted[0] > 0.0f &&
+        fabsf(uninterrupted[warmup - 1] - base) <= 1e-8f &&
+        uninterrupted[total - 1] == 0.0f &&
+        optim_lr_cosine(base, total + 1, warmup, total) == 0.0f;
 }

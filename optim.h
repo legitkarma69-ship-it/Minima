@@ -17,6 +17,12 @@ typedef struct {
     // Step counter (for bias correction)
     int64_t step;
 
+    /* Persisted schedule configuration, indexed by global optimizer step. */
+    float schedule_base_lr;
+    int64_t schedule_total_steps;
+    int64_t schedule_warmup_steps;
+    int32_t schedule_type; /* 0 = cosine, 1 = constant */
+
     // First and second moments – same shapes / order as Model weights
     float* m_tok_emb;
     float* m_pos_emb;
@@ -59,6 +65,7 @@ void optim_step(Optim* opt, Model* model, const Model* grads);
 bool optim_check_adamw(void);
 
 // Optional: learning-rate schedule helper
-float optim_lr_cosine(float base_lr, int step, int warmup, int total);
+float optim_lr_cosine(float base_lr, int64_t step, int64_t warmup, int64_t total);
+bool optim_check_lr_schedule(void);
 
 #endif

@@ -32,6 +32,8 @@
 
 typedef struct {
     float learning_rate;
+    int total_steps;
+    bool total_steps_explicit;
     int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval;
     int batch_size, sequence_length;
     uint64_t seed;
@@ -73,7 +75,7 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
 
 static void print_usage(const char* exe) {
     printf("Usage: %s [options] [corpus.txt ...]\n", exe);
-    printf("  --resume --steps N --lr FLOAT --warmup N --log-interval N\n");
+    printf("  --resume --steps N --total-steps N --lr FLOAT --warmup N --log-interval N\n");
     printf("  --validation-batches N --validation-interval N --checkpoint-interval N --seed N\n");
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
     printf("  --heads N --ffn-dim N --max-seq N --batch-size N --sequence-length N\n");
@@ -209,6 +211,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
+    o->total_steps=0; o->total_steps_explicit=false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -224,6 +227,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         else if (strcmp(argv[i], "--chat") == 0) o->chat_mode=true;
         else if (strcmp(argv[i], "--steps") == 0 ||
             strcmp(argv[i], "--warmup") == 0 ||
+            strcmp(argv[i], "--total-steps") == 0 ||
             strcmp(argv[i], "--log-interval") == 0 ||
             strcmp(argv[i], "--validation-batches") == 0 ||
             strcmp(argv[i], "--validation-interval") == 0 ||
@@ -254,6 +258,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (strcmp(opt,"--sequence-length")==0) { lo=8; hi=512; }
             long v=parse_long_value(opt,argv[i],lo,hi);
             if (strcmp(opt,"--steps")==0) *steps=(int)v;
+            else if (strcmp(opt,"--total-steps")==0) { o->total_steps=(int)v; o->total_steps_explicit=true; }
             else if (strcmp(opt,"--warmup")==0) o->warmup_steps=(int)v;
             else if (strcmp(opt,"--log-interval")==0) o->log_interval=(int)v;
             else if (strcmp(opt,"--validation-batches")==0) o->validation_batches=(int)v;
@@ -551,6 +556,8 @@ int main(int argc, char** argv) {
     if (!optim_check_adamw())
         die("AdamW numerical regression check failed");
     printf("AdamW bias-correction check: PASS\n");
+    if (!optim_check_lr_schedule()) die("global-step LR schedule regression check failed");
+    printf("Global-step LR schedule check: PASS (split continuity, warmup, cosine endpoint)\n");
 
     // ------------------------------------------------------------------
     // 1. Arenas
@@ -743,8 +750,14 @@ int main(int argc, char** argv) {
         if (!checkpoint_load("minima.model", &model, &opt,
             &rng, tokenizer_hash))
             die("checkpoint load failed: model/tokenizer mismatch or invalid checkpoint");
-        printf("Resumed checkpoint at optimizer step %lld\n\n",
+        printf("Resumed checkpoint at optimizer step %lld\n",
             (long long)opt.step);
+        if (options.total_steps_explicit && options.total_steps != opt.schedule_total_steps)
+            die("--total-steps (%d) does not match checkpoint schedule horizon (%lld)",
+                options.total_steps, (long long)opt.schedule_total_steps);
+        printf("Restored LR schedule: %s, base_lr=%.7g, warmup=%lld, total_steps=%lld\n\n",
+            opt.schedule_type==0?"cosine":"constant", opt.schedule_base_lr,
+            (long long)opt.schedule_warmup_steps, (long long)opt.schedule_total_steps);
     }
 
     if (options.chat_mode) {
@@ -781,9 +794,18 @@ int main(int argc, char** argv) {
         check_tokens, check_targets, options.batch_size, options.sequence_length))
         die("numerical gradient check failed");
 
-    // Create a valid step-zero checkpoint before training starts. If the
-    // process is interrupted early, --resume still has a matching baseline.
-    if (!resume && !checkpoint_save("minima.model", &model, &opt,
+    // Establish one schedule horizon on a fresh run and persist it before updates.
+    if (!resume) {
+        const int total_steps = options.total_steps_explicit ? options.total_steps : steps_to_run;
+        if (total_steps < steps_to_run)
+            die("--total-steps must be at least --steps for a fresh run");
+        opt.schedule_base_lr = options.learning_rate;
+        opt.schedule_total_steps = total_steps;
+        opt.schedule_warmup_steps = options.warmup_steps < total_steps
+            ? options.warmup_steps : (total_steps > 1 ? total_steps - 1 : 0);
+        opt.schedule_type = strcmp(options.lr_schedule,"constant")==0 ? 1 : 0;
+    }
+    if (!diagnostics_only && !resume && !checkpoint_save("minima.model", &model, &opt,
         &rng, tokenizer_hash))
         die("initial checkpoint save failed");
 
@@ -795,9 +817,11 @@ int main(int argc, char** argv) {
     uint16_t* batch_targets;
     float* dlogits;
 
-    const int warmup_steps = options.warmup_steps < steps_to_run
-        ? options.warmup_steps : (steps_to_run > 1 ? steps_to_run - 1 : 0);
     const int64_t initial_step = opt.step;
+    if (!diagnostics_only && steps_to_run > 0 &&
+        (int64_t)steps_to_run > opt.schedule_total_steps - opt.step)
+        die("requested %d steps exceed the remaining LR schedule horizon (%lld steps remain)",
+            steps_to_run, (long long)(opt.schedule_total_steps - opt.step));
 
     printf(" step | train loss | valid loss | learning rate\n");
     printf("------+------------+------------+--------------\n");
@@ -807,8 +831,8 @@ int main(int argc, char** argv) {
     if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
     const clock_t training_started=clock();
     printf("Metrics CSV: %s\n",options.metrics_path);
-    printf("Settings: lr=%.7g schedule=%s warmup=%d log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s batch=%d seq=%d\n",
-        options.learning_rate,options.lr_schedule,options.warmup_steps,options.log_interval,options.validation_interval,options.validation_batches,
+    printf("Settings: lr=%.7g schedule=%s warmup=%lld total_steps=%lld log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s batch=%d seq=%d\n",
+        opt.schedule_base_lr,opt.schedule_type==0?"cosine":"constant",(long long)opt.schedule_warmup_steps,(long long)opt.schedule_total_steps,options.log_interval,options.validation_interval,options.validation_batches,
         options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes,
         options.tokenizer_spread?"spread":"prefix",options.batch_size,options.sequence_length);
     printf("Estimated activations + logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
@@ -854,11 +878,11 @@ int main(int argc, char** argv) {
         model_backward(&model, &grads, &act, dlogits,
             batch_tokens, options.batch_size, options.sequence_length);
 
-        // Each invocation is an additional training segment with its own
-        // warmup + cosine decay. AdamW's bias-correction step remains global.
-        opt.lr = (strcmp(options.lr_schedule,"constant")==0 || steps_to_run==1)
-            ? options.learning_rate
-            : optim_lr_cosine(options.learning_rate,local_step+1,warmup_steps,steps_to_run);
+        // Use the next absolute optimizer step, independent of process restarts.
+        const int64_t scheduled_step = opt.step + 1;
+        opt.lr = opt.schedule_type == 1 ? opt.schedule_base_lr :
+            optim_lr_cosine(opt.schedule_base_lr, scheduled_step,
+                opt.schedule_warmup_steps, opt.schedule_total_steps);
         optim_step(&opt, &model, &grads);
         const bool manual_save_requested=consume_file_signal(options.save_file);
         if (opt.step % options.checkpoint_interval == 0 || manual_save_requested) {
@@ -968,6 +992,10 @@ int main(int argc, char** argv) {
     const float saved_moment = opt.m_tok_emb[0];
     const float saved_variance = opt.v_tok_emb[0];
     const uint64_t saved_rng_state = rng.state;
+    const float saved_schedule_lr = opt.schedule_base_lr;
+    const int64_t saved_schedule_total = opt.schedule_total_steps;
+    const int64_t saved_schedule_warmup = opt.schedule_warmup_steps;
+    const int32_t saved_schedule_type = opt.schedule_type;
     model.tok_emb[0] += 1.0f;
     opt.m_tok_emb[0] += 1.0f;
     opt.v_tok_emb[0] += 1.0f;
@@ -979,17 +1007,25 @@ int main(int argc, char** argv) {
     if (model.tok_emb[0] != saved_weight ||
         opt.m_tok_emb[0] != saved_moment ||
         opt.v_tok_emb[0] != saved_variance ||
-        opt.step != final_step || rng.state != saved_rng_state)
+        opt.step != final_step || rng.state != saved_rng_state ||
+        opt.schedule_base_lr != saved_schedule_lr ||
+        opt.schedule_total_steps != saved_schedule_total ||
+        opt.schedule_warmup_steps != saved_schedule_warmup ||
+        opt.schedule_type != saved_schedule_type)
         die("checkpoint round-trip verification failed");
 
-    printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG)\n");
+    if (opt.schedule_base_lr <= 0.0f || opt.schedule_total_steps <= 0 ||
+        opt.schedule_warmup_steps < 0 ||
+        (opt.schedule_type != 0 && opt.schedule_type != 1))
+        die("checkpoint LR schedule round-trip verification failed");
+    printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG, LR schedule)\n");
     printf("Checkpoint compatibility: PASS (model architecture and tokenizer)\n");
 
     /* A truncated checkpoint must not alter any live destination state. */
     {
         FILE* source = fopen("minima.model", "rb");
         FILE* truncated = fopen("minima_truncated.model", "wb");
-        uint8_t prefix[104];
+        uint8_t prefix[128];
         size_t bytes = source ? fread(prefix, 1, sizeof(prefix), source) : 0;
         if (source) fclose(source);
         if (!truncated || bytes != sizeof(prefix) ||
@@ -1009,6 +1045,10 @@ int main(int argc, char** argv) {
         const float guard_lr = opt.lr;
         const int64_t guard_step = opt.step;
         const uint64_t guard_rng = rng.state;
+        const float guard_schedule_lr = opt.schedule_base_lr;
+        const int64_t guard_schedule_total = opt.schedule_total_steps;
+        const int64_t guard_schedule_warmup = opt.schedule_warmup_steps;
+        const int32_t guard_schedule_type = opt.schedule_type;
         model.tok_emb[0] = guard_weight + 3.0f;
         opt.m_tok_emb[0] = guard_moment + 4.0f;
         opt.v_tok_emb[0] = guard_variance + 5.0f;
@@ -1028,7 +1068,10 @@ int main(int argc, char** argv) {
             opt.m_tok_emb[0] == expected_moment &&
             opt.v_tok_emb[0] == expected_variance &&
             opt.lr == expected_lr && opt.step == expected_step &&
-            rng.state == expected_rng;
+            opt.schedule_base_lr == guard_schedule_lr &&
+            opt.schedule_total_steps == guard_schedule_total &&
+            opt.schedule_warmup_steps == guard_schedule_warmup &&
+            opt.schedule_type == guard_schedule_type && rng.state == expected_rng;
 
         model.tok_emb[0] = guard_weight;
         opt.m_tok_emb[0] = guard_moment;

@@ -15,7 +15,7 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
 // Loads into already initialized objects transactionally: on any failure, model,
 // optimizer, and RNG destination state remain unchanged. Model vocabulary and architecture
 // must match the checkpoint, as must the tokenizer fingerprint.
-// Optimizer hyperparameters, moments, global step, and RNG state are restored.
+// Optimizer hyperparameters, moments, global step, RNG state, and LR schedule are restored.
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
     Rng* rng, uint64_t tokenizer_hash);
 

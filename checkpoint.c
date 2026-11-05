@@ -11,8 +11,8 @@
 #include <windows.h>
 #endif
 
-#define CHECKPOINT_MAGIC "MINIMA02"
-#define CHECKPOINT_VERSION 2u
+#define CHECKPOINT_MAGIC "MINIMA03"
+#define CHECKPOINT_VERSION 3u
 
 static bool write_bytes(FILE* f, const void* data, size_t size, size_t count) {
     return fwrite(data, size, count, f) == count;
@@ -82,7 +82,12 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
-        !model->rms_final_scale || opt->n_params != model_parameter_count(model))
+        !model->rms_final_scale || opt->n_params != model_parameter_count(model) ||
+        !isfinite(opt->schedule_base_lr) || opt->schedule_base_lr <= 0.0f ||
+        opt->schedule_total_steps < 1 || opt->step < 0 ||
+        opt->step > opt->schedule_total_steps || opt->schedule_warmup_steps < 0 ||
+        opt->schedule_warmup_steps >= opt->schedule_total_steps ||
+        (opt->schedule_type != 0 && opt->schedule_type != 1))
         return false;
 
     char temp_path[1024];
@@ -115,7 +120,11 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         !write_bytes(f, &opt->beta1, sizeof(float), 1) ||
         !write_bytes(f, &opt->beta2, sizeof(float), 1) ||
         !write_bytes(f, &opt->eps, sizeof(float), 1) ||
-        !write_bytes(f, &opt->weight_decay, sizeof(float), 1))
+        !write_bytes(f, &opt->weight_decay, sizeof(float), 1) ||
+        !write_bytes(f, &opt->schedule_base_lr, sizeof(float), 1) ||
+        !write_bytes(f, &opt->schedule_total_steps, sizeof(int64_t), 1) ||
+        !write_bytes(f, &opt->schedule_warmup_steps, sizeof(int64_t), 1) ||
+        !write_bytes(f, &opt->schedule_type, sizeof(int32_t), 1))
         goto fail;
 
     MODEL_ARRAYS(WRITE_MODEL);
@@ -210,7 +219,9 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     uint64_t checkpoint_params = 0;
     int64_t step = 0;
     uint64_t rng_state = 0, saved_tokenizer_hash = 0;
-    float lr, beta1, beta2, eps, weight_decay;
+    float lr, beta1, beta2, eps, weight_decay, schedule_base_lr;
+    int64_t schedule_total_steps = 0, schedule_warmup_steps = 0;
+    int32_t schedule_type = -1;
 
     if (!read_bytes(f, magic, 1, sizeof(magic)) ||
         memcmp(magic, CHECKPOINT_MAGIC, sizeof(magic)) != 0 ||
@@ -225,7 +236,11 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !read_bytes(f, &beta1, sizeof(float), 1) ||
         !read_bytes(f, &beta2, sizeof(float), 1) ||
         !read_bytes(f, &eps, sizeof(float), 1) ||
-        !read_bytes(f, &weight_decay, sizeof(float), 1))
+        !read_bytes(f, &weight_decay, sizeof(float), 1) ||
+        !read_bytes(f, &schedule_base_lr, sizeof(float), 1) ||
+        !read_bytes(f, &schedule_total_steps, sizeof(int64_t), 1) ||
+        !read_bytes(f, &schedule_warmup_steps, sizeof(int64_t), 1) ||
+        !read_bytes(f, &schedule_type, sizeof(int32_t), 1))
         goto fail;
 
     if (dims[0] != (uint32_t)model->vocab_size ||
@@ -241,7 +256,11 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !isfinite(beta1) || beta1 < 0.0f || beta1 >= 1.0f ||
         !isfinite(beta2) || beta2 < 0.0f || beta2 >= 1.0f ||
         !isfinite(eps) || eps <= 0.0f ||
-        !isfinite(weight_decay) || weight_decay < 0.0f)
+        !isfinite(weight_decay) || weight_decay < 0.0f ||
+        !isfinite(schedule_base_lr) || schedule_base_lr <= 0.0f ||
+        schedule_total_steps < 1 || step > schedule_total_steps ||
+        schedule_warmup_steps < 0 || schedule_warmup_steps >= schedule_total_steps ||
+        (schedule_type != 0 && schedule_type != 1))
         goto fail;
 
     MODEL_ARRAYS(READ_MODEL);
@@ -265,6 +284,10 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     opt->beta2 = beta2;
     opt->eps = eps;
     opt->weight_decay = weight_decay;
+    opt->schedule_base_lr = schedule_base_lr;
+    opt->schedule_total_steps = schedule_total_steps;
+    opt->schedule_warmup_steps = schedule_warmup_steps;
+    opt->schedule_type = schedule_type;
     free(staging);
     return true;
 
