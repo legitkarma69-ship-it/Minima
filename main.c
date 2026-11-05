@@ -72,7 +72,7 @@ int main(void) {
     // ------------------------------------------------------------------
     // All translation units now use the same values from config.h.
     Model model;
-    if (!model_init(&model, &arena, 42))
+    if (!model_init(&model, &arena, 42, tok.vocab_size))
         die("model_init failed");
     model_summary(&model);
 
