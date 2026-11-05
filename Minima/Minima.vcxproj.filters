@@ -15,6 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\train.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\corpus.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -23,6 +26,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\train.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\corpus.h">
       <Filter>Header Files</Filter>
     </ClInclude>
