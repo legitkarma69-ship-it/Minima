@@ -150,15 +150,19 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
         int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,512);
         if(input_count<=0){puts("BOT: [input encoding failed]");puts("CHAT_READY");continue;}
         if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
-        int prompt_len=history_len+input_count;
+        uint16_t separator[4];
+        const int separator_count=history_len
+            ? tokenizer_encode(tok,(const uint8_t*)"\\n",1,separator,4) : 0;
+        int prompt_len=history_len+separator_count+input_count;
         if(prompt_len>model->max_seq-1){
             int drop=prompt_len-(model->max_seq-1);
             if(drop<history_len){memmove(history,history+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
             else history_len=0;
-            prompt_len=history_len+input_count;
+            prompt_len=history_len+separator_count+input_count;
         }
         memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
-        memcpy(prompt+history_len,input_ids,(size_t)input_count*sizeof(uint16_t));
+        if(separator_count)memcpy(prompt+history_len,separator,(size_t)separator_count*sizeof(uint16_t));
+        memcpy(prompt+history_len+separator_count,input_ids,(size_t)input_count*sizeof(uint16_t));
         Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)opt->seed^(uint64_t)history_len);
         int max_new=options->max_new_tokens;
         if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
