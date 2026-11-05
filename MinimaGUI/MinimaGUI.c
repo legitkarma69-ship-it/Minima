@@ -388,6 +388,7 @@ static void start_engine(BOOL chat_mode) {
         CloseHandle(g_process);
         g_process = NULL;
         CloseHandle(read_pipe);
+        g_chat_mode=FALSE;
         set_running(FALSE);
         MessageBoxW(g_window, L"Could not create the output-reader thread.", L"ProjectMinima", MB_ICONERROR);
     }
