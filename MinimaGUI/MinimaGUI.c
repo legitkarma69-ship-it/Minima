@@ -155,7 +155,7 @@ static void layout_controls(HWND hwnd) {
     if (g_graph) MoveWindow(g_graph, scale_px(600), scale_px(170), width - scale_px(624), scale_px(175), TRUE);
     if (g_log) MoveWindow(g_log, pad, output_top + scale_px(27), width - 2 * pad,
         height - output_top - scale_px(108), TRUE);
-    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(355), scale_px(26), TRUE);
+    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(355), scale_px(180), TRUE);
     if (g_chat_test) MoveWindow(g_chat_test, width - scale_px(340), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(230), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_CHAT_STOP), width - scale_px(110), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
