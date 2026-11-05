@@ -46,12 +46,12 @@ typedef struct {
     size_t size;
 } CorpusFile;
 
-bool corpus_load_files(Corpus* corpus, Arena* arena,
+CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
     const char* const* paths, size_t path_count, size_t max_bytes) {
 
     if (!corpus || !arena || !paths || path_count == 0 ||
         path_count > CORPUS_MAX_PATHS || max_bytes == 0)
-        return false;
+        return CORPUS_LOAD_ERROR;
 
     memset(corpus, 0, sizeof(*corpus));
 
@@ -68,7 +68,7 @@ bool corpus_load_files(Corpus* corpus, Arena* arena,
 
         if (fseek(f, 0, SEEK_END) != 0) {
             fclose(f);
-            return false;
+            return CORPUS_LOAD_ERROR;
         }
 
         long end = ftell(f);
@@ -94,7 +94,7 @@ bool corpus_load_files(Corpus* corpus, Arena* arena,
         total += bytes;
     }
 
-    if (file_count == 0) return false;
+    if (file_count == 0) return CORPUS_LOAD_EMPTY;
 
     // Reserve two separator bytes between sources, plus a NUL terminator.
     if (file_count > 1) {
@@ -139,11 +139,11 @@ bool corpus_load_files(Corpus* corpus, Arena* arena,
         printf("  loaded: %s (%zu bytes)\n", files[i].path, got);
     }
 
-    if (written == 0) return false;
+    if (written == 0) return CORPUS_LOAD_EMPTY;
     data[written] = 0;
 
     corpus->data = data;
     corpus->length = written;
     corpus->files_loaded = loaded;
-    return true;
+    return CORPUS_LOAD_OK;
 }
