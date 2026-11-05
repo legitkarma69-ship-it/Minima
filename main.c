@@ -48,6 +48,7 @@ typedef struct {
     const char* lr_schedule;
     bool tokenizer_spread;
     bool tokenizer_only;
+    bool use_existing_tokenizer;
 } TrainOptions;
 
 static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
@@ -84,6 +85,7 @@ static void print_usage(const char* exe) {
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
+    printf("  --use-existing-tokenizer (fresh model using a previously rebuilt minima.bpe)\n");
     printf("  --diagnostics-only --help\n");
 }
 
@@ -214,7 +216,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
     o->total_steps=0; o->total_steps_explicit=false;
-    o->tokenizer_only=false;
+    o->tokenizer_only=false; o->use_existing_tokenizer=false;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -229,6 +231,9 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         }
         else if (strcmp(argv[i], "--retrain-tokenizer-only") == 0) {
             o->tokenizer_only = true;
+        }
+        else if (strcmp(argv[i], "--use-existing-tokenizer") == 0) {
+            o->use_existing_tokenizer = true;
         }
         else if (strcmp(argv[i], "--chat") == 0) o->chat_mode=true;
         else if (strcmp(argv[i], "--steps") == 0 ||
@@ -328,8 +333,10 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         }
     }
     if (o->chat_mode && !*resume) die("--chat requires --resume");
-    if (o->tokenizer_only && (*resume || o->chat_mode || *diagnostics_only))
-        die("--retrain-tokenizer-only cannot be combined with resume, chat, or diagnostics-only");
+    if (o->tokenizer_only && (*resume || o->chat_mode || *diagnostics_only || o->use_existing_tokenizer))
+        die("--retrain-tokenizer-only cannot be combined with resume, chat, diagnostics-only, or --use-existing-tokenizer");
+    if (o->use_existing_tokenizer && (*resume || o->chat_mode || *diagnostics_only))
+        die("--use-existing-tokenizer is for fresh training only");
     if (*diagnostics_only) {
         if (!*resume)
             die("--diagnostics-only requires --resume");
@@ -664,12 +671,14 @@ int main(int argc, char** argv) {
     // 3. Load or train tokenizer
     // ------------------------------------------------------------------
     Tokenizer tok;
-    if (resume) {
+    if (resume || options.use_existing_tokenizer) {
         if (!tokenizer_load(&tok, &arena, "minima.bpe"))
-            die("resume requested, but minima.bpe could not be loaded");
+            die(resume ? "resume requested, but minima.bpe could not be loaded" :
+                "--use-existing-tokenizer requested, but minima.bpe could not be loaded");
         if (tok.vocab_size != options.model.vocab_size)
-            die("saved tokenizer vocabulary does not match the configured model vocabulary; start a fresh run");
-        printf("Loaded tokenizer: minima.bpe (vocab = %d)\n", tok.vocab_size);
+            die("saved tokenizer vocabulary does not match the configured model vocabulary; rebuild it or change the vocabulary setting");
+        printf("Loaded %s tokenizer: minima.bpe (vocab = %d)\n",
+            resume ? "checkpoint" : "prebuilt", tok.vocab_size);
     }
     else {
         const size_t train_corpus_len = (corpus_len * 95u) / 100u;
