@@ -527,8 +527,15 @@ int main(int argc, char** argv) {
         &resume, &diagnostics_only, &steps_to_run, user_paths, &options);
     if(options.sequence_length>options.model.max_seq)
         die("sequence length cannot exceed model context length");
-    if((size_t)options.batch_size*(size_t)options.sequence_length*(size_t)options.model.vocab_size > 16u*1024u*1024u)
-        die("batch x sequence x vocabulary exceeds the 64 MiB logits-scratch safety limit");
+    const size_t training_tokens=(size_t)options.batch_size*(size_t)options.sequence_length;
+    const size_t activation_floats=training_tokens*(
+        (size_t)(9+6*options.model.n_layers)*(size_t)options.model.dim +
+        (size_t)(3*options.model.n_layers+3)*(size_t)options.model.ffn_dim +
+        2u*(size_t)options.model.vocab_size);
+    const size_t activation_bytes=activation_floats*sizeof(float);
+    if(activation_bytes>192u*1024u*1024u)
+        die("estimated activations/logits require %.1f MiB; the temporary arena safety limit is 192 MiB",
+            (double)activation_bytes/(1024.0*1024.0));
 
     printf("ProjectMinima text-corpus training experiment\n");
     printf("Vocabulary target: %d\n", options.model.vocab_size);
@@ -803,8 +810,8 @@ int main(int argc, char** argv) {
         options.learning_rate,options.lr_schedule,options.warmup_steps,options.log_interval,options.validation_interval,options.validation_batches,
         options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes,
         options.tokenizer_spread?"spread":"prefix",options.batch_size,options.sequence_length);
-    printf("Estimated logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
-        (double)options.batch_size*options.sequence_length*model.vocab_size*sizeof(float)/(1024.0*1024.0),
+    printf("Estimated activations + logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
+        (double)activation_bytes/(1024.0*1024.0),
         2.0*model.n_layers*model.max_seq*model.dim*sizeof(float)/(1024.0*1024.0));
 
     double train_loss_sum = 0.0;
