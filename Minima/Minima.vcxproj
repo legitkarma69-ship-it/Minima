@@ -105,7 +105,6 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard_C>stdc11</LanguageStandard_C>
-      <LanguageStandard_C>stdc11</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -130,6 +129,7 @@
   <ItemGroup>
     <ClCompile Include="..\arena.c" />
     <ClCompile Include="..\backward.c" />
+    <ClCompile Include="..\corpus.c" />
     <ClCompile Include="..\forward.c" />
     <ClCompile Include="..\gradcheck.c" />
     <ClCompile Include="..\generate.c" />
@@ -143,6 +143,7 @@
     <ClInclude Include="..\arena.h" />
     <ClInclude Include="..\backward.h" />
     <ClInclude Include="..\config.h" />
+    <ClInclude Include="..\corpus.h" />
     <ClInclude Include="..\forward.h" />
     <ClInclude Include="..\gradcheck.h" />
     <ClInclude Include="..\generate.h" />
