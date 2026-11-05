@@ -992,6 +992,10 @@ int main(int argc, char** argv) {
     const float saved_moment = opt.m_tok_emb[0];
     const float saved_variance = opt.v_tok_emb[0];
     const uint64_t saved_rng_state = rng.state;
+    const float saved_schedule_lr = opt.schedule_base_lr;
+    const int64_t saved_schedule_total = opt.schedule_total_steps;
+    const int64_t saved_schedule_warmup = opt.schedule_warmup_steps;
+    const int32_t saved_schedule_type = opt.schedule_type;
     model.tok_emb[0] += 1.0f;
     opt.m_tok_emb[0] += 1.0f;
     opt.v_tok_emb[0] += 1.0f;
@@ -1003,7 +1007,11 @@ int main(int argc, char** argv) {
     if (model.tok_emb[0] != saved_weight ||
         opt.m_tok_emb[0] != saved_moment ||
         opt.v_tok_emb[0] != saved_variance ||
-        opt.step != final_step || rng.state != saved_rng_state)
+        opt.step != final_step || rng.state != saved_rng_state ||
+        opt.schedule_base_lr != saved_schedule_lr ||
+        opt.schedule_total_steps != saved_schedule_total ||
+        opt.schedule_warmup_steps != saved_schedule_warmup ||
+        opt.schedule_type != saved_schedule_type)
         die("checkpoint round-trip verification failed");
 
     if (opt.schedule_base_lr <= 0.0f || opt.schedule_total_steps <= 0 ||
