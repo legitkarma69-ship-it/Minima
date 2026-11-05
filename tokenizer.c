@@ -260,6 +260,50 @@ int tokenizer_decode(const Tokenizer* tok,
 }
 
 // ------------------------------------------------------------------
+// Stable tokenizer fingerprint
+// ------------------------------------------------------------------
+
+static uint64_t tokenizer_hash_bytes(uint64_t hash,
+    const void* data, size_t length) {
+    const uint8_t* bytes = (const uint8_t*)data;
+    for (size_t i = 0; i < length; i++) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+uint64_t tokenizer_fingerprint(const Tokenizer* tok) {
+    if (!tok || tok->vocab_size < 260 ||
+        tok->vocab_size > TOK_MAX_VOCAB ||
+        tok->n_merges < 0 || tok->n_merges > TOK_MAX_MERGES)
+        return 0;
+
+    uint64_t hash = 14695981039346656037ULL;
+    const uint32_t vocab_size = (uint32_t)tok->vocab_size;
+    const uint32_t n_merges = (uint32_t)tok->n_merges;
+    hash = tokenizer_hash_bytes(hash, &vocab_size, sizeof(vocab_size));
+    hash = tokenizer_hash_bytes(hash, &n_merges, sizeof(n_merges));
+
+    for (int i = 0; i < tok->vocab_size; i++) {
+        if (!tok->token_str[i] || tok->token_len[i] <= 0 ||
+            tok->token_len[i] > TOK_MAX_TOKEN_LEN)
+            return 0;
+        const uint32_t len = (uint32_t)tok->token_len[i];
+        hash = tokenizer_hash_bytes(hash, &len, sizeof(len));
+        hash = tokenizer_hash_bytes(hash, tok->token_str[i], len);
+    }
+
+    for (int i = 0; i < tok->n_merges; i++) {
+        hash = tokenizer_hash_bytes(hash, &tok->merges[i].left,
+            sizeof(tok->merges[i].left));
+        hash = tokenizer_hash_bytes(hash, &tok->merges[i].right,
+            sizeof(tok->merges[i].right));
+    }
+    return hash ? hash : 1;
+}
+
+// ------------------------------------------------------------------
 // Save / Load (simple binary format)
 // ------------------------------------------------------------------
 
