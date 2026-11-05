@@ -10,10 +10,13 @@ typedef struct {
     size_t   size;      // total bytes
     size_t   used;      // bytes currently allocated
     size_t   peak;      // high-water mark (for diagnostics)
+    size_t   committed; // bytes backed by physical/commit memory
+    size_t   page_size; // OS page size used for incremental commits
 } Arena;
 
-// Create an arena of exactly `size` bytes.
-// Returns false on failure (out of memory).
+// Create an arena of `size` bytes. On Windows, reserve address space and commit
+// pages on demand as allocations grow. Other platforms allocate the full block.
+// Returns false on failure (out of memory or address-space reservation failure).
 bool arena_init(Arena* a, size_t size);
 
 // Destroy and free the underlying memory.
