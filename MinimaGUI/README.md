@@ -21,7 +21,7 @@ The engine working directory is the executable directory. Keep the `data` folder
 - Configure learning rate, warmup, and cosine or constant learning-rate schedule.
 - Configure training-log interval, validation interval, validation batch count, and checkpoint interval independently.
 - Choose the random seed.
-- Configure tokenizer sample byte limit and either evenly spread sampling or prefix sampling.
+- Configure tokenizer sample byte limit (4 MiB maximum) and either evenly spread sampling or prefix sampling.
 - Start training, request a graceful stop, or request an immediate checkpoint save.
 
 Runtime model limits are validated by the engine: vocabulary 260-8192, dimension 1-512, layers 1-16, heads 1-32 (dimension must divide evenly by heads), FFN dimension 1-1024, and context length 32-512. Batch size is 1-16 and training sequence length is 8-512 and cannot exceed context length. The engine also rejects excessively large logits scratch configurations.
@@ -49,7 +49,7 @@ The engine appends structured rows to `minima_metrics.csv`. The lightweight GDI 
 - Start chat loads the existing checkpoint and tokenizer.
 - The GUI provides a text input and Generate/Send button.
 - Temperature, top-k, top-p, repetition penalty, and maximum new tokens are configurable.
-- Chat history is appended to `minima_chat.txt` and reloaded when the GUI starts.
+- Chat transcript is appended to `minima_chat.txt` and reloaded when the GUI starts. The visible transcript persists; the model's rolling context starts fresh when a new chat process is launched.
 - Stop generation terminates the inference child process. This does not affect checkpoint weights.
 
 Chat requires `minima.model` and `minima.bpe`. Set the model configuration controls to match the checkpoint before starting chat if it was trained with non-default architecture settings.
