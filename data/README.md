@@ -52,3 +52,18 @@ smoke test. The low-level load function is available, but a user-facing resume
 command is not wired into the program yet. Keep the tokenizer file paired with
 the model checkpoint; weights trained with a different tokenizer are not
 compatible.
+
+## Current implementation limits and checks
+
+The training forward/backward attention kernels use a maximum sequence length of
+512 because their per-query score workspaces are currently fixed at that size.
+The inference path additionally requires dimension <= 512, FFN dimension <=
+1024, and vocabulary size <= 8192. These limits are checked before those
+buffers are used; increasing the model configuration beyond them requires
+replacing the fixed inference workspaces with arena-backed buffers.
+
+The smoke test now includes an AdamW bias-correction regression check, tokenizer
+save/load encoding parity, checkpoint save/load verification, numerical
+gradient checks, and KV-cache parity across every prefix position in the test
+sequence. These checks are regression guards, not a substitute for evaluating
+training on held-out text.
