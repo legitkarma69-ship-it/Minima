@@ -138,7 +138,7 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
     puts("ProjectMinima chat. Type /quit to exit.");
     for(;;){
         if(!fgets(line,sizeof(line),stdin))break;
-        size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\\n'||line[bytes-1]=='\\r'))line[--bytes]=0;
+        size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\n'||line[bytes-1]=='\r'))line[--bytes]=0;
         if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
         if(!bytes){puts("CHAT_READY");continue;}
         int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,512);
@@ -161,7 +161,7 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
         if(total<=prompt_len){puts("BOT: [generation failed]");puts("CHAT_READY");continue;}
         int decoded_bytes=tokenizer_decode(tok,output+prompt_len,total-prompt_len,decoded,(int)sizeof(decoded));
         if(decoded_bytes<0)decoded[0]=0;
-        printf("BOT: %s\\n",decoded);
+        printf("BOT: %s\n",decoded);
         history_len=total;
         if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
         else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
@@ -510,7 +510,10 @@ int main(int argc, char** argv) {
     Corpus loaded_corpus;
     bool have_corpus = false;
 
-    if (user_path_count > 0) {
+    if (options.chat_mode) {
+        have_corpus=false; /* Chat only needs the saved tokenizer and checkpoint. */
+    }
+    else if (user_path_count > 0) {
         const CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
             &arena, user_paths, (size_t)user_path_count, max_corpus_bytes);
         if (load_result == CORPUS_LOAD_ERROR)
@@ -815,7 +818,7 @@ int main(int argc, char** argv) {
             fflush(metrics);
             train_loss_sum=0.0; train_loss_count=0;
             if (stop_file_exists(options.stop_file)) {
-                printf("Cooperative stop requested; saving checkpoint and stopping after optimizer step %lld.\\n",
+                printf("Cooperative stop requested; saving checkpoint and stopping after optimizer step %lld.\n",
                     (long long)opt.step);
                 break;
             }
