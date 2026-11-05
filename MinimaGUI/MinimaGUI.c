@@ -502,6 +502,8 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         g_process = NULL;
         CloseHandle(read_pipe);
         g_chat_mode=FALSE;
+        g_tokenizer_rebuild_mode=FALSE;
+        g_fresh_used_saved_tokenizer=FALSE;
         set_running(FALSE);
         MessageBoxW(g_window, L"Could not create the output-reader thread.", L"ProjectMinima", MB_ICONERROR);
     }
@@ -601,6 +603,7 @@ static void rebuild_tokenizer(void) {
     }
     if(MessageBoxW(g_window,L"Rebuild minima.bpe using the current corpus and tokenizer settings?\r\n\r\nThe existing tokenizer will be backed up as minima.bpe.previous. The current model checkpoint will no longer match it. You must start a fresh training run afterward.",L"Rebuild tokenizer",MB_YESNO|MB_ICONWARNING)!=IDYES)return;
     g_use_saved_tokenizer=FALSE;
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
     wchar_t source[MAX_PATH],backup[MAX_PATH];
     wcscpy_s(source,_countof(source),g_engine_path);
     wchar_t* slash=wcsrchr(source,L'\\'); if(!slash)return;
