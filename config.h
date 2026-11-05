@@ -2,15 +2,16 @@
 #define CONFIG_H
 
 // ---------- Model hyper-parameters ----------
-// Start conservative; you can raise these later.
+// Small defaults for the initial smoke test.
+// Increase these only after the training and inference paths are validated.
 
-#define MODEL_VOCAB_SIZE      8192
-#define MODEL_DIM             384
-#define MODEL_N_LAYERS        6
-#define MODEL_N_HEADS         6
-#define MODEL_HEAD_DIM        (MODEL_DIM / MODEL_N_HEADS)   // 64
-#define MODEL_FFN_DIM         (MODEL_DIM * 8 / 3)           // ~1024 for SwiGLU-ish
-#define MODEL_MAX_SEQ         256                           // training context
+#define MODEL_VOCAB_SIZE      512
+#define MODEL_DIM             64
+#define MODEL_N_LAYERS        2
+#define MODEL_N_HEADS         2
+#define MODEL_HEAD_DIM        (MODEL_DIM / MODEL_N_HEADS)
+#define MODEL_FFN_DIM         128
+#define MODEL_MAX_SEQ         64
 
 // Derived
 #define MODEL_N_PARAMS_EST    ( \
