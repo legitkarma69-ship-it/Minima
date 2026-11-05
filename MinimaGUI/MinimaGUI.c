@@ -99,6 +99,14 @@ static void append_log(const wchar_t* text) {
     save_chat_text(text);
 }
 
+static void update_fresh_only_controls(void) {
+    BOOL fresh=SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED;
+    BOOL enabled=!InterlockedCompareExchange(&g_running,0,0) && fresh;
+    EnableWindow(g_seed,enabled);
+    EnableWindow(g_tokenizer_bytes,enabled);
+    EnableWindow(g_tokenizer_sampling,enabled);
+}
+
 static void set_running(BOOL running) {
     InterlockedExchange(&g_running, running ? 1 : 0);
     EnableWindow(GetDlgItem(g_window, IDC_START), !running);
@@ -114,6 +122,7 @@ static void set_running(BOOL running) {
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     SetWindowTextW(g_status,running?(g_chat_mode?L"Chat running":L"Training running"):L"Idle");
+    update_fresh_only_controls();
 }
 
 static DWORD WINAPI reader_thread(void* parameter) {
@@ -477,7 +486,7 @@ static void create_controls(HWND hwnd) {
     g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,241,40,23,hwnd,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,244,65,18,hwnd,NULL,NULL,NULL);
     g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,241,42,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Seed",WS_CHILD|WS_VISIBLE,507,244,35,18,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Seed (fresh)",WS_CHILD|WS_VISIBLE,507,244,55,18,hwnd,NULL,NULL,NULL);
     g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,241,55,23,hwnd,NULL,NULL,NULL);
 
     CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,278,92,18,hwnd,NULL,NULL,NULL);
@@ -568,6 +577,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
             return 0;
         }
+        case IDC_RESUME: update_fresh_only_controls(); return 0;
         case IDC_START: start_engine(FALSE); return 0;
         case IDC_STOP: stop_engine(); return 0;
         case IDC_CHAT_START: start_engine(TRUE); return 0;
