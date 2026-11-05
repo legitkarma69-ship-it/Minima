@@ -138,6 +138,7 @@
     <ClCompile Include="..\model.c" />
     <ClCompile Include="..\optim.c" />
     <ClCompile Include="..\tokenizer.c" />
+    <ClCompile Include="..\train.c" />
     <ClCompile Include="..\util.c" />
   </ItemGroup>
   <ItemGroup>
@@ -152,6 +153,7 @@
     <ClInclude Include="..\model.h" />
     <ClInclude Include="..\optim.h" />
     <ClInclude Include="..\tokenizer.h" />
+    <ClInclude Include="..\train.h" />
     <ClInclude Include="..\util.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
