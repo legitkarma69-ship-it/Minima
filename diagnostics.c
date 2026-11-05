@@ -49,7 +49,7 @@ static int compare_token_count(const void* a, const void* b) {
 static void write_csv_string(FILE* file, const char* text) {
     fputc('"', file);
     for (const unsigned char* p = (const unsigned char*)text; *p; ++p) {
-        if (*p == '"') fputs("""", file);
+        if (*p == '"') fputs("\"\"", file);
         else if (*p == '\\') fputs("\\\\", file);
         else if (*p == '\n') fputs("\\n", file);
         else if (*p == '\r') fputs("\\r", file);
@@ -65,12 +65,12 @@ static void write_csv_token(FILE* file, const char* token, int length) {
     for (int i = 0; i < length; ++i) {
         const unsigned char byte = (unsigned char)token[i];
         if (byte == '"') fputs("\"\"", file);
-        else if (byte == '\\\\') fputs("\\\\\\\\", file);
-        else if (byte == '\\n') fputs("\\\\n", file);
-        else if (byte == '\\r') fputs("\\\\r", file);
-        else if (byte == '\\t') fputs("\\\\t", file);
+        else if (byte == '\\') fputs("\\\\", file);
+        else if (byte == '\n') fputs("\\n", file);
+        else if (byte == '\r') fputs("\\r", file);
+        else if (byte == '\t') fputs("\\t", file);
         else if (byte >= 32 && byte <= 126) fputc(byte, file);
-        else fprintf(file, "\\\\x%02X", (unsigned int)byte);
+        else fprintf(file, "\\x%02X", (unsigned int)byte);
     }
     fputc('"', file);
 }
