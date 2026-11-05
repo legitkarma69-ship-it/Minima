@@ -281,7 +281,16 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     if (!model || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
         top_n <= 0 || model->vocab_size <= 0 ||
         model->vocab_size > 8192 || tok->vocab_size != model->vocab_size ||
-        prompt_len > cache->max_seq || !cache->k_cache || !cache->v_cache)
+        model->dim <= 0 || model->dim > 512 ||
+        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
+        model->n_layers <= 0 || model->n_heads <= 0 ||
+        model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim ||
+        prompt_len > model->max_seq || prompt_len > cache->max_seq ||
+        cache->n_layers != model->n_layers || cache->dim != model->dim ||
+        cache->n_heads != model->n_heads ||
+        cache->head_dim != model->head_dim ||
+        !cache->k_cache || !cache->v_cache)
         return false;
 
     if (top_n > 20) top_n = 20;
