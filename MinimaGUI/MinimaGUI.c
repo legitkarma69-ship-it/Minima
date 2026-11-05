@@ -329,7 +329,7 @@ static void start_engine(BOOL chat_mode) {
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED)
             DeleteFileW(g_metrics_path); /* A fresh model starts a fresh loss graph. */
     }
-    int corpus_count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
+    int corpus_count = chat_mode ? 0 : (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
         wchar_t path[MAX_PATH * 2];
         SendMessageW(g_corpus, LB_GETTEXT, i, (LPARAM)path);
