@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <math.h>
 
 #define BATCH     4
 #define SEQ       32
@@ -77,7 +78,7 @@ static float evaluate_loss(Model* model, Arena* temp,
 }
 
 int main(int argc, char** argv) {
-    printf("ProjectMinima text-corpus training smoke test\n\n");
+    printf("ProjectMinima text-corpus training experiment\n\n");
     if (!optim_check_adamw())
         die("AdamW numerical regression check failed");
     printf("AdamW bias-correction check: PASS\n");
@@ -215,7 +216,7 @@ int main(int argc, char** argv) {
         all_ids, (int)corpus_len);
     printf("total tokens = %d\n\n", n_tokens);
 
-    const int train_tokens = (n_tokens * 95) / 100;
+    const int train_tokens = n_tokens - n_tokens / 20;
     const int validation_tokens = n_tokens - train_tokens;
     if (train_tokens < BATCH * SEQ + 1 ||
         validation_tokens < BATCH * SEQ + 1)
