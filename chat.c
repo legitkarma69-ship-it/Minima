@@ -4,32 +4,60 @@
 #include "tokenizer.h"
 
 #include <stdio.h>
+#include <errno.h>
 #include <math.h>
 #include <string.h>
 #include <time.h>
 
+static const char* skip_setting_space(const char* p) {
+    while (*p == ' ' || *p == '\t') ++p;
+    return p;
+}
+
 static bool parse_test_settings(const char* line, ChatOptions* settings) {
-    float temperature = 0.0f, top_p = 0.0f, repetition = 0.0f;
-    int top_k = 0, max_tokens = 0, consumed = 0;
-    if (sscanf(line, "/test %f %d %f %f %d %n",
-        &temperature, &top_k, &top_p, &repetition, &max_tokens,
-        &consumed) != 5 || consumed <= 0)
+    if (!line || !settings || strncmp(line, "/test ", 6) != 0)
         return false;
-    for (const char* p = line + consumed; *p; ++p)
-        if (*p != ' ' && *p != '\t' && *p != '\r' && *p != '\n')
-            return false;
-    if (!isfinite(temperature) || temperature < 0.05f || temperature > 5.0f ||
-        top_k < 1 || top_k > 256 ||
-        !isfinite(top_p) || top_p < 0.01f || top_p > 1.0f ||
-        !isfinite(repetition) || repetition < 1.0f || repetition > 3.0f ||
-        max_tokens < 1 || max_tokens > 512)
+
+    const char* p = line + 6;
+    char* end = NULL;
+    errno = 0;
+    const float temperature = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(temperature)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long top_k = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || top_k < 1 || top_k > 256)
+        return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const float top_p = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(top_p)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const float repetition = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(repetition)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long max_tokens = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || max_tokens < 1 || max_tokens > 512)
+        return false;
+    p = skip_setting_space(end);
+    if (*p != '\0') return false;
+
+    if (temperature < 0.05f || temperature > 5.0f ||
+        top_p < 0.01f || top_p > 1.0f ||
+        repetition < 1.0f || repetition > 3.0f)
         return false;
 
     settings->temperature = temperature;
-    settings->top_k = top_k;
+    settings->top_k = (int)top_k;
     settings->top_p = top_p;
     settings->repetition_penalty = repetition;
-    settings->max_new_tokens = max_tokens;
+    settings->max_new_tokens = (int)max_tokens;
     return true;
 }
 
