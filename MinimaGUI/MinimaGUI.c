@@ -104,7 +104,7 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
     HWND fields[]={g_lr,g_warmup,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
-        g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length};
+        g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     SetWindowTextW(g_status, running ? L"Training process running" : L"Idle");
 }
@@ -408,7 +408,7 @@ static void request_checkpoint_save(void) {
     wchar_t* slash=wcsrchr(path,L'\\');
     if(slash)wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima.save");
     HANDLE file=CreateFileW(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
-    if(file!=INVALID_HANDLE_VALUE){CloseHandle(file);append_log(L"Checkpoint save requested.\\r\\n");}
+    if(file!=INVALID_HANDLE_VALUE){CloseHandle(file);append_log(L"Checkpoint save requested.\r\n");}
 }
 
 static void stop_engine(void) {
