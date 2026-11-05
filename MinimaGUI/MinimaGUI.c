@@ -950,7 +950,23 @@ static void save_settings(void) {
 }
 
 static void create_controls(HWND hwnd) {
-    HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    g_dpi = GetDpiForWindow(hwnd);
+    if (!g_dpi) g_dpi = 96;
+    rebuild_ui_font(hwnd);
+
+    g_group_corpus = CreateWindowW(L"BUTTON", L"Corpus", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 6, 920, 168, hwnd, NULL, NULL, NULL);
+    g_group_model = CreateWindowW(L"BUTTON", L"Model", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 168, 585, 38, hwnd, NULL, NULL, NULL);
+    g_group_training = CreateWindowW(L"BUTTON", L"Training", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 202, 585, 38, hwnd, NULL, NULL, NULL);
+    g_group_advanced = CreateWindowW(L"BUTTON", L"Advanced / generation", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 236, 585, 98, hwnd, NULL, NULL, NULL);
+    g_group_monitor = CreateWindowW(L"BUTTON", L"Monitor", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        590, 150, 340, 205, hwnd, NULL, NULL, NULL);
+    g_group_output = CreateWindowW(L"BUTTON", L"Output / chat", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
+        8, 375, 920, 350, hwnd, NULL, NULL, NULL);
+    HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, hwnd, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
         12, 34, 520, 105, hwnd, (HMENU)IDC_CORPUS, NULL, NULL);
@@ -1042,6 +1058,7 @@ static void create_controls(HWND hwnd) {
         g_batch_size,g_sequence_length,g_total_steps };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
+    EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
@@ -1087,25 +1104,42 @@ static void create_controls(HWND hwnd) {
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE:
-        g_window = hwnd; create_controls(hwnd); SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL); return 0;
+        g_window = hwnd;
+        create_controls(hwnd);
+        refresh_graph_metrics();
+        SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL);
+        return 0;
     case WM_TIMER:
-        if(wp==IDT_GRAPH_REFRESH && g_graph) InvalidateRect(g_graph,NULL,FALSE);
+        if(wp==IDT_GRAPH_REFRESH && g_graph) {
+            refresh_graph_metrics();
+            InvalidateRect(g_graph,NULL,FALSE);
+        }
         return 0;
     case WM_GETMINMAXINFO: {
         MINMAXINFO* info=(MINMAXINFO*)lp;
-        info->ptMinTrackSize.x=960;
-        info->ptMinTrackSize.y=780;
+        info->ptMinTrackSize.x=scale_px(960);
+        info->ptMinTrackSize.y=scale_px(780);
         return 0;
     }
-    case WM_SIZE: {
-        RECT r;
-        GetClientRect(hwnd, &r);
-        MoveWindow(g_corpus,12,34,r.right-24,95,TRUE);
-        MoveWindow(g_graph,r.right-320,170,285,175,TRUE);
-        MoveWindow(g_log,12,402,r.right-24,r.bottom-510,TRUE);
-        MoveWindow(g_chat_input,12,r.bottom-75,r.right-240,26,TRUE);
-        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),r.right-225,r.bottom-75,110,26,TRUE);
-        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),r.right-110,r.bottom-75,100,26,TRUE);
+    case WM_SIZE:
+        if (wp != SIZE_MINIMIZED) layout_controls(hwnd);
+        return 0;
+    case WM_DPICHANGED: {
+        const UINT old_dpi = g_dpi ? g_dpi : 96;
+        UINT new_dpi = HIWORD(wp);
+        if (!new_dpi) new_dpi = old_dpi;
+        RECT* suggested = (RECT*)lp;
+        SetWindowPos(hwnd, NULL, suggested->left, suggested->top,
+            suggested->right - suggested->left,
+            suggested->bottom - suggested->top,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+        DpiScaleContext context = { hwnd, old_dpi, new_dpi };
+        EnumChildWindows(hwnd, scale_child_for_dpi, (LPARAM)&context);
+        g_dpi = new_dpi;
+        rebuild_ui_font(hwnd);
+        layout_controls(hwnd);
+        refresh_graph_metrics();
+        if (g_graph) InvalidateRect(g_graph, NULL, FALSE);
         return 0;
     }
     case WM_COMMAND:
@@ -1174,6 +1208,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
+        KillTimer(hwnd, IDT_GRAPH_REFRESH);
+        if (g_ui_font && g_ui_font != (HFONT)GetStockObject(DEFAULT_GUI_FONT)) {
+            DeleteObject(g_ui_font);
+            g_ui_font = NULL;
+        }
         PostQuitMessage(0);
         return 0;
     }
@@ -1182,6 +1221,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
     (void)previous; (void)command_line;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    g_dpi = GetDpiForSystem();
+    if (!g_dpi) g_dpi = 96;
     INITCOMMONCONTROLSEX controls = { sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS };
     InitCommonControlsEx(&controls);
 
@@ -1212,8 +1254,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if (!RegisterClassW(&wc)) return 1;
 
     HWND hwnd = CreateWindowW(wc.lpszClassName, L"ProjectMinima",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 960, 780,
-        NULL, NULL, instance, NULL);
+        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+        scale_px(960), scale_px(780), NULL, NULL, instance, NULL);
     if (!hwnd) return 1;
     ShowWindow(hwnd, show);
     UpdateWindow(hwnd);
