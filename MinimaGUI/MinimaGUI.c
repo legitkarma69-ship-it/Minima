@@ -13,6 +13,7 @@
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #define IDC_CORPUS       1001
 #define IDC_ADD          1002
@@ -54,6 +55,7 @@ static BOOL g_use_saved_tokenizer;
 static BOOL g_fresh_used_saved_tokenizer;
 static wchar_t g_prebuilt_vocab[64],g_prebuilt_tokenizer_bytes[64],g_prebuilt_sampling[64];
 static wchar_t g_engine_path[MAX_PATH];
+static HWND g_tooltip;
 static HWND g_group_corpus, g_group_model, g_group_training;
 static HWND g_group_advanced, g_group_monitor, g_group_output;
 static UINT g_dpi = 96;
@@ -123,6 +125,18 @@ static void layout_controls(HWND hwnd) {
     if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(240), scale_px(26), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(225), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
     MoveWindow(GetDlgItem(hwnd, IDC_CHAT_STOP), width - scale_px(110), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
+}
+
+static void add_tooltip(HWND target, const wchar_t* text) {
+    if (!g_tooltip || !target || !text) return;
+    TOOLINFOW info;
+    ZeroMemory(&info, sizeof(info));
+    info.cbSize = sizeof(info);
+    info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    info.hwnd = g_window;
+    info.uId = (UINT_PTR)target;
+    info.lpszText = (LPWSTR)text;
+    SendMessageW(g_tooltip, TTM_ADDTOOLW, 0, (LPARAM)&info);
 }
 
 static void refresh_graph_metrics(void) {
@@ -1030,7 +1044,7 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,309,65,18,hwnd,NULL,NULL,NULL);
     g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,306,70,23,hwnd,NULL,NULL,NULL);
 
-    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,hwnd,(HMENU)IDC_SAVE_NOW,NULL,NULL);
@@ -1059,6 +1073,26 @@ static void create_controls(HWND hwnd) {
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
+
+    g_tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
+        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT, CW_USEDEFAULT,
+        CW_USEDEFAULT, CW_USEDEFAULT, hwnd, NULL, GetModuleHandleW(NULL), NULL);
+    if (g_tooltip) {
+        SendMessageW(g_tooltip, TTM_SETMAXTIPWIDTH, 0, scale_px(320));
+        SendMessageW(g_tooltip, TTM_SETDELAYTIME, TTDT_INITIAL, 500);
+        add_tooltip(g_steps, L"Number of additional optimizer updates in this run.");
+        add_tooltip(g_total_steps, L"Global learning-rate schedule horizon for a fresh run. Resume restores the horizon stored in the checkpoint.");
+        add_tooltip(g_batch_size, L"Number of independent training sequences in each update.");
+        add_tooltip(g_sequence_length, L"Number of tokens processed per sequence. Must not exceed model context length.");
+        add_tooltip(g_lr, L"Base learning rate. The cosine or constant schedule is applied to this value.");
+        add_tooltip(g_warmup, L"Number of initial optimizer steps used for linear learning-rate warmup.");
+        add_tooltip(g_tokenizer_bytes, L"Maximum corpus bytes sampled when training the BPE tokenizer.");
+        add_tooltip(g_lr_schedule, L"Cosine decay reaches zero at the saved global schedule horizon. Constant keeps the base rate.");
+        add_tooltip(g_tokenizer_sampling, L"Spread samples across the corpus; prefix samples from the beginning.");
+        add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
+        add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
+        add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
+    }
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
