@@ -9,6 +9,7 @@
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{C17B8A90-5D9D-4D4D-AB42-93A0D29B2C31}</ProjectGuid>
     <RootNamespace>MinimaGUI</RootNamespace>
+    <ApplicationManifest>MinimaGUI.manifest</ApplicationManifest>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
