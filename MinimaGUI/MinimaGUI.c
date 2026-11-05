@@ -63,8 +63,19 @@ static BOOL g_advanced_expanded = TRUE;
 static UINT g_dpi = 96;
 static HFONT g_ui_font;
 static HPEN g_graph_grid_pen, g_graph_train_pen, g_graph_valid_pen;
+static HDC g_graph_back_dc;
+static HBITMAP g_graph_back_bitmap;
+static HGDIOBJ g_graph_back_old_bitmap;
+static int g_graph_back_width, g_graph_back_height;
+static HWND g_advanced_controls[32];
+static int g_advanced_control_count;
 static float g_graph_train[512], g_graph_valid[512];
 static int g_graph_count;
+
+static void register_advanced_control(HWND control) {
+    if (control && g_advanced_control_count < (int)_countof(g_advanced_controls))
+        g_advanced_controls[g_advanced_control_count++] = control;
+}
 
 static int scale_px(int value) {
     return MulDiv(value, (int)(g_dpi ? g_dpi : 96), 96);
@@ -106,36 +117,17 @@ static BOOL CALLBACK scale_child_for_dpi(HWND child, LPARAM parameter) {
     return TRUE;
 }
 
-static BOOL is_action_control(HWND child) {
-    const int id = GetDlgCtrlID(child);
-    return id == IDC_START || id == IDC_STOP || id == IDC_CHAT_START ||
-        id == IDC_SAVE_NOW || id == IDC_REBUILD_TOKENIZER ||
-        id == IDC_AUTO_SETTINGS || id == IDC_STATUS ||
-        id == IDC_ADVANCED_TOGGLE;
-}
-
 static void layout_controls(HWND hwnd);
-
-typedef struct { BOOL visible; HWND parent; } AdvancedVisibilityContext;
-
-static BOOL CALLBACK set_advanced_child_visibility(HWND child, LPARAM parameter) {
-    AdvancedVisibilityContext* context = (AdvancedVisibilityContext*)parameter;
-    if (is_action_control(child)) return TRUE;
-    RECT rect;
-    if (!GetWindowRect(child, &rect)) return TRUE;
-    MapWindowPoints(NULL, context->parent, (POINT*)&rect, 2);
-    if (rect.top >= scale_px(258) && rect.top < scale_px(354) &&
-        rect.left < scale_px(700))
-        ShowWindow(child, context->visible ? SW_SHOWNA : SW_HIDE);
-    return TRUE;
-}
 
 static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
     g_advanced_expanded = expanded ? TRUE : FALSE;
     SendMessageW(g_group_advanced, BM_SETCHECK,
         g_advanced_expanded ? BST_CHECKED : BST_UNCHECKED, 0);
-    AdvancedVisibilityContext context = { g_advanced_expanded, hwnd };
-    EnumChildWindows(hwnd, set_advanced_child_visibility, (LPARAM)&context);
+    for (int i = 0; i < g_advanced_control_count; ++i)
+        ShowWindow(g_advanced_controls[i], g_advanced_expanded ? SW_SHOWNA : SW_HIDE);
+    if (g_settings_path[0])
+        WritePrivateProfileStringW(L"UI", L"advanced_expanded",
+            g_advanced_expanded ? L"1" : L"0", g_settings_path);
     layout_controls(hwnd);
     InvalidateRect(hwnd, NULL, TRUE);
 }
@@ -218,6 +210,53 @@ static void refresh_graph_metrics(void) {
     fclose(file);
 }
 
+static void release_graph_backbuffer(void) {
+    if (g_graph_back_dc && g_graph_back_old_bitmap)
+        SelectObject(g_graph_back_dc, g_graph_back_old_bitmap);
+    if (g_graph_back_bitmap) {
+        DeleteObject(g_graph_back_bitmap);
+        g_graph_back_bitmap = NULL;
+    }
+    if (g_graph_back_dc) {
+        DeleteDC(g_graph_back_dc);
+        g_graph_back_dc = NULL;
+    }
+    g_graph_back_old_bitmap = NULL;
+    g_graph_back_width = 0;
+    g_graph_back_height = 0;
+}
+
+static BOOL ensure_graph_backbuffer(HDC reference, int width, int height) {
+    if (width <= 0 || height <= 0) return FALSE;
+    if (!g_graph_back_dc) {
+        g_graph_back_dc = CreateCompatibleDC(reference);
+        if (!g_graph_back_dc) return FALSE;
+    }
+    if (g_graph_back_bitmap && width == g_graph_back_width &&
+        height == g_graph_back_height)
+        return TRUE;
+
+    if (g_graph_back_bitmap) {
+        SelectObject(g_graph_back_dc, g_graph_back_old_bitmap);
+        DeleteObject(g_graph_back_bitmap);
+        g_graph_back_bitmap = NULL;
+        g_graph_back_old_bitmap = NULL;
+    }
+
+    HBITMAP bitmap = CreateCompatibleBitmap(reference, width, height);
+    if (!bitmap) return FALSE;
+    HGDIOBJ previous = SelectObject(g_graph_back_dc, bitmap);
+    if (!previous || previous == HGDI_ERROR) {
+        DeleteObject(bitmap);
+        return FALSE;
+    }
+    g_graph_back_bitmap = bitmap;
+    g_graph_back_old_bitmap = previous;
+    g_graph_back_width = width;
+    g_graph_back_height = height;
+    return TRUE;
+}
+
 static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     (void)wp; (void)lp;
     if (msg == WM_CREATE) {
@@ -227,6 +266,7 @@ static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     if (msg == WM_DESTROY) {
+        release_graph_backbuffer();
         if (g_graph_grid_pen) { DeleteObject(g_graph_grid_pen); g_graph_grid_pen = NULL; }
         if (g_graph_train_pen) { DeleteObject(g_graph_train_pen); g_graph_train_pen = NULL; }
         if (g_graph_valid_pen) { DeleteObject(g_graph_valid_pen); g_graph_valid_pen = NULL; }
@@ -239,63 +279,62 @@ static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetClientRect(hwnd, &rect);
         const int width = rect.right - rect.left;
         const int height = rect.bottom - rect.top;
-        HDC back = CreateCompatibleDC(dc);
-        HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
-        HGDIOBJ old_bitmap = SelectObject(back, bitmap);
-        FillRect(back, &rect, (HBRUSH)(COLOR_WINDOW + 1));
-        SetBkMode(back, TRANSPARENT);
-        SetTextColor(back, RGB(40,40,40));
-        TextOutW(back, scale_px(8), scale_px(5), L"Training / validation loss", 26);
+        if (ensure_graph_backbuffer(dc, width, height)) {
+            HDC back = g_graph_back_dc;
+            FillRect(back, &rect, (HBRUSH)(COLOR_WINDOW + 1));
+            SetBkMode(back, TRANSPARENT);
+            SetTextColor(back, RGB(40,40,40));
+            TextOutW(back, scale_px(8), scale_px(5), L"Training / validation loss", 26);
 
-        const int left = scale_px(58), top = scale_px(30);
-        const int right = width - scale_px(12), bottom = height - scale_px(27);
-        float low = 0.0f, high = 1.0f;
-        if (g_graph_count > 0) {
-            low = g_graph_train[0];
-            high = g_graph_train[0];
-            for (int i = 0; i < g_graph_count; ++i) {
-                if (g_graph_train[i] < low) low = g_graph_train[i];
-                if (g_graph_valid[i] < low) low = g_graph_valid[i];
-                if (g_graph_train[i] > high) high = g_graph_train[i];
-                if (g_graph_valid[i] > high) high = g_graph_valid[i];
-            }
-            if (high - low < 0.001f) high = low + 0.001f;
-        }
-
-        if (g_graph_grid_pen) SelectObject(back, g_graph_grid_pen);
-        for (int i = 0; i <= 4; ++i) {
-            const int y = top + (bottom - top) * i / 4;
-            MoveToEx(back, left, y, NULL);
-            LineTo(back, right, y);
-            wchar_t label[24];
-            const float value = high - (high - low) * (float)i / 4.0f;
-            swprintf_s(label, _countof(label), L"%.2f", value);
-            TextOutW(back, scale_px(3), y - scale_px(7), label, (int)wcslen(label));
-        }
-
-        if (g_graph_count > 1) {
-            for (int series = 0; series < 2; ++series) {
-                SelectObject(back, series ? g_graph_valid_pen : g_graph_train_pen);
+            const int left = scale_px(58), top = scale_px(30);
+            const int right = width - scale_px(12), bottom = height - scale_px(27);
+            float low = 0.0f, high = 1.0f;
+            if (g_graph_count > 0) {
+                low = g_graph_train[0];
+                high = g_graph_train[0];
                 for (int i = 0; i < g_graph_count; ++i) {
-                    const float value = series ? g_graph_valid[i] : g_graph_train[i];
-                    const int x = left + (right - left) * i / (g_graph_count - 1);
-                    const int y = bottom - (int)((value - low) / (high - low) * (bottom - top));
-                    if (i == 0) MoveToEx(back, x, y, NULL);
-                    else LineTo(back, x, y);
+                    if (g_graph_train[i] < low) low = g_graph_train[i];
+                    if (g_graph_valid[i] < low) low = g_graph_valid[i];
+                    if (g_graph_train[i] > high) high = g_graph_train[i];
+                    if (g_graph_valid[i] > high) high = g_graph_valid[i];
                 }
+                if (high - low < 0.001f) high = low + 0.001f;
             }
-            wchar_t legend[96];
-            swprintf_s(legend, _countof(legend), L"Train %.3f   Valid %.3f", g_graph_train[g_graph_count - 1], g_graph_valid[g_graph_count - 1]);
-            SetTextColor(back, RGB(35,105,190));
-            TextOutW(back, left, bottom + scale_px(5), legend, (int)wcslen(legend));
-        } else {
-            TextOutW(back, left, top + scale_px(35), L"Waiting for training metrics...", 31);
-        }
 
-        BitBlt(dc, 0, 0, width, height, back, 0, 0, SRCCOPY);
-        SelectObject(back, old_bitmap);
-        DeleteObject(bitmap);
-        DeleteDC(back);
+            if (g_graph_grid_pen) SelectObject(back, g_graph_grid_pen);
+            for (int i = 0; i <= 4; ++i) {
+                const int y = top + (bottom - top) * i / 4;
+                MoveToEx(back, left, y, NULL);
+                LineTo(back, right, y);
+                wchar_t label[24];
+                const float value = high - (high - low) * (float)i / 4.0f;
+                swprintf_s(label, _countof(label), L"%.2f", value);
+                TextOutW(back, scale_px(3), y - scale_px(7), label, (int)wcslen(label));
+            }
+
+            if (g_graph_count > 1) {
+                for (int series = 0; series < 2; ++series) {
+                    SelectObject(back, series ? g_graph_valid_pen : g_graph_train_pen);
+                    for (int i = 0; i < g_graph_count; ++i) {
+                        const float value = series ? g_graph_valid[i] : g_graph_train[i];
+                        const int x = left + (right - left) * i / (g_graph_count - 1);
+                        const int y = bottom - (int)((value - low) / (high - low) * (bottom - top));
+                        if (i == 0) MoveToEx(back, x, y, NULL);
+                        else LineTo(back, x, y);
+                    }
+                }
+                wchar_t legend[96];
+                swprintf_s(legend, _countof(legend), L"Train %.3f   Valid %.3f",
+                    g_graph_train[g_graph_count - 1], g_graph_valid[g_graph_count - 1]);
+                SetTextColor(back, RGB(35,105,190));
+                TextOutW(back, left, bottom + scale_px(5), legend, (int)wcslen(legend));
+            } else {
+                TextOutW(back, left, top + scale_px(35), L"Waiting for training metrics...", 31);
+            }
+            BitBlt(dc, 0, 0, width, height, back, 0, 0, SRCCOPY);
+        } else {
+            FillRect(dc, &rect, (HBRUSH)(COLOR_WINDOW + 1));
+        }
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -948,6 +987,9 @@ static void load_settings(void) {
     load_edit_setting(L"max_tokens",g_max_tokens,L"32");
     load_combo_setting(L"lr_schedule",g_lr_schedule,L"cosine");
     load_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling,L"spread");
+    const BOOL advanced_expanded = GetPrivateProfileIntW(
+        L"UI", L"advanced_expanded", 1, g_settings_path) ? TRUE : FALSE;
+    set_advanced_expanded(g_window, advanced_expanded);
     SendMessageW(g_resume,BM_SETCHECK,
         GetPrivateProfileIntW(L"Training",L"resume",0,g_settings_path)?BST_CHECKED:BST_UNCHECKED,0);
     g_use_saved_tokenizer=GetPrivateProfileIntW(L"Training",L"prebuilt_tokenizer",0,g_settings_path)?TRUE:FALSE;
@@ -993,6 +1035,8 @@ static void save_settings(void) {
     save_edit_setting(L"max_tokens",g_max_tokens);
     save_combo_setting(L"lr_schedule",g_lr_schedule);
     save_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling);
+    WritePrivateProfileStringW(L"UI",L"advanced_expanded",
+        g_advanced_expanded?L"1":L"0",g_settings_path);
     WritePrivateProfileStringW(L"Training",L"resume",
         SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED?L"1":L"0",g_settings_path);
     WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",g_use_saved_tokenizer?L"1":L"0",g_settings_path);
@@ -1059,37 +1103,37 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,450,210,52,18,hwnd,NULL,NULL,NULL);
     g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,hwnd,NULL,NULL,NULL);
 
-    CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,hwnd,NULL,NULL,NULL);
-    g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Validate every",WS_CHILD|WS_VISIBLE,132,264,90,18,hwnd,NULL,NULL,NULL);
-    g_validation_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,261,45,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Val batches",WS_CHILD|WS_VISIBLE,276,264,68,18,hwnd,NULL,NULL,NULL);
-    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,261,40,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,264,65,18,hwnd,NULL,NULL,NULL);
-    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,261,42,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Seed (fresh)",WS_CHILD|WS_VISIBLE,507,264,55,18,hwnd,NULL,NULL,NULL);
-    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,261,55,23,hwnd,NULL,NULL,NULL);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,hwnd,NULL,NULL,NULL));
+    g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_log_interval);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Validate every",WS_CHILD|WS_VISIBLE,132,264,90,18,hwnd,NULL,NULL,NULL));
+    g_validation_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,261,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_validation_interval);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Val batches",WS_CHILD|WS_VISIBLE,276,264,68,18,hwnd,NULL,NULL,NULL));
+    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,261,40,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_validation_batches);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,264,65,18,hwnd,NULL,NULL,NULL));
+    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,261,42,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_checkpoint_interval);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Seed (fresh)",WS_CHILD|WS_VISIBLE,507,264,55,18,hwnd,NULL,NULL,NULL));
+    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,261,55,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_seed);
 
-    CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,298,92,18,hwnd,NULL,NULL,NULL);
-    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,hwnd,NULL,NULL,NULL);
-    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,hwnd,NULL,NULL,NULL);
-    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,324,295,40,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,370,298,38,18,hwnd,NULL,NULL,NULL);
-    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,409,295,45,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,460,298,45,18,hwnd,NULL,NULL,NULL);
-    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,295,45,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,329,75,18,hwnd,NULL,NULL,NULL);
-    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,326,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"LR schedule",WS_CHILD|WS_VISIBLE,155,329,68,18,hwnd,NULL,NULL,NULL);
-    g_lr_schedule=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,225,326,95,100,hwnd,NULL,NULL,NULL);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,298,92,18,hwnd,NULL,NULL,NULL));
+    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_tokenizer_bytes);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,hwnd,NULL,NULL,NULL));
+    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_temperature);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,hwnd,NULL,NULL,NULL));
+    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,324,295,40,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_top_k);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,370,298,38,18,hwnd,NULL,NULL,NULL));
+    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,409,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_top_p);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,460,298,45,18,hwnd,NULL,NULL,NULL));
+    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_repetition);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,329,75,18,hwnd,NULL,NULL,NULL));
+    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,326,48,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_max_tokens);
+    register_advanced_control(CreateWindowW(L"STATIC",L"LR schedule",WS_CHILD|WS_VISIBLE,155,329,68,18,hwnd,NULL,NULL,NULL));
+    g_lr_schedule=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,225,326,95,100,hwnd,NULL,NULL,NULL); register_advanced_control(g_lr_schedule);
     SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"cosine");SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"constant");SendMessageW(g_lr_schedule,CB_SETCURSEL,0,0);
-    CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,329,95,18,hwnd,NULL,NULL,NULL);
-    g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,326,95,100,hwnd,NULL,NULL,NULL);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,329,95,18,hwnd,NULL,NULL,NULL));
+    g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,326,95,100,hwnd,NULL,NULL,NULL); register_advanced_control(g_tokenizer_sampling);
     SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"spread");SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"prefix");SendMessageW(g_tokenizer_sampling,CB_SETCURSEL,0,0);
-    CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,hwnd,NULL,NULL,NULL);
-    g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,hwnd,NULL,NULL,NULL);
+    register_advanced_control(CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,hwnd,NULL,NULL,NULL));
+    g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_total_steps);
 
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
