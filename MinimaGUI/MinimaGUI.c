@@ -30,6 +30,8 @@
 #define IDT_GRAPH_REFRESH 1
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
+static HWND g_tab_controls[40];
+static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
@@ -707,9 +709,11 @@ static void create_controls(HWND hwnd) {
         GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_SAVE_NOW),
         g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
     };
-    for(int i=0;i<(int)_countof(tab_controls);i++) {
-        LONG_PTR style=GetWindowLongPtrW(tab_controls[i],GWL_STYLE);
-        SetWindowLongPtrW(tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
+    g_tab_control_count=(int)_countof(tab_controls);
+    for(int i=0;i<g_tab_control_count;i++) {
+        g_tab_controls[i]=tab_controls[i];
+        LONG_PTR style=GetWindowLongPtrW(g_tab_controls[i],GWL_STYLE);
+        SetWindowLongPtrW(g_tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
     }
 
     load_settings();
@@ -855,10 +859,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        if(!IsDialogMessageW(hwnd,&msg)) {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+        if(msg.message==WM_KEYDOWN && msg.wParam==VK_TAB &&
+           GetAncestor(GetFocus(),GA_ROOT)==hwnd) {
+            BOOL backwards=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+            int current=-1;
+            for(int i=0;i<g_tab_control_count;i++)
+                if(g_tab_controls[i]==GetFocus()){current=i;break;}
+            for(int offset=1;offset<=g_tab_control_count;offset++) {
+                int index=backwards
+                    ? (current-offset+g_tab_control_count*2)%g_tab_control_count
+                    : (current+offset)%g_tab_control_count;
+                HWND target=g_tab_controls[index];
+                if(IsWindowVisible(target) && IsWindowEnabled(target)) {
+                    SetFocus(target);
+                    break;
+                }
+            }
+            continue;
         }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
     return (int)msg.wParam;
 }
