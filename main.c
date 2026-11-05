@@ -187,6 +187,10 @@ int main(void) {
     if (!kvcache_init(&cache, &arena, &model, model.max_seq))
         die("KV cache initialization failed");
 
+    if (!generation_check_kv_cache(&model, &cache, &temp,
+        check_tokens, SEQ, 1e-4f))
+        die("KV-cache parity check failed");
+
     Rng generation_rng;
     rng_seed(&generation_rng, 5678);
 
