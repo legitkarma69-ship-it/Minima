@@ -20,14 +20,46 @@
 #define IDC_STATUS       1009
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
+#define IDT_GRAPH_REFRESH 1
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
 static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
-static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes;
+static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph;
+static wchar_t g_metrics_path[MAX_PATH];
 static HANDLE g_process, g_thread;
 static volatile LONG g_running;
 static BOOL g_close_when_done;
 static wchar_t g_engine_path[MAX_PATH];
+
+static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    (void)wp; (void)lp;
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps; HDC dc=BeginPaint(hwnd,&ps);
+        RECT r; GetClientRect(hwnd,&r); FillRect(dc,&r,(HBRUSH)(COLOR_WINDOW+1));
+        SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(40,40,40));
+        TextOutW(dc,8,6,L"Training / validation loss",26);
+        int left=42,top=30,right=r.right-12,bottom=r.bottom-24;
+        HPEN grid=CreatePen(PS_SOLID,1,RGB(220,220,220)); HPEN old=(HPEN)SelectObject(dc,grid);
+        for(int i=0;i<=4;i++){int y=top+(bottom-top)*i/4;MoveToEx(dc,left,y,NULL);LineTo(dc,right,y);}
+        SelectObject(dc,old);DeleteObject(grid);
+        float tr[512],va[512];int n=0;FILE* f=_wfopen(g_metrics_path,L"rt");
+        if(f){char line[512];(void)fgets(line,sizeof(line),f);while(fgets(line,sizeof(line),f)){
+            double step,a,b,lr,tp,vp,elapsed;
+            if(sscanf_s(line,"%lf,%lf,%lf,%lf,%lf,%lf,%lf",&step,&a,&b,&lr,&tp,&vp,&elapsed)==7){
+                if(n==512){memmove(tr,tr+1,511*sizeof(float));memmove(va,va+1,511*sizeof(float));n=511;}
+                tr[n]=(float)a;va[n]=(float)b;n++;
+            }}fclose(f);}
+        if(n>1){float lo=tr[0],hi=tr[0];for(int i=0;i<n;i++){if(va[i]<lo)lo=va[i];if(tr[i]<lo)lo=tr[i];if(va[i]>hi)hi=va[i];if(tr[i]>hi)hi=tr[i];}
+            if(hi-lo<0.001f)hi=lo+0.001f;
+            HPEN p1=CreatePen(PS_SOLID,2,RGB(35,105,190)),p2=CreatePen(PS_SOLID,2,RGB(190,85,45));
+            for(int s=0;s<2;s++){SelectObject(dc,s?p2:p1);for(int i=0;i<n;i++){float v=s?va[i]:tr[i];int x=left+(right-left)*i/(n-1);int y=bottom-(int)((v-lo)/(hi-lo)*(bottom-top));if(i==0)MoveToEx(dc,x,y,NULL);else LineTo(dc,x,y);}}
+            SelectObject(dc,GetStockObject(BLACK_PEN));DeleteObject(p1);DeleteObject(p2);
+            wchar_t legend[96];swprintf_s(legend,_countof(legend),L"Train %.3f   Valid %.3f",tr[n-1],va[n-1]);TextOutW(dc,left,bottom+5,legend,(int)wcslen(legend));
+        }else TextOutW(dc,left,top+35,L"Waiting for training metrics...",31);
+        EndPaint(hwnd,&ps);return 0;
+    }
+    return DefWindowProcW(hwnd,msg,wp,lp);
+}
 
 static void append_log(const wchar_t* text) {
     int end = GetWindowTextLengthW(g_log);
@@ -305,13 +337,14 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"BUTTON",L"Stop",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,310,80,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
     g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,240,316,280,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL,NULL);
 
+    g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,580,170,285,175,hwnd,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Engine output / training metrics",WS_CHILD|WS_VISIBLE,12,350,300,20,hwnd,NULL,NULL,NULL);
     g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
         12,372,850,280,hwnd,(HMENU)IDC_LOG,NULL,NULL);
 
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
-        g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes };
+        g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 }
@@ -319,8 +352,9 @@ static void create_controls(HWND hwnd) {
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE:
-        g_window = hwnd;
-        create_controls(hwnd);
+        g_window = hwnd; create_controls(hwnd); SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL); return 0;
+    case WM_TIMER:
+        if(wp==IDT_GRAPH_REFRESH && g_graph) InvalidateRect(g_graph,NULL,FALSE);
         return 0;
     case WM_SIZE: {
         RECT r;
@@ -382,8 +416,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if (!slash) return 1;
     wcscpy_s(slash + 1, _countof(g_engine_path) - (size_t)(slash + 1 - g_engine_path), L"Minima.exe");
 
-    WNDCLASSW wc;
-    ZeroMemory(&wc, sizeof(wc));
+    WNDCLASSW gwc; ZeroMemory(&gwc,sizeof(gwc));
+    gwc.lpfnWndProc=graph_proc;gwc.hInstance=instance;gwc.lpszClassName=L"MinimaLossGraph";
+    gwc.hCursor=LoadCursorW(NULL,IDC_ARROW);gwc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
+    if(!RegisterClassW(&gwc))return 1;
+    DWORD plen=GetModuleFileNameW(NULL,g_metrics_path,_countof(g_metrics_path));
+    if(!plen||plen>=_countof(g_metrics_path))return 1;
+    wchar_t* pslash=wcsrchr(g_metrics_path,L'\\');
+    if(pslash)wcscpy_s(pslash+1,_countof(g_metrics_path)-(size_t)(pslash+1-g_metrics_path),L"minima_metrics.csv");
+
+    WNDCLASSW wc; ZeroMemory(&wc,sizeof(wc));
     wc.lpfnWndProc = window_proc;
     wc.hInstance = instance;
     wc.lpszClassName = L"ProjectMinimaWin32";
