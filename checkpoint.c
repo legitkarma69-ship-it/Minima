@@ -75,10 +75,10 @@ static size_t model_parameter_count(const Model* m) {
 } while (0)
 
 bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
-    const Rng* rng, uint64_t tokenizer_hash, uint64_t corpus_hash) {
+    const Rng* rng, uint64_t tokenizer_hash) {
     const Model* m = model;
     if (!path || !model || !opt || !rng || !tokenizer_hash ||
-        !corpus_hash || !model->tok_emb ||
+        !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
@@ -111,7 +111,6 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         !write_bytes(f, &step, sizeof(step), 1) ||
         !write_bytes(f, &rng_state, sizeof(rng_state), 1) ||
         !write_bytes(f, &tokenizer_hash, sizeof(tokenizer_hash), 1) ||
-        !write_bytes(f, &corpus_hash, sizeof(corpus_hash), 1) ||
         !write_bytes(f, &opt->lr, sizeof(float), 1) ||
         !write_bytes(f, &opt->beta1, sizeof(float), 1) ||
         !write_bytes(f, &opt->beta2, sizeof(float), 1) ||
@@ -158,10 +157,10 @@ fail:
 } while (0)
 
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
-    Rng* rng, uint64_t tokenizer_hash, uint64_t corpus_hash) {
+    Rng* rng, uint64_t tokenizer_hash) {
     Model* m = model;
     if (!path || !model || !opt || !rng || !tokenizer_hash ||
-        !corpus_hash || !model->tok_emb ||
+        !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
@@ -175,7 +174,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     uint32_t version = 0, dims[6] = { 0 };
     uint64_t params = 0;
     int64_t step = 0;
-    uint64_t rng_state = 0, saved_tokenizer_hash = 0, saved_corpus_hash = 0;
+    uint64_t rng_state = 0, saved_tokenizer_hash = 0;
     float lr, beta1, beta2, eps, weight_decay;
 
     if (!read_bytes(f, magic, 1, sizeof(magic)) ||
@@ -187,7 +186,6 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !read_bytes(f, &step, sizeof(step), 1) ||
         !read_bytes(f, &rng_state, sizeof(rng_state), 1) ||
         !read_bytes(f, &saved_tokenizer_hash, sizeof(saved_tokenizer_hash), 1) ||
-        !read_bytes(f, &saved_corpus_hash, sizeof(saved_corpus_hash), 1) ||
         !read_bytes(f, &lr, sizeof(float), 1) ||
         !read_bytes(f, &beta1, sizeof(float), 1) ||
         !read_bytes(f, &beta2, sizeof(float), 1) ||
@@ -204,7 +202,6 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         params != (uint64_t)model_parameter_count(model) ||
         params != (uint64_t)opt->n_params ||
         saved_tokenizer_hash != tokenizer_hash ||
-        saved_corpus_hash != corpus_hash ||
         step < 0 || !isfinite(lr) || lr <= 0.0f ||
         !isfinite(beta1) || beta1 < 0.0f || beta1 >= 1.0f ||
         !isfinite(beta2) || beta2 < 0.0f || beta2 >= 1.0f ||
