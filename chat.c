@@ -8,7 +8,7 @@
 #include <time.h>
 
 int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
-    const TrainOptions* options) {
+    const ChatOptions* options) {
     uint16_t history[512], input_ids[8192], prompt[512], output[512];
     int history_len=0;
     char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
