@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 
 // ------------------------------------------------------------------
 // Internal helpers
@@ -105,19 +106,28 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
                 continue;
 
             uint32_t h = pair_hash(a, b);
-            // linear probe
-            for (int probe = 0; probe < 32; probe++) {
+            // Linear probing must either find this pair or an empty slot.
+            // A bounded 32-slot search silently loses counts under collisions.
+            bool inserted = false;
+            const uint32_t key = ((uint32_t)a << 16) | b;
+            for (uint32_t probe = 0; probe < PAIR_HASH_SIZE; probe++) {
                 uint32_t slot = (h + probe) & (PAIR_HASH_SIZE - 1);
                 if (table[slot].count == 0) {
-                    table[slot].key = ((uint32_t)a << 16) | b;
+                    table[slot].key = key;
                     table[slot].count = 1;
+                    inserted = true;
                     break;
                 }
-                if (table[slot].key == (((uint32_t)a << 16) | b)) {
+                if (table[slot].key == key) {
+                    if (table[slot].count == INT32_MAX)
+                        die("BPE pair count overflow");
                     table[slot].count++;
+                    inserted = true;
                     break;
                 }
             }
+            if (!inserted)
+                die("BPE pair hash table is full; increase PAIR_HASH_SIZE");
         }
 
         // Find most frequent pair
