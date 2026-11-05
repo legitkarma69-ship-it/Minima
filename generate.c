@@ -9,6 +9,11 @@
 // ------------------------------------------------------------------
 
 bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq) {
+    if (!cache || !arena || !model || max_seq <= 0 ||
+        max_seq > model->max_seq || model->n_layers <= 0 ||
+        model->dim <= 0)
+        return false;
+
     memset(cache, 0, sizeof(*cache));
     cache->max_seq = max_seq;
     cache->n_layers = model->n_layers;
@@ -16,17 +21,24 @@ bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq)
     cache->head_dim = model->head_dim;
     cache->dim = model->dim;
 
-    size_t bytes = (size_t)model->n_layers * max_seq * model->dim * sizeof(float);
+    const size_t count = (size_t)model->n_layers *
+        (size_t)max_seq * (size_t)model->dim;
+    if (count > SIZE_MAX / sizeof(float)) return false;
+
+    const size_t bytes = count * sizeof(float);
     cache->k_cache = arena_alloc(arena, bytes);
     cache->v_cache = arena_alloc(arena, bytes);
-    if (!cache->k_cache || !cache->v_cache) return false;
+    if (!cache->k_cache || !cache->v_cache) {
+        memset(cache, 0, sizeof(*cache));
+        return false;
+    }
 
     cache->pos = 0;
     return true;
 }
 
 void kvcache_reset(KVCache* cache) {
-    cache->pos = 0;
+    if (cache) cache->pos = 0;
 }
 
 // ------------------------------------------------------------------
@@ -225,23 +237,58 @@ int generate(Model* model, Tokenizer* tok, KVCache* cache,
     float temperature, int top_k,
     Rng* rng) {
 
-    if (prompt_len + n_new > out_cap) n_new = out_cap - prompt_len;
-    if (n_new <= 0) return prompt_len;
+    if (!model || !tok || !cache || !prompt_ids || !out_ids || !rng ||
+        prompt_len <= 0 || out_cap <= 0 || n_new < 0 ||
+        !isfinite(temperature) || temperature <= 0.0f ||
+        model->dim <= 0 || model->dim > 512 ||
+        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
+        model->vocab_size <= 0 || model->vocab_size > 8192 ||
+        model->n_heads <= 0 || model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim ||
+        cache->n_layers != model->n_layers ||
+        cache->dim != model->dim ||
+        cache->max_seq <= 0 || cache->max_seq > 512)
+        return 0;
+
+    if (prompt_len > out_cap || prompt_len > cache->max_seq)
+        return 0;
+
+    if (n_new > out_cap - prompt_len)
+        n_new = out_cap - prompt_len;
+    if (n_new > cache->max_seq - prompt_len)
+        n_new = cache->max_seq - prompt_len;
+    if (n_new <= 0) {
+        memcpy(out_ids, prompt_ids, (size_t)prompt_len * sizeof(uint16_t));
+        return prompt_len;
+    }
+
+    if (top_k < 1) top_k = 1;
+    if (top_k > model->vocab_size) top_k = model->vocab_size;
+    if (top_k > 256) top_k = 256;
+
+    for (int i = 0; i < prompt_len; i++) {
+        if (prompt_ids[i] >= model->vocab_size ||
+            prompt_ids[i] >= tok->vocab_size)
+            return 0;
+    }
 
     kvcache_reset(cache);
 
     float x[512];
-    float logits[8192];   // safe upper bound
+    float logits[8192];
 
-    // Prefill the prompt
+    // Prefill the prompt. The final logits predict the next token.
     for (int i = 0; i < prompt_len; i++) {
         out_ids[i] = prompt_ids[i];
         forward_one(model, cache, prompt_ids[i], x, logits);
     }
 
-    // Autoregressive loop
+    // Sample autoregressively, updating the cache after each new token.
     for (int i = 0; i < n_new; i++) {
-        int next = sample_top_k(logits, model->vocab_size, temperature, top_k, rng);
+        int next = sample_top_k(logits, model->vocab_size,
+            temperature, top_k, rng);
+        if (next < 0 || next >= tok->vocab_size) return 0;
+
         out_ids[prompt_len + i] = (uint16_t)next;
         forward_one(model, cache, (uint16_t)next, x, logits);
     }
