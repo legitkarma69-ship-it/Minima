@@ -587,7 +587,7 @@ int main(int argc, char** argv) {
             corpus_len, loaded_corpus.files_loaded);
     }
     else {
-        if (user_path_count > 0)
+        if (user_path_count > 0 && !options.chat_mode)
             die("the supplied corpus files contained no usable text");
 
         const char* smoke_text =
@@ -773,10 +773,13 @@ int main(int argc, char** argv) {
     if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
     const clock_t training_started=clock();
     printf("Metrics CSV: %s\n",options.metrics_path);
-    printf("Settings: lr=%.7g schedule=%s warmup=%d log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s\n",
+    printf("Settings: lr=%.7g schedule=%s warmup=%d log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s batch=%d seq=%d\n",
         options.learning_rate,options.lr_schedule,options.warmup_steps,options.log_interval,options.validation_interval,options.validation_batches,
         options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes,
-        options.tokenizer_spread?"spread":"prefix");
+        options.tokenizer_spread?"spread":"prefix",options.batch_size,options.sequence_length);
+    printf("Estimated logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
+        (double)options.batch_size*options.sequence_length*model.vocab_size*sizeof(float)/(1024.0*1024.0),
+        2.0*model.n_layers*model.max_seq*model.dim*sizeof(float)/(1024.0*1024.0));
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
