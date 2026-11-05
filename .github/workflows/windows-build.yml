@@ -54,14 +54,14 @@ jobs:
       - name: Test tokenizer-only rebuild
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --retrain-tokenizer-only --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --sequence-length 8 --max-seq 32 --tokenizer-sampling spread ".\minima_ci_corpus.txt"
+          & ".\x64\Release\Minima.exe" --retrain-tokenizer-only --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --tokenizer-sampling spread ".\minima_ci_corpus.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path ".\minima.bpe")) { throw "Tokenizer-only rebuild did not produce minima.bpe." }
 
       - name: Run fresh-training smoke test
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt"
+          & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
             throw "Fresh-training smoke test did not produce a checkpoint and tokenizer."
@@ -70,14 +70,14 @@ jobs:
       - name: Verify checkpoint resume diagnostics
         shell: pwsh
         run: |
-          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
+          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
       - name: Verify resumed global-step learning-rate schedule
         shell: pwsh
         run: |
-          $output = & ".\x64\Release\Minima.exe" --resume --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_resume_training_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output = & ".\x64\Release\Minima.exe" --resume --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_resume_training_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
           $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $text = $output -join "`n"
