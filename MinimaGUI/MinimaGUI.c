@@ -520,6 +520,7 @@ static void create_controls(HWND hwnd) {
     g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
         12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
+    SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
     g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL,
         12,665,700,26,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
     SendMessageW(g_chat_input,EM_SETLIMITTEXT,2048,0);
@@ -541,6 +542,11 @@ static void create_controls(HWND hwnd) {
     FILE* history_file=_wfopen(history_path,L"rt");
     if(history_file){
         char line[4096];
+        if(fseek(history_file,0,SEEK_END)==0){
+            long end=ftell(history_file),start=end>1024*1024?end-1024*1024:0;
+            if(start>0){fseek(history_file,start,SEEK_SET);(void)fgets(line,sizeof(line),history_file);}
+            else rewind(history_file);
+        }
         while(fgets(line,sizeof(line),history_file)){
             int count=MultiByteToWideChar(CP_UTF8,0,line,-1,NULL,0);
             if(count>0){wchar_t* wide=(wchar_t*)calloc((size_t)count,sizeof(wchar_t));
