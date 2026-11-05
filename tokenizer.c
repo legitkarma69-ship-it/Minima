@@ -96,6 +96,14 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
         for (size_t i = 0; i + 1 < n; i++) {
             uint16_t a = ids[i];
             uint16_t b = ids[i + 1];
+
+            // Keep every learned token within TOK_MAX_TOKEN_LEN.
+            int len_a = tok->token_len[a];
+            int len_b = tok->token_len[b];
+            if (len_a <= 0 || len_b <= 0 ||
+                len_a > TOK_MAX_TOKEN_LEN - len_b)
+                continue;
+
             uint32_t h = pair_hash(a, b);
             // linear probe
             for (int probe = 0; probe < 32; probe++) {
@@ -130,9 +138,10 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
         // Build the string by concatenating the two children
         int len1 = tok->token_len[best_left];
         int len2 = tok->token_len[best_right];
-        char* new_str = arena_alloc(arena, len1 + len2 + 1);
-        memcpy(new_str, tok->token_str[best_left], len1);
-        memcpy(new_str + len1, tok->token_str[best_right], len2);
+        char* new_str = arena_alloc(arena, (size_t)len1 + (size_t)len2 + 1);
+        if (!new_str) die("arena OOM for merged token");
+        memcpy(new_str, tok->token_str[best_left], (size_t)len1);
+        memcpy(new_str + len1, tok->token_str[best_right], (size_t)len2);
         new_str[len1 + len2] = 0;
         tok->token_str[new_id] = new_str;
         tok->token_len[new_id] = len1 + len2;
