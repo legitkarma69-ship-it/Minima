@@ -99,6 +99,31 @@ prompts and greedy top-k=1 decoding. Each prompt is generated twice from the
 same initial state and the token sequences are compared exactly. This checks
 repeatability; it does not measure generation quality by itself.
 
+## Tokenizer maintenance
+
+A normal fresh training run trains a tokenizer from the current corpus. Resume
+loads the tokenizer paired with the checkpoint. The GUI's **Rebuild tokenizer**
+button runs a tokenizer-only pass and backs up the previous tokenizer as
+`minima.bpe.previous`. After it completes, use **Start training** with Resume
+unchecked. The GUI reuses the prebuilt tokenizer if the corpus selection and
+tokenizer settings have not changed.
+
+The command-line equivalents are:
+
+```text
+Minima.exe --retrain-tokenizer-only --vocab-size 2048 --tokenizer-sample-bytes 262144 books.txt
+Minima.exe --use-existing-tokenizer --steps 2000 --total-steps 10000 books.txt
+```
+
+The **Auto settings** GUI button estimates one token-pass from corpus file size,
+using the current batch and sequence settings. It estimates roughly three
+source bytes per token, so treat the suggested steps as a starting point and
+check the exact token count reported by the engine. It adjusts steps, total
+steps, warmup, logging/validation/checkpoint intervals, and tokenizer sample
+size. It deliberately does not change model dimensions, batch size, or
+sequence length because those affect memory use and should not be guessed from
+corpus size alone.
+
 ## Current implementation limits and checks
 
 The training forward/backward attention kernels use a maximum sequence length of
