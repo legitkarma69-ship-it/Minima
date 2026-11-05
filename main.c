@@ -111,7 +111,8 @@ static float evaluate_loss(Model* model, Arena* temp,
         for (int b = 0; b < batch_size; b++) {
             const size_t sample_index = (size_t)eval_batch * batch_size + b;
             const size_t sample_count = (size_t)validation_batches * batch_size;
-            const size_t offset = (span * sample_index) / (sample_count - 1);
+            const size_t offset = sample_count > 1
+                ? (span * sample_index) / (sample_count - 1) : 0;
             const int start = validation_start + (int)offset;
 
             for (int t = 0; t < seq_len; t++) {
@@ -231,6 +232,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             const char* opt=argv[i];
             if (++i >= argc) die("%s requires a value", opt);
             long lo=1, hi=INT_MAX;
+            if(strcmp(opt,"--validation-batches")==0)hi=4096;
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=67108864; }
             if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=8192; }
