@@ -107,7 +107,7 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     if (!write_bytes(f, magic, 1, sizeof(magic)) ||
         !write_bytes(f, &version, sizeof(version), 1) ||
         !write_bytes(f, dims, sizeof(uint32_t), 6) ||
-        !write_bytes(f, &checkpoint_params, sizeof(checkpoint_params), 1) ||
+        !write_bytes(f, &params, sizeof(params), 1) ||
         !write_bytes(f, &step, sizeof(step), 1) ||
         !write_bytes(f, &rng_state, sizeof(rng_state), 1) ||
         !write_bytes(f, &tokenizer_hash, sizeof(tokenizer_hash), 1) ||
