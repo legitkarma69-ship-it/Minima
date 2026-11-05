@@ -95,14 +95,23 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
         pair_hash_size * sizeof(PairSlot));
     if (!table) return false;
 
+    // Track occupied hash slots so each merge only clears and scans entries
+    // that were actually used. This avoids two full-table passes per merge.
+    if (sample_len > SIZE_MAX / sizeof(size_t)) return false;
+    size_t* occupied_slots = arena_alloc(arena,
+        sample_len * sizeof(size_t));
+    if (!occupied_slots) return false;
+
     int merges_needed = target_vocab - tok->vocab_size;
+    size_t occupied_count = 0;
 
     for (int m = 0; m < merges_needed; m++) {
-        // Clear counts
-        for (size_t i = 0; i < pair_hash_size; i++) {
-            table[i].count = 0;
-            table[i].key = 0;
+        for (size_t i = 0; i < occupied_count; i++) {
+            const size_t slot = occupied_slots[i];
+            table[slot].count = 0;
+            table[slot].key = 0;
         }
+        occupied_count = 0;
 
         // Count pairs
         for (size_t i = 0; i + 1 < n; i++) {
@@ -126,6 +135,7 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
                 if (table[slot].count == 0) {
                     table[slot].key = key;
                     table[slot].count = 1;
+                    occupied_slots[occupied_count++] = slot;
                     inserted = true;
                     break;
                 }
@@ -143,12 +153,19 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
 
         // Find most frequent pair
         int best_count = 0;
+        size_t best_slot = SIZE_MAX;
         uint16_t best_left = 0, best_right = 0;
-        for (size_t i = 0; i < pair_hash_size; i++) {
-            if (table[i].count > best_count) {
-                best_count = table[i].count;
-                best_left = (uint16_t)(table[i].key >> 16);
-                best_right = (uint16_t)(table[i].key & 0xffff);
+        for (size_t i = 0; i < occupied_count; i++) {
+            const size_t slot = occupied_slots[i];
+            const int count = table[slot].count;
+            // Preserve the previous lowest-slot tie break, independent of
+            // the order in which pairs first appeared in the sample.
+            if (count > best_count ||
+                (count == best_count && count > 0 && slot < best_slot)) {
+                best_count = count;
+                best_slot = slot;
+                best_left = (uint16_t)(table[slot].key >> 16);
+                best_right = (uint16_t)(table[slot].key & 0xffff);
             }
         }
 
