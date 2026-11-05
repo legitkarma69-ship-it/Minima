@@ -152,7 +152,7 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
         if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
         uint16_t separator[4];
         const int separator_count=history_len
-            ? tokenizer_encode(tok,(const uint8_t*)"\\n",1,separator,4) : 0;
+            ? tokenizer_encode(tok,(const uint8_t*)"\n",1,separator,4) : 0;
         int prompt_len=history_len+separator_count+input_count;
         if(prompt_len>model->max_seq-1){
             int drop=prompt_len-(model->max_seq-1);
