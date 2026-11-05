@@ -30,10 +30,90 @@ void gradients_zero(Gradients* g, const Model* model) {
 }
 
 bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
-    if (!model) return false;
-    // Model and Gradients intentionally have identical parameter layouts.
-    // Match the model's runtime vocabulary exactly.
-    return model_init(g, arena, 0, model->vocab_size);
+    if (!g || !arena || !model) return false;
+
+    // Gradients share the exact tensor layout of Model. Copy every runtime
+    // dimension, not just vocabulary size, before allocating the buffers.
+    const ModelConfig config = {
+        model->vocab_size,
+        model->dim,
+        model->n_layers,
+        model->n_heads,
+        model->ffn_dim,
+        model->max_seq
+    };
+
+    if (!model_init_config(g, arena, 0, &config))
+        return false;
+
+    gradients_zero(g, model);
+    return true;
+}
+
+/*
+ * Verify that every gradient tensor has enough contiguous storage for the
+ * corresponding runtime model tensor. The arena bound catches an undersized
+ * final tensor; adjacent-pointer checks catch undersized earlier tensors.
+ */
+bool gradients_check_layout(const Gradients* g, const Model* model,
+    const Arena* arena) {
+    if (!g || !model || !arena || !arena->base ||
+        g->vocab_size != model->vocab_size ||
+        g->dim != model->dim ||
+        g->n_layers != model->n_layers ||
+        g->n_heads != model->n_heads ||
+        g->head_dim != model->head_dim ||
+        g->ffn_dim != model->ffn_dim ||
+        g->max_seq != model->max_seq ||
+        g->weight_bytes != model->weight_bytes ||
+        model->dim <= 0 || model->n_layers <= 0 ||
+        model->ffn_dim <= 0 || model->vocab_size <= 0 ||
+        model->max_seq <= 0)
+        return false;
+
+    float* tensors[] = {
+        g->tok_emb, g->pos_emb, g->attn_qkv, g->attn_proj,
+        g->ffn_up, g->ffn_gate, g->ffn_down,
+        g->rms1_scale, g->rms2_scale, g->rms_final_scale
+    };
+    const size_t counts[] = {
+        (size_t)model->vocab_size * model->dim,
+        (size_t)model->max_seq * model->dim,
+        (size_t)model->n_layers * 3 * model->dim * model->dim,
+        (size_t)model->n_layers * model->dim * model->dim,
+        (size_t)model->n_layers * model->ffn_dim * model->dim,
+        (size_t)model->n_layers * model->ffn_dim * model->dim,
+        (size_t)model->n_layers * model->dim * model->ffn_dim,
+        (size_t)model->n_layers * model->dim,
+        (size_t)model->n_layers * model->dim,
+        (size_t)model->dim
+    };
+
+    const uintptr_t arena_begin = (uintptr_t)arena->base;
+    if (arena->used > UINTPTR_MAX - arena_begin)
+        return false;
+    const uintptr_t arena_end = arena_begin + arena->used;
+
+    size_t expected_bytes = 0;
+    for (size_t i = 0; i < sizeof(tensors) / sizeof(tensors[0]); ++i) {
+        if (!tensors[i] || counts[i] > SIZE_MAX / sizeof(float))
+            return false;
+        const uintptr_t begin = (uintptr_t)tensors[i];
+        const size_t bytes = counts[i] * sizeof(float);
+        if (begin < arena_begin || begin > arena_end ||
+            bytes > (size_t)(arena_end - begin))
+            return false;
+        if (i + 1 < sizeof(tensors) / sizeof(tensors[0])) {
+            const uintptr_t next = (uintptr_t)tensors[i + 1];
+            if (next < begin || bytes > (size_t)(next - begin))
+                return false;
+        }
+        if (expected_bytes > SIZE_MAX - bytes)
+            return false;
+        expected_bytes += bytes;
+    }
+
+    return expected_bytes == g->weight_bytes;
 }
 
 // ------------------------------------------------------------------
