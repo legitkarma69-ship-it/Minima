@@ -257,8 +257,8 @@ int main(int argc, char** argv) {
     if (!checkpoint_save("minima.model", &model, &opt))
         die("failed to save model checkpoint to minima.model");
 
-    printf("\nSaved tokenizer: minima.bpe\\n");
-    printf("Saved model + optimizer: minima.model (step %d)\\n", STEPS);
+    printf("\nSaved tokenizer: minima.bpe\n");
+    printf("Saved model + optimizer: minima.model (step %d)\n", STEPS);
 
     // ------------------------------------------------------------------
     // 9. Autoregressive generation smoke test
