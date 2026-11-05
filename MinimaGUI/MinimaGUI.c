@@ -69,11 +69,25 @@ static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd,msg,wp,lp);
 }
 
+static void save_chat_text(const wchar_t* text) {
+    if(!g_chat_mode || !g_engine_path[0])return;
+    wchar_t path[MAX_PATH];wcscpy_s(path,_countof(path),g_engine_path);
+    wchar_t* slash=wcsrchr(path,L'\\');
+    if(slash)wcscpy_s(slash+1,_countof(path)-(size_t)(slash+1-path),L"minima_chat.txt");
+    int n=WideCharToMultiByte(CP_UTF8,0,text,-1,NULL,0,NULL,NULL);
+    if(n<=1)return;
+    char* utf8=(char*)malloc((size_t)n);if(!utf8)return;
+    WideCharToMultiByte(CP_UTF8,0,text,-1,utf8,n,NULL,NULL);
+    FILE* f=_wfopen(path,L"ab");if(f){fwrite(utf8,1,(size_t)n-1,f);fclose(f);}
+    free(utf8);
+}
+
 static void append_log(const wchar_t* text) {
-    int end = GetWindowTextLengthW(g_log);
-    SendMessageW(g_log, EM_SETSEL, (WPARAM)end, (LPARAM)end);
-    SendMessageW(g_log, EM_REPLACESEL, FALSE, (LPARAM)text);
-    SendMessageW(g_log, EM_SCROLLCARET, 0, 0);
+    int end=GetWindowTextLengthW(g_log);
+    SendMessageW(g_log,EM_SETSEL,(WPARAM)end,(LPARAM)end);
+    SendMessageW(g_log,EM_REPLACESEL,FALSE,(LPARAM)text);
+    SendMessageW(g_log,EM_SCROLLCARET,0,0);
+    save_chat_text(text);
 }
 
 static void set_running(BOOL running) {
@@ -109,6 +123,8 @@ static DWORD WINAPI reader_thread(void* parameter) {
             carry[used++] = buffer[i];
             if (buffer[i] == '\n' || used >= 8000) {
                 carry[used] = 0;
+                if((used==11 && memcmp(carry,"CHAT_READY\n",11)==0) ||
+                   (used==12 && memcmp(carry,"CHAT_CLOSED\n",12)==0)){used=0;continue;}
                 UINT code_page=CP_UTF8;
                 int needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);
                 if(needed<=0){code_page=CP_ACP;needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);}
@@ -466,6 +482,20 @@ static void create_controls(HWND hwnd) {
         g_batch_size,g_sequence_length };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
+
+    wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
+    wchar_t* history_slash=wcsrchr(history_path,L'\\');
+    if(history_slash)wcscpy_s(history_slash+1,_countof(history_path)-(size_t)(history_slash+1-history_path),L"minima_chat.txt");
+    FILE* history_file=_wfopen(history_path,L"rt");
+    if(history_file){
+        char line[4096];
+        while(fgets(line,sizeof(line),history_file)){
+            int count=MultiByteToWideChar(CP_UTF8,0,line,-1,NULL,0);
+            if(count>0){wchar_t* wide=(wchar_t*)calloc((size_t)count,sizeof(wchar_t));
+                if(wide){MultiByteToWideChar(CP_UTF8,0,line,-1,wide,count);append_log(wide);free(wide);}}
+        }
+        fclose(history_file);
+    }
 }
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
