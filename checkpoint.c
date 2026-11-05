@@ -147,28 +147,65 @@ fail:
     return false;
 }
 
+#define STAGE_MODEL(name, count) do { \
+    staged_model.name = cursor; cursor += (count); \
+} while (0)
+
+#define STAGE_OPT_MOMENTS(name, count) do { \
+    staged_opt.m_##name = cursor; cursor += (count); \
+    staged_opt.v_##name = cursor; cursor += (count); \
+} while (0)
+
 #define READ_MODEL(name, count) do { \
-    if (!read_floats(f, model->name, (count))) goto fail; \
+    if (!read_floats(f, staged_model.name, (count))) goto fail; \
 } while (0)
 
 #define READ_OPT_MOMENTS(name, count) do { \
-    if (!read_floats(f, opt->m_##name, (count))) goto fail; \
-    if (!read_floats(f, opt->v_##name, (count))) goto fail; \
+    if (!read_floats(f, staged_opt.m_##name, (count))) goto fail; \
+    if (!read_floats(f, staged_opt.v_##name, (count))) goto fail; \
+} while (0)
+
+#define COMMIT_MODEL(name, count) do { \
+    memcpy(model->name, staged_model.name, (count) * sizeof(float)); \
+} while (0)
+
+#define COMMIT_OPT_MOMENTS(name, count) do { \
+    memcpy(opt->m_##name, staged_opt.m_##name, (count) * sizeof(float)); \
+    memcpy(opt->v_##name, staged_opt.v_##name, (count) * sizeof(float)); \
 } while (0)
 
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
     Rng* rng, uint64_t tokenizer_hash) {
-    Model* m = model;
     if (!path || !model || !opt || !rng || !tokenizer_hash ||
-        !model->tok_emb ||
-        !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
-        !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
-        !model->rms1_scale || !model->rms2_scale ||
-        !model->rms_final_scale)
+        !model->tok_emb || !model->pos_emb || !model->attn_qkv ||
+        !model->attn_proj || !model->ffn_up || !model->ffn_gate ||
+        !model->ffn_down || !model->rms1_scale || !model->rms2_scale ||
+        !model->rms_final_scale || opt->n_params != model_parameter_count(model) ||
+        !opt->m_tok_emb || !opt->m_pos_emb || !opt->m_attn_qkv ||
+        !opt->m_attn_proj || !opt->m_ffn_up || !opt->m_ffn_gate ||
+        !opt->m_ffn_down || !opt->m_rms1_scale || !opt->m_rms2_scale ||
+        !opt->m_rms_final_scale || !opt->v_tok_emb || !opt->v_pos_emb ||
+        !opt->v_attn_qkv || !opt->v_attn_proj || !opt->v_ffn_up ||
+        !opt->v_ffn_gate || !opt->v_ffn_down || !opt->v_rms1_scale ||
+        !opt->v_rms2_scale || !opt->v_rms_final_scale)
         return false;
 
+    const size_t params = model_parameter_count(model);
+    if (params > SIZE_MAX / (3 * sizeof(float))) return false;
+    float* staging = (float*)malloc(params * 3 * sizeof(float));
+    if (!staging) return false;
+
+    Model staged_model = *model;
+    Optim staged_opt = *opt;
+    float* cursor = staging;
+    Model* m = &staged_model;
+    Optim* opt_stage = &staged_opt;
+    (void)opt_stage;
+    MODEL_ARRAYS(STAGE_MODEL);
+    OPT_ARRAYS(STAGE_OPT_MOMENTS);
+
     FILE* f = fopen(path, "rb");
-    if (!f) return false;
+    if (!f) { free(staging); return false; }
 
     char magic[8];
     uint32_t version = 0, dims[6] = { 0 };
@@ -212,9 +249,17 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     MODEL_ARRAYS(READ_MODEL);
     OPT_ARRAYS(READ_OPT_MOMENTS);
 
-    // Reject truncated files and unexpected trailing data.
+    // Reject truncated files, unexpected trailing bytes, and non-finite state.
     if (fgetc(f) != EOF || ferror(f)) goto fail;
+    for (size_t i = 0; i < params * 3; ++i)
+        if (!isfinite(staging[i])) goto fail;
 
+    if (fclose(f) != 0) { free(staging); return false; }
+
+    // Commit only after the entire file has been read and validated.
+    m = &staged_model;
+    MODEL_ARRAYS(COMMIT_MODEL);
+    OPT_ARRAYS(COMMIT_OPT_MOMENTS);
     opt->step = step;
     rng->state = rng_state ? rng_state : 0x123456789abcdef0ULL;
     opt->lr = lr;
@@ -222,11 +267,11 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     opt->beta2 = beta2;
     opt->eps = eps;
     opt->weight_decay = weight_decay;
-
-    if (fclose(f) != 0) return false;
+    free(staging);
     return true;
 
 fail:
     fclose(f);
+    free(staging);
     return false;
 }
