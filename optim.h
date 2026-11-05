@@ -17,7 +17,7 @@ typedef struct {
     // Step counter (for bias correction)
     int64_t step;
 
-    // First and second moments – same shapes / order as Model weights
+    // First and second moments â€“ same shapes / order as Model weights
     float* m_tok_emb;
     float* m_pos_emb;
     float* m_attn_qkv;
@@ -54,6 +54,9 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
 // weights (we will define a Gradients struct next, or you can pass the
 // same pointers that the backward pass writes into).
 void optim_step(Optim* opt, Model* model, const Model* grads);
+
+// Deterministic scalar regression test for the AdamW update.
+bool optim_check_adamw(void);
 
 // Optional: learning-rate schedule helper
 float optim_lr_cosine(float base_lr, int step, int warmup, int total);
