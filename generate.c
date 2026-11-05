@@ -334,8 +334,30 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
         }
     }
 
+    double entropy_bits = 0.0;
+    for (int i = 0; i < model->vocab_size; ++i) {
+        const double probability =
+            exp((double)logits[i] - (double)max_logit) / denom;
+        if (probability > 0.0)
+            entropy_bits -= probability * (log(probability) / log(2.0));
+    }
+
+    double top1_mass = 0.0, top5_mass = 0.0, top10_mass = 0.0;
+    double cumulative_mass = 0.0;
+    for (int i = 0; i < found; ++i) {
+        const double probability =
+            exp((double)best_logits[i] - (double)max_logit) / denom;
+        cumulative_mass += probability;
+        if (i == 0) top1_mass = cumulative_mass;
+        if (i == 4) top5_mass = cumulative_mass;
+        if (i == 9) top10_mass = cumulative_mass;
+    }
+
     printf("  Next-token distribution (top %d, full-vocabulary probabilities):\n",
         found);
+    printf("    entropy=%.4f bits, top-1=%.2f%%, top-5=%.2f%%, top-10=%.2f%%\n",
+        entropy_bits, top1_mass * 100.0, top5_mass * 100.0,
+        top10_mass * 100.0);
     for (int i = 0; i < found; i++) {
         const double probability =
             exp((double)best_logits[i] - (double)max_logit) / denom;
