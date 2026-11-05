@@ -294,6 +294,10 @@ static void start_engine(BOOL chat_mode) {
         wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
         if(stop_slash)wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
         DeleteFileW(stop_path);
+        wchar_t save_path[MAX_PATH];wcscpy_s(save_path,_countof(save_path),g_engine_path);
+        wchar_t* save_slash=wcsrchr(save_path,L'\\');
+        if(save_slash)wcscpy_s(save_slash+1,_countof(save_path)-(size_t)(save_slash+1-save_path),L"minima.save");
+        DeleteFileW(save_path);
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED)
             DeleteFileW(g_metrics_path); /* A fresh model starts a fresh loss graph. */
     }
