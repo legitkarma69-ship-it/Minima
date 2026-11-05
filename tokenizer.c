@@ -300,30 +300,76 @@ bool tokenizer_save(const Tokenizer* tok, const char* path) {
 }
 
 bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
+    if (!tok || !arena || !path) return false;
+
     FILE* f = fopen(path, "rb");
     if (!f) return false;
 
-    uint32_t magic;
-    if (fread(&magic, 4, 1, f) != 1 || magic != 0x42504531) {
+    uint32_t magic = 0;
+    int vocab_size = 0;
+    int n_merges = 0;
+    if (fread(&magic, sizeof(magic), 1, f) != 1 ||
+        magic != 0x42504531 ||
+        fread(&vocab_size, sizeof(vocab_size), 1, f) != 1 ||
+        fread(&n_merges, sizeof(n_merges), 1, f) != 1 ||
+        vocab_size < 260 || vocab_size > TOK_MAX_VOCAB ||
+        n_merges < 0 || n_merges > TOK_MAX_MERGES ||
+        n_merges > vocab_size - 260) {
         fclose(f);
         return false;
     }
 
-    memset(tok, 0, sizeof(*tok));
-    fread(&tok->vocab_size, 4, 1, f);
-    fread(&tok->n_merges, 4, 1, f);
+    Tokenizer loaded;
+    memset(&loaded, 0, sizeof(loaded));
+    loaded.vocab_size = vocab_size;
+    loaded.n_merges = n_merges;
 
-    for (int i = 0; i < tok->vocab_size; i++) {
-        uint16_t len;
-        fread(&len, 2, 1, f);
-        char* s = arena_alloc(arena, len + 1);
-        fread(s, 1, len, f);
+    for (int i = 0; i < vocab_size; i++) {
+        uint16_t len = 0;
+        if (fread(&len, sizeof(len), 1, f) != 1 ||
+            len == 0 || len > TOK_MAX_TOKEN_LEN) {
+            fclose(f);
+            return false;
+        }
+
+        char* s = (char*)arena_alloc(arena, (size_t)len + 1);
+        if (!s || fread(s, 1, len, f) != len) {
+            fclose(f);
+            return false;
+        }
         s[len] = 0;
-        tok->token_str[i] = s;
-        tok->token_len[i] = len;
+        loaded.token_str[i] = s;
+        loaded.token_len[i] = len;
     }
 
-    fread(tok->merges, sizeof(Merge), tok->n_merges, f);
-    fclose(f);
+    if (n_merges > 0 &&
+        fread(loaded.merges, sizeof(Merge), (size_t)n_merges, f) !=
+            (size_t)n_merges) {
+        fclose(f);
+        return false;
+    }
+
+    // Each merge may only combine tokens that existed before its result.
+    for (int i = 0; i < n_merges; i++) {
+        const uint16_t new_id = (uint16_t)(260 + i);
+        const uint16_t left = loaded.merges[i].left;
+        const uint16_t right = loaded.merges[i].right;
+        if (left >= new_id || right >= new_id ||
+            loaded.token_len[left] <= 0 || loaded.token_len[right] <= 0 ||
+            loaded.token_len[left] > TOK_MAX_TOKEN_LEN - loaded.token_len[right] ||
+            loaded.token_len[new_id] !=
+                loaded.token_len[left] + loaded.token_len[right]) {
+            fclose(f);
+            return false;
+        }
+    }
+
+    if (fgetc(f) != EOF || ferror(f)) {
+        fclose(f);
+        return false;
+    }
+    if (fclose(f) != 0) return false;
+
+    *tok = loaded;
     return true;
 }
