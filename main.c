@@ -20,8 +20,8 @@
 #include <errno.h>
 #include <time.h>
 
-#define BATCH 4
-#define SEQ 32
+#define DEFAULT_BATCH_SIZE 4
+#define DEFAULT_SEQUENCE_LENGTH 32
 #define DEFAULT_STEPS 2000
 #define DEFAULT_LR 3e-4f
 #define DEFAULT_WARMUP_STEPS 100
@@ -33,6 +33,7 @@
 typedef struct {
     float learning_rate;
     int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval;
+    int batch_size, sequence_length;
     uint64_t seed;
     size_t tokenizer_sample_bytes;
     const char* metrics_path;
@@ -74,56 +75,57 @@ static void print_usage(const char* exe) {
     printf("  --resume --steps N --lr FLOAT --warmup N --log-interval N\n");
     printf("  --validation-batches N --validation-interval N --checkpoint-interval N --seed N\n");
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
-    printf("  --heads N --ffn-dim N --max-seq N --metrics PATH --diagnostics-only\n");
+    printf("  --heads N --ffn-dim N --max-seq N --batch-size N --sequence-length N\n");
+    printf("  --metrics PATH --diagnostics-only\n");
 }
 
 static float evaluate_loss(Model* model, Arena* temp,
     const uint16_t* all_ids, int validation_start, int validation_tokens,
-    int validation_batches) {
+    int validation_batches, int batch_size, int seq_len) {
 
     if (!model || !temp || !all_ids ||
-        validation_start < 0 || validation_tokens < BATCH * SEQ + 1 || validation_batches < 1)
+        validation_start < 0 || validation_tokens < batch_size * seq_len + 1 || validation_batches < 1)
         return NAN;
 
     arena_reset(temp);
 
     Activations act;
-    if (!activations_init(&act, temp, BATCH, SEQ, model))
+    if (!activations_init(&act, temp, batch_size, seq_len, model))
         return NAN;
 
     float* dlogits = arena_alloc(temp,
-        (size_t)BATCH * SEQ * model->vocab_size * sizeof(float));
+        (size_t)batch_size * seq_len * model->vocab_size * sizeof(float));
     uint16_t* batch_tokens = arena_alloc(temp,
-        (size_t)BATCH * SEQ * sizeof(uint16_t));
+        (size_t)batch_size * seq_len * sizeof(uint16_t));
     uint16_t* batch_targets = arena_alloc(temp,
-        (size_t)BATCH * SEQ * sizeof(uint16_t));
+        (size_t)batch_size * seq_len * sizeof(uint16_t));
 
     if (!dlogits || !batch_tokens || !batch_targets)
         return NAN;
 
-    const size_t span = (size_t)validation_tokens - SEQ - 1;
+    const size_t span = (size_t)validation_tokens - seq_len - 1;
     double loss_sum = 0.0;
 
     // Evaluate fixed, evenly spaced windows across the held-out region.
     for (int eval_batch = 0; eval_batch < validation_batches; eval_batch++) {
-        for (int b = 0; b < BATCH; b++) {
-            const size_t sample_index = (size_t)eval_batch * BATCH + b;
-            const size_t sample_count = (size_t)validation_batches * BATCH;
+        for (int b = 0; b < batch_size; b++) {
+            const size_t sample_index = (size_t)eval_batch * batch_size + b;
+            const size_t sample_count = (size_t)validation_batches * batch_size;
             const size_t offset = (span * sample_index) / (sample_count - 1);
             const int start = validation_start + (int)offset;
 
-            for (int t = 0; t < SEQ; t++) {
-                batch_tokens[b * SEQ + t] = all_ids[start + t];
-                batch_targets[b * SEQ + t] = all_ids[start + t + 1];
+            for (int t = 0; t < seq_len; t++) {
+                batch_tokens[b * seq_len + t] = all_ids[start + t];
+                batch_targets[b * seq_len + t] = all_ids[start + t + 1];
             }
         }
 
         float* logits = model_forward(model, &act,
-            batch_tokens, BATCH, SEQ);
+            batch_tokens, batch_size, seq_len);
         if (!logits) return NAN;
 
         const float loss = loss_cross_entropy(logits, batch_targets,
-            dlogits, BATCH, SEQ, model->vocab_size);
+            dlogits, batch_size, seq_len, model->vocab_size);
         if (!isfinite(loss)) return NAN;
         loss_sum += loss;
     }
@@ -187,6 +189,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     *resume = false; *diagnostics_only = false; *steps = DEFAULT_STEPS;
     ModelConfig default_model=MODEL_CONFIG_DEFAULT;
     o->model=default_model;
+    o->batch_size=DEFAULT_BATCH_SIZE; o->sequence_length=DEFAULT_SEQUENCE_LENGTH;
     o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->validation_interval=DEFAULT_LOG_INTERVAL;
@@ -222,7 +225,9 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             strcmp(argv[i], "--layers") == 0 ||
             strcmp(argv[i], "--heads") == 0 ||
             strcmp(argv[i], "--ffn-dim") == 0 ||
-            strcmp(argv[i], "--max-seq") == 0) {
+            strcmp(argv[i], "--max-seq") == 0 ||
+            strcmp(argv[i], "--batch-size") == 0 ||
+            strcmp(argv[i], "--sequence-length") == 0) {
             const char* opt=argv[i];
             if (++i >= argc) die("%s requires a value", opt);
             long lo=1, hi=INT_MAX;
@@ -234,6 +239,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (strcmp(opt,"--heads")==0) { lo=1; hi=32; }
             if (strcmp(opt,"--ffn-dim")==0) { lo=1; hi=1024; }
             if (strcmp(opt,"--max-seq")==0) { lo=32; hi=512; }
+            if (strcmp(opt,"--batch-size")==0) { lo=1; hi=16; }
+            if (strcmp(opt,"--sequence-length")==0) { lo=8; hi=512; }
             long v=parse_long_value(opt,argv[i],lo,hi);
             if (strcmp(opt,"--steps")==0) *steps=(int)v;
             else if (strcmp(opt,"--warmup")==0) o->warmup_steps=(int)v;
@@ -248,6 +255,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--heads")==0) o->model.n_heads=(int)v;
             else if (strcmp(opt,"--ffn-dim")==0) o->model.ffn_dim=(int)v;
             else if (strcmp(opt,"--max-seq")==0) o->model.max_seq=(int)v;
+            else if (strcmp(opt,"--batch-size")==0) o->batch_size=(int)v;
+            else if (strcmp(opt,"--sequence-length")==0) o->sequence_length=(int)v;
             else o->tokenizer_sample_bytes=(size_t)v;
         }
         else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
@@ -495,6 +504,10 @@ int main(int argc, char** argv) {
     TrainOptions options;
     const int user_path_count = parse_arguments(argc, argv,
         &resume, &diagnostics_only, &steps_to_run, user_paths, &options);
+    if(options.sequence_length>options.model.max_seq)
+        die("sequence length cannot exceed model context length");
+    if((size_t)options.batch_size*(size_t)options.sequence_length*(size_t)options.model.vocab_size > 16u*1024u*1024u)
+        die("batch x sequence x vocabulary exceeds the 64 MiB logits-scratch safety limit");
 
     printf("ProjectMinima text-corpus training experiment\n");
     printf("Vocabulary target: %d\n", options.model.vocab_size);
@@ -592,8 +605,8 @@ int main(int argc, char** argv) {
         printf("No training text found; using synthetic smoke corpus.\n");
     }
 
-    if (corpus_len < (size_t)BATCH * SEQ + 1)
-        die("corpus too small: need at least %d bytes", BATCH * SEQ + 1);
+    if (corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
+        die("corpus too small: need at least %d bytes", options.batch_size * options.sequence_length + 1);
     if (corpus_len > (size_t)INT_MAX)
         die("corpus exceeds tokenizer's current INT_MAX byte/token-capacity limit");
 
@@ -610,7 +623,7 @@ int main(int argc, char** argv) {
     }
     else {
         const size_t train_corpus_len = (corpus_len * 95u) / 100u;
-        if (train_corpus_len < (size_t)BATCH * SEQ + 1)
+        if (train_corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
             die("training portion is too small");
 
         const size_t tokenizer_sample_cap = options.tokenizer_sample_bytes;
@@ -669,8 +682,8 @@ int main(int argc, char** argv) {
 
     const int train_tokens = n_tokens - n_tokens / 20;
     const int validation_tokens = n_tokens - train_tokens;
-    if (train_tokens < BATCH * SEQ + 1 ||
-        validation_tokens < BATCH * SEQ + 1)
+    if (train_tokens < options.batch_size * options.sequence_length + 1 ||
+        validation_tokens < options.batch_size * options.sequence_length + 1)
         die("corpus too small for a 95/5 train/validation split");
 
     printf("Training tokens:   %d (95%%)\n", train_tokens);
@@ -716,22 +729,22 @@ int main(int argc, char** argv) {
     // 6. Numerical gradient check
     // ------------------------------------------------------------------
     uint16_t* check_tokens = arena_alloc(&arena,
-        (size_t)BATCH * SEQ * sizeof(uint16_t));
+        (size_t)options.batch_size * options.sequence_length * sizeof(uint16_t));
     uint16_t* check_targets = arena_alloc(&arena,
-        (size_t)BATCH * SEQ * sizeof(uint16_t));
+        (size_t)options.batch_size * options.sequence_length * sizeof(uint16_t));
     if (!check_tokens || !check_targets)
         die("gradient-check batch allocation failed");
 
-    for (int b = 0; b < BATCH; b++) {
-        const int start = b * SEQ;
-        for (int t = 0; t < SEQ; t++) {
-            check_tokens[b * SEQ + t] = all_ids[start + t];
-            check_targets[b * SEQ + t] = all_ids[start + t + 1];
+    for (int b = 0; b < options.batch_size; b++) {
+        const int start = b * options.sequence_length;
+        for (int t = 0; t < options.sequence_length; t++) {
+            check_tokens[b * options.sequence_length + t] = all_ids[start + t];
+            check_targets[b * options.sequence_length + t] = all_ids[start + t + 1];
         }
     }
 
     if (!gradient_check(&model, &grads, &temp,
-        check_tokens, check_targets, BATCH, SEQ))
+        check_tokens, check_targets, options.batch_size, options.sequence_length))
         die("numerical gradient check failed");
 
     // Create a valid step-zero checkpoint before training starts. If the
@@ -774,35 +787,35 @@ int main(int argc, char** argv) {
     }
     else for (int local_step = 0; local_step < steps_to_run; local_step++) {
         arena_reset(&temp);
-        if (!activations_init(&act, &temp, BATCH, SEQ, &model))
+        if (!activations_init(&act, &temp, options.batch_size, options.sequence_length, &model))
             die("activation allocation failed");
 
         dlogits = arena_alloc(&temp,
-            (size_t)BATCH * SEQ * model.vocab_size * sizeof(float));
-        batch_tokens = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
-        batch_targets = arena_alloc(&temp, BATCH * SEQ * sizeof(uint16_t));
+            (size_t)options.batch_size * options.sequence_length * model.vocab_size * sizeof(float));
+        batch_tokens = arena_alloc(&temp, options.batch_size * options.sequence_length * sizeof(uint16_t));
+        batch_targets = arena_alloc(&temp, options.batch_size * options.sequence_length * sizeof(uint16_t));
         if (!dlogits || !batch_tokens || !batch_targets)
             die("training scratch allocation failed");
 
-        for (int b = 0; b < BATCH; b++) {
-            const int start = rng_int(&rng, 0, train_tokens - SEQ - 1);
-            for (int t = 0; t < SEQ; t++) {
-                batch_tokens[b * SEQ + t] = all_ids[start + t];
-                batch_targets[b * SEQ + t] = all_ids[start + t + 1];
+        for (int b = 0; b < options.batch_size; b++) {
+            const int start = rng_int(&rng, 0, train_tokens - options.sequence_length - 1);
+            for (int t = 0; t < options.sequence_length; t++) {
+                batch_tokens[b * options.sequence_length + t] = all_ids[start + t];
+                batch_targets[b * options.sequence_length + t] = all_ids[start + t + 1];
             }
         }
 
         float* logits = model_forward(&model, &act,
-            batch_tokens, BATCH, SEQ);
+            batch_tokens, options.batch_size, options.sequence_length);
         if (!logits) die("model_forward failed");
 
         const float loss = loss_cross_entropy(logits, batch_targets, dlogits,
-            BATCH, SEQ, model.vocab_size);
+            options.batch_size, options.sequence_length, model.vocab_size);
         if (!isfinite(loss)) die("training loss became non-finite");
 
         gradients_zero(&grads, &model);
         model_backward(&model, &grads, &act, dlogits,
-            batch_tokens, BATCH, SEQ);
+            batch_tokens, options.batch_size, options.sequence_length);
 
         // Each invocation is an additional training segment with its own
         // warmup + cosine decay. AdamW's bias-correction step remains global.
@@ -858,9 +871,9 @@ int main(int argc, char** argv) {
         (long long)initial_step, (long long)final_step);
 
     const float final_train_loss = evaluate_loss(&model, &temp,
-        all_ids, 0, train_tokens, options.validation_batches);
+        all_ids, 0, train_tokens, options.validation_batches, options.batch_size, options.sequence_length);
     const float final_validation_loss = evaluate_loss(&model, &temp,
-        all_ids, train_tokens, validation_tokens, options.validation_batches);
+        all_ids, train_tokens, validation_tokens, options.validation_batches, options.batch_size, options.sequence_length);
     if (!isfinite(final_train_loss) || !isfinite(final_validation_loss))
         die("final loss diagnostics are unavailable");
 
@@ -928,7 +941,7 @@ int main(int argc, char** argv) {
         die("KV cache initialization failed");
 
     if (!generation_check_kv_cache(&model, &cache, &temp,
-        check_tokens, SEQ, 1e-4f))
+        check_tokens, options.sequence_length, 1e-4f))
         die("KV-cache parity check failed");
 
     if (!run_generation_benchmark(&model, &tok, &cache))
