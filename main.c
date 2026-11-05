@@ -16,7 +16,7 @@
 #define LR        3e-4f
 
 int main(void) {
-    printf("tinyllm smoke test - overfitting a short string\n\n");
+    printf("ProjectMinima smoke test - overfitting a short string\n\n");
 
     // ------------------------------------------------------------------
     // 1. Arenas
@@ -39,11 +39,11 @@ int main(void) {
     size_t text_len = strlen(text);
 
     // Repeat it so we have enough tokens
-    size_t corpus_len = text_len * 40;
+    size_t corpus_len = text_len * 80;
     uint8_t* corpus = arena_alloc(&arena, corpus_len + 1);
     if (!corpus) die("corpus allocation failed");
 
-    for (size_t i = 0; i < 40; i++)
+    for (size_t i = 0; i < 80; i++)
         memcpy(corpus + i * text_len, text, text_len);
     corpus[corpus_len] = 0;
 
