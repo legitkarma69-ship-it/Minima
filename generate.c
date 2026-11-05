@@ -178,6 +178,71 @@ static void forward_one(Model* model, KVCache* cache,
 }
 
 // ------------------------------------------------------------------
+// KV-cache parity check
+// ------------------------------------------------------------------
+
+// Compare the final-token logits from a full causal forward pass against
+// incremental single-token inference using the KV cache.
+bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
+    const uint16_t* tokens, int seq, float tolerance) {
+
+    if (!model || !cache || !temp_arena || !tokens || seq <= 0 ||
+        seq > model->max_seq || seq > cache->max_seq ||
+        seq > 512 || !isfinite(tolerance) || tolerance <= 0.0f ||
+        model->dim <= 0 || model->dim > 512 ||
+        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
+        model->vocab_size <= 0 || model->vocab_size > 8192 ||
+        model->n_layers <= 0 || model->n_heads <= 0 ||
+        model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim ||
+        cache->n_layers != model->n_layers ||
+        cache->dim != model->dim ||
+        cache->n_heads != model->n_heads ||
+        cache->head_dim != model->head_dim ||
+        !cache->k_cache || !cache->v_cache)
+        return false;
+
+    for (int i = 0; i < seq; i++)
+        if (tokens[i] >= model->vocab_size) return false;
+
+    arena_reset(temp_arena);
+
+    Activations act;
+    if (!activations_init(&act, temp_arena, 1, seq, model))
+        return false;
+
+    float* full_logits = model_forward(model, &act, tokens, 1, seq);
+    if (!full_logits) return false;
+
+    float x[512];
+    float cached_logits[8192];
+    kvcache_reset(cache);
+    for (int i = 0; i < seq; i++)
+        forward_one(model, cache, tokens[i], x, cached_logits);
+
+    float max_abs = 0.0f;
+    float max_rel = 0.0f;
+    const float* expected = full_logits + (size_t)(seq - 1) * model->vocab_size;
+
+    for (int i = 0; i < model->vocab_size; i++) {
+        float diff = fabsf(expected[i] - cached_logits[i]);
+        float denom = fmaxf(fabsf(expected[i]), 1e-6f);
+        float rel = diff / denom;
+        if (diff > max_abs) max_abs = diff;
+        if (rel > max_rel) max_rel = rel;
+    }
+
+    printf("KV-cache parity check\n");
+    printf("  sequence length : %d\n", seq);
+    printf("  max abs error   : %.8e\n", max_abs);
+    printf("  max rel error   : %.8e\n", max_rel);
+    printf("  tolerance       : %.8e\n", tolerance);
+    printf("  result          : %s\n", max_abs <= tolerance ? "PASS" : "FAIL");
+
+    return max_abs <= tolerance;
+}
+
+// ------------------------------------------------------------------
 // Sampling helpers
 // ------------------------------------------------------------------
 
