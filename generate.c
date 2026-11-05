@@ -355,15 +355,13 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
     int top_k, float top_p, float repetition_penalty,
     const uint16_t* history, int history_len, Rng* rng) {
     int idx[256]; float vals[256]; int n=0;
+    uint8_t seen[8192]={0};
     if(top_k<1)top_k=1;if(top_k>vocab)top_k=vocab;if(top_k>256)top_k=256;
+    if(repetition_penalty>1.0f)
+        for(int j=0;j<history_len;j++)if(history[j]<(uint16_t)vocab)seen[history[j]]=1;
     for(int id=0;id<vocab;id++){
         float value=logits[id];
-        if(repetition_penalty>1.0f){
-            for(int j=0;j<history_len;j++)if(history[j]==(uint16_t)id){
-                value=value>0.0f?value/repetition_penalty:value*repetition_penalty;
-                break;
-            }
-        }
+        if(seen[id])value=value>0.0f?value/repetition_penalty:value*repetition_penalty;
         value/=temperature;
         if(n<top_k){idx[n]=id;vals[n]=value;n++;}
         else{
