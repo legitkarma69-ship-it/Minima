@@ -8,6 +8,7 @@
 #include "gradcheck.h"
 #include "generate.h"
 #include "corpus.h"
+#include "checkpoint.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -249,7 +250,18 @@ int main(int argc, char** argv) {
     }
 
     // ------------------------------------------------------------------
-    // 8. Autoregressive generation smoke test
+    // 8. Save tokenizer, model weights, and AdamW state
+    // ------------------------------------------------------------------
+    if (!tokenizer_save(&tok, "minima.bpe"))
+        die("failed to save tokenizer to minima.bpe");
+    if (!checkpoint_save("minima.model", &model, &opt))
+        die("failed to save model checkpoint to minima.model");
+
+    printf("\nSaved tokenizer: minima.bpe\\n");
+    printf("Saved model + optimizer: minima.model (step %d)\\n", STEPS);
+
+    // ------------------------------------------------------------------
+    // 9. Autoregressive generation smoke test
     // ------------------------------------------------------------------
     const char* prompt_text = "The quick ";
     const size_t prompt_bytes = strlen(prompt_text);
