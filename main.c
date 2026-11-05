@@ -41,6 +41,8 @@ typedef struct {
     int top_k, max_new_tokens;
     bool chat_mode;
     ModelConfig model;
+    const char* lr_schedule;
+    bool tokenizer_spread;
 } TrainOptions;
 
 static long parse_long_value(const char* name, const char* value, long minv, long maxv) {
@@ -192,6 +194,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL;
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
+    o->lr_schedule="cosine"; o->tokenizer_spread=true;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
@@ -256,6 +259,18 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if(strcmp(option,"--temperature")==0)o->temperature=parse_float_value(option,argv[i],0.05f,5.0f);
             else if(strcmp(option,"--top-p")==0)o->top_p=parse_float_value(option,argv[i],0.01f,1.0f);
             else o->repetition_penalty=parse_float_value(option,argv[i],1.0f,3.0f);
+        }
+        else if (strcmp(argv[i], "--lr-schedule") == 0) {
+            if(++i>=argc)die("--lr-schedule requires cosine or constant");
+            if(strcmp(argv[i],"cosine")!=0 && strcmp(argv[i],"constant")!=0)
+                die("--lr-schedule must be cosine or constant");
+            o->lr_schedule=argv[i];
+        }
+        else if (strcmp(argv[i], "--tokenizer-sampling") == 0) {
+            if(++i>=argc)die("--tokenizer-sampling requires spread or prefix");
+            if(strcmp(argv[i],"spread")!=0 && strcmp(argv[i],"prefix")!=0)
+                die("--tokenizer-sampling must be spread or prefix");
+            o->tokenizer_spread=(strcmp(argv[i],"spread")==0);
         }
         else if (strcmp(argv[i], "--lr") == 0) {
             if (++i >= argc) die("--lr requires a value");
@@ -601,7 +616,7 @@ int main(int argc, char** argv) {
         uint8_t* tokenizer_sample = (uint8_t*)arena_alloc(&arena, sample_len);
         if (!tokenizer_sample) die("tokenizer sample allocation failed");
 
-        if (train_corpus_len <= tokenizer_sample_cap) {
+        if (train_corpus_len <= tokenizer_sample_cap || !options.tokenizer_spread) {
             memcpy(tokenizer_sample, corpus, sample_len);
         }
         else {
@@ -742,9 +757,10 @@ int main(int argc, char** argv) {
     if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
     const clock_t training_started=clock();
     printf("Metrics CSV: %s\n",options.metrics_path);
-    printf("Settings: lr=%.7g warmup=%d log=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu\n",
-        options.learning_rate,options.warmup_steps,options.log_interval,options.validation_batches,
-        options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes);
+    printf("Settings: lr=%.7g schedule=%s warmup=%d log=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s\n",
+        options.learning_rate,options.lr_schedule,options.warmup_steps,options.log_interval,options.validation_batches,
+        options.checkpoint_interval,(unsigned long long)options.seed,options.tokenizer_sample_bytes,
+        options.tokenizer_spread?"spread":"prefix");
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;
@@ -786,9 +802,9 @@ int main(int argc, char** argv) {
 
         // Each invocation is an additional training segment with its own
         // warmup + cosine decay. AdamW's bias-correction step remains global.
-        opt.lr = steps_to_run == 1 ? options.learning_rate :
-            optim_lr_cosine(options.learning_rate, local_step + 1,
-                warmup_steps, steps_to_run);
+        opt.lr = (strcmp(options.lr_schedule,"constant")==0 || steps_to_run==1)
+            ? options.learning_rate
+            : optim_lr_cosine(options.learning_rate,local_step+1,warmup_steps,steps_to_run);
         optim_step(&opt, &model, &grads);
         if (opt.step % options.checkpoint_interval == 0) {
             if (!checkpoint_save("minima.model", &model, &opt, &rng, tokenizer_hash))
