@@ -78,7 +78,7 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
         if(strncmp(line,"/test ",6)==0) {
             ChatOptions requested = *options;
             if (!parse_test_settings(line, &requested)) {
-                printf("TEST_ERROR: invalid sampling settings: [%s]\\n", line);
+                printf("TEST_ERROR: invalid sampling settings: [%s]\n", line);
                 puts("CHAT_READY");
                 continue;
             }
