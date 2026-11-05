@@ -60,6 +60,21 @@ static void write_csv_string(FILE* file, const char* text) {
     fputc('"', file);
 }
 
+static void write_csv_token(FILE* file, const char* token, int length) {
+    fputc('"', file);
+    for (int i = 0; i < length; ++i) {
+        const unsigned char byte = (unsigned char)token[i];
+        if (byte == '"') fputs("\"\"", file);
+        else if (byte == '\\\\') fputs("\\\\\\\\", file);
+        else if (byte == '\\n') fputs("\\\\n", file);
+        else if (byte == '\\r') fputs("\\\\r", file);
+        else if (byte == '\\t') fputs("\\\\t", file);
+        else if (byte >= 32 && byte <= 126) fputc(byte, file);
+        else fprintf(file, "\\\\x%02X", (unsigned int)byte);
+    }
+    fputc('"', file);
+}
+
 static bool token_has_whitespace(const Tokenizer* tok, int id) {
     const unsigned char* s = (const unsigned char*)tok->token_str[id];
     for (int i = 0; i < tok->token_len[id]; ++i) {
