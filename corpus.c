@@ -74,19 +74,19 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
         long end = ftell(f);
         if (end < 0 || fseek(f, 0, SEEK_SET) != 0) {
             fclose(f);
-            return false;
+            return CORPUS_LOAD_ERROR;
         }
         bool has_text = false;
         if (end > 0 && !file_has_text(f, &has_text)) {
             fclose(f);
-            return false;
+            return CORPUS_LOAD_ERROR;
         }
         fclose(f);
 
         if (end == 0 || !has_text) continue;
         size_t bytes = (size_t)end;
         if (bytes > max_bytes || total > max_bytes - bytes)
-            return false;
+            return CORPUS_LOAD_ERROR;
 
         files[file_count].path = paths[i];
         files[file_count].size = bytes;
@@ -100,12 +100,12 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
     if (file_count > 1) {
         size_t separators = (file_count - 1) * 2;
         if (separators > max_bytes || total > max_bytes - separators)
-            return false;
+            return CORPUS_LOAD_ERROR;
         total += separators;
     }
 
     uint8_t* data = (uint8_t*)arena_alloc(arena, total + 1);
-    if (!data) return false;
+    if (!data) return CORPUS_LOAD_ERROR;
 
     size_t written = 0;
     size_t loaded = 0;
@@ -113,7 +113,7 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
     // Second pass: read exact file lengths. UTF-8 BOMs are stripped.
     for (size_t i = 0; i < file_count; i++) {
         FILE* f = fopen(files[i].path, "rb");
-        if (!f) return false;
+        if (!f) return CORPUS_LOAD_ERROR;
 
         if (loaded > 0) {
             data[written++] = '\n';
@@ -125,7 +125,7 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
         int read_error = ferror(f);
         fclose(f);
 
-        if (got != files[i].size || read_error) return false;
+        if (got != files[i].size || read_error) return CORPUS_LOAD_ERROR;
 
         if (got >= 3 && data[start] == 0xEF &&
             data[start + 1] == 0xBB && data[start + 2] == 0xBF) {
