@@ -989,7 +989,7 @@ int main(int argc, char** argv) {
     {
         FILE* source = fopen("minima.model", "rb");
         FILE* truncated = fopen("minima_truncated.model", "wb");
-        uint8_t prefix[64];
+        uint8_t prefix[104];
         size_t bytes = source ? fread(prefix, 1, sizeof(prefix), source) : 0;
         if (source) fclose(source);
         if (!truncated || bytes != sizeof(prefix) ||
