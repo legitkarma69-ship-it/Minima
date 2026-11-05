@@ -642,7 +642,7 @@ int main(int argc, char** argv) {
         if (!tokenizer_load(&tok, &arena, "minima.bpe"))
             die("resume requested, but minima.bpe could not be loaded");
         if (tok.vocab_size != options.model.vocab_size)
-            die("saved tokenizer vocabulary does not match MODEL_VOCAB_SIZE; start a fresh run");
+            die("saved tokenizer vocabulary does not match the configured model vocabulary; start a fresh run");
         printf("Loaded tokenizer: minima.bpe (vocab = %d)\n", tok.vocab_size);
     }
     else {
