@@ -206,10 +206,18 @@ static bool tokenizer_report(const Tokenizer* tok, Arena* arena,
     printf("\nTokenizer and corpus diagnostics\n");
     printf("  vocabulary / merges        : %d / %d\n", tok->vocab_size, tok->n_merges);
     printf("  active tokens in train     : %d / %d\n", active, tok->vocab_size);
-    printf("  unused merge tokens        : %d\n", unused_merge_tokens);
+    printf("  used / unused merge tokens : %llu / %d\n",
+        (unsigned long long)used_merge_count, unused_merge_tokens);
     printf("  mean bytes per train token : %.3f\n",
         (double)represented_bytes / (double)train_tokens);
     printf("  maximum token byte length : %d\n", max_token_bytes);
+    printf("  token length distribution : 1=%llu 2=%llu 3-4=%llu 5-8=%llu 9-16=%llu 17+=%llu\n",
+        (unsigned long long)length_buckets[0],
+        (unsigned long long)length_buckets[1],
+        (unsigned long long)length_buckets[2],
+        (unsigned long long)length_buckets[3],
+        (unsigned long long)length_buckets[4],
+        (unsigned long long)length_buckets[5]);
     printf("  raw-byte fallback share    : %.2f%%\n",
         100.0 * (double)raw_byte_count / (double)train_tokens);
     printf("  whitespace token share    : %.2f%% (leading-space %.2f%%, newline-containing %.2f%%)\n",
@@ -228,11 +236,20 @@ static bool tokenizer_report(const Tokenizer* tok, Arena* arena,
     for (int rank = 0; rank < active; ++rank) {
         const int id = ranked[rank].id;
         fprintf(csv, "%d,%d,", rank + 1, id);
-        write_csv_string(csv, tok->token_str[id]);
+        write_csv_token(csv, tok->token_str[id], tok->token_len[id]);
         fprintf(csv, ",%d,%s,%llu,%.8f,%llu,%.8f\n",
             tok->token_len[id], token_category(id),
             (unsigned long long)train_counts[id],
             100.0 * (double)train_counts[id] / (double)train_tokens,
+            (unsigned long long)validation_counts[id],
+            100.0 * (double)validation_counts[id] / (double)validation_tokens);
+    }
+    for (int id = 0; id < tok->vocab_size; ++id) {
+        if (train_counts[id] != 0) continue;
+        fprintf(csv, ",%d,", id);
+        write_csv_token(csv, tok->token_str[id], tok->token_len[id]);
+        fprintf(csv, ",%d,%s,0,0.0,%llu,%.8f\n",
+            tok->token_len[id], token_category(id),
             (unsigned long long)validation_counts[id],
             100.0 * (double)validation_counts[id] / (double)validation_tokens);
     }
