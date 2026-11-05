@@ -165,12 +165,20 @@ static bool tokenizer_report(const Tokenizer* tok, Arena* arena,
     uint64_t leading_space_count = 0;
     uint64_t newline_token_count = 0;
     uint64_t represented_bytes = 0;
+    uint64_t length_buckets[6] = {0};
     int unused_merge_tokens = 0;
     int max_token_bytes = 0;
     for (int id = 0; id < tok->vocab_size; ++id) {
         if (tok->token_len[id] > max_token_bytes)
             max_token_bytes = tok->token_len[id];
         represented_bytes += (uint64_t)tok->token_len[id] * train_counts[id];
+        if (id >= 4 && train_counts[id] > 0) {
+            const int length = tok->token_len[id];
+            const int bucket = length <= 1 ? 0 : length == 2 ? 1 :
+                length <= 4 ? 2 : length <= 8 ? 3 :
+                length <= 16 ? 4 : 5;
+            length_buckets[bucket] += train_counts[id];
+        }
         if (id >= 4 && id < 260) raw_byte_count += train_counts[id];
         if (id >= 260) {
             if (train_counts[id]) used_merge_count++;
@@ -483,7 +491,7 @@ static bool write_generation_report(Model* model, const Tokenizer* tok,
                 stats.unique_tokens, stats.entropy_bits, stats.distinct[0],
                 stats.distinct[1], stats.distinct[2],
                 stats.adjacent_repeat_rate, stats.max_repeated_ngram);
-            write_csv_string(csv, decoded);
+            write_csv_token(csv, decoded, decoded_bytes);
             fputc('\n', csv);
         }
     }
