@@ -135,7 +135,6 @@ static int run_chat_console(Model* model, Tokenizer* tok, KVCache* cache,
     puts("CHAT_READY");
     puts("ProjectMinima chat. Type /quit to exit.");
     for(;;){
-        fputs("You: ",stdout);fflush(stdout);
         if(!fgets(line,sizeof(line),stdin))break;
         size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\\n'||line[bytes-1]=='\\r'))line[--bytes]=0;
         if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
@@ -459,7 +458,9 @@ int main(int argc, char** argv) {
 
     printf("ProjectMinima text-corpus training experiment\n");
     printf("Vocabulary target: %d\n", MODEL_VOCAB_SIZE);
-    if (diagnostics_only)
+    if (options.chat_mode)
+        printf("Mode: interactive chat (checkpoint resume)\n\n");
+    else if (diagnostics_only)
         printf("Mode: diagnostics only (no optimizer updates)\n\n");
     else
         printf("Steps this run: %d%s\n\n", steps_to_run,
