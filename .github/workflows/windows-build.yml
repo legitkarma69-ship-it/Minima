@@ -26,14 +26,14 @@ jobs:
           & ".\x64\Release\Minima.exe" --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Test GUI protocol line endings
+      - name: Test GUI reader-to-window readiness integration
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (!$vs) { throw "Visual C++ x64 tools were not found." }
           $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
-          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC tests\gui_protocol_test.c /Fe:gui_protocol_test.exe && gui_protocol_test.exe'
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC tests\gui_protocol_integration_test.c /Fe:gui_protocol_integration_test.exe /link user32.lib && gui_protocol_integration_test.exe'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

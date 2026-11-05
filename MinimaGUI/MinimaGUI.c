@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "gui_protocol.h"
+#include "gui_chat_state.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
@@ -130,6 +131,10 @@ static void set_running(BOOL running) {
     update_fresh_only_controls();
 }
 
+static void post_chat_ready(void* context) {
+    PostMessageW((HWND)context, WM_CHAT_READY, 0, 0);
+}
+
 static DWORD WINAPI reader_thread(void* parameter) {
     HANDLE pipe = (HANDLE)parameter;
     char buffer[2048];
@@ -149,9 +154,9 @@ static DWORD WINAPI reader_thread(void* parameter) {
             carry[used++] = buffer[i];
             if (buffer[i] == '\n' || used >= 60000) {
                 carry[used] = 0;
-                const int protocol_marker=minima_protocol_marker(carry,used);
+                const int protocol_marker=minima_protocol_dispatch(carry, used, post_chat_ready, g_window);
                 if(protocol_marker==MINIMA_PROTOCOL_CHAT_READY){
-                    PostMessageW(g_window,WM_CHAT_READY,0,0);used=0;continue;
+                    used=0;continue;
                 }
                 if(protocol_marker==MINIMA_PROTOCOL_CHAT_CLOSED){used=0;continue;}
                 UINT code_page=CP_UTF8;
@@ -783,8 +788,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         break;
     case WM_CHAT_READY:
-        if(g_chat_mode && InterlockedCompareExchange(&g_running,0,0))
-            EnableWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),TRUE);
+        minima_gui_set_chat_send_ready(GetDlgItem(hwnd,IDC_CHAT_SEND),
+            g_chat_mode, InterlockedCompareExchange(&g_running,0,0) != 0);
         return 0;
     case WM_APPEND_LOG:
         append_log((const wchar_t*)lp);
