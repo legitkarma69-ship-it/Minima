@@ -28,7 +28,7 @@
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
 static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
-static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph;
+static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling;
@@ -86,7 +86,7 @@ static void set_running(BOOL running) {
     EnableWindow(g_steps,!running);EnableWindow(g_resume,!running);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
     HWND fields[]={g_lr,g_warmup,g_log_interval,g_validation_batches,g_checkpoint_interval,
-        g_seed,g_tokenizer_bytes,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
+        g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     SetWindowTextW(g_status, running ? L"Training process running" : L"Idle");
@@ -247,6 +247,7 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--warmup",g_warmup) ||
            !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
            !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
+           !append_option(command,_countof(command),L"--validation-interval",g_validation_interval) ||
            !append_option(command,_countof(command),L"--checkpoint-interval",g_checkpoint_interval) ||
            !append_option(command,_countof(command),L"--seed",g_seed) ||
            !append_option(command,_countof(command),L"--tokenizer-sample-bytes",g_tokenizer_bytes) ||
@@ -408,12 +409,14 @@ static void create_controls(HWND hwnd) {
 
     CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,244,60,18,hwnd,NULL,NULL,NULL);
     g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,241,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Validation batches",WS_CHILD|WS_VISIBLE,132,244,112,18,hwnd,NULL,NULL,NULL);
-    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,246,241,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Checkpoint every",WS_CHILD|WS_VISIBLE,305,244,100,18,hwnd,NULL,NULL,NULL);
-    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,407,241,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Seed",WS_CHILD|WS_VISIBLE,466,244,35,18,hwnd,NULL,NULL,NULL);
-    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,505,241,60,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Validate every",WS_CHILD|WS_VISIBLE,132,244,90,18,hwnd,NULL,NULL,NULL);
+    g_validation_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,241,45,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Val batches",WS_CHILD|WS_VISIBLE,276,244,68,18,hwnd,NULL,NULL,NULL);
+    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,241,40,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,244,65,18,hwnd,NULL,NULL,NULL);
+    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,241,42,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Seed",WS_CHILD|WS_VISIBLE,507,244,35,18,hwnd,NULL,NULL,NULL);
+    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,241,55,23,hwnd,NULL,NULL,NULL);
 
     CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,278,92,18,hwnd,NULL,NULL,NULL);
     g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,275,75,23,hwnd,NULL,NULL,NULL);
@@ -451,7 +454,7 @@ static void create_controls(HWND hwnd) {
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,835,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
-        g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
+        g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling };
     for (int i = 0; i < (int)_countof(controls); ++i)
