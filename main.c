@@ -952,6 +952,18 @@ int main(int argc, char** argv) {
 
     printf("Tokenizer round-trip: PASS (vocabulary, merges, encoding)\n");
 
+    /* An undersized output buffer must fail without returning a prefix. */
+    uint16_t capacity_guard[8];
+    for (int i = 0; i < 8; ++i) capacity_guard[i] = 0xBEEFu;
+    const int capacity_result = tokenizer_encode(&tok,
+        (const uint8_t*)"123456789", 9, capacity_guard, 8);
+    if (capacity_result != -1)
+        die("tokenizer capacity regression check failed: expected -1");
+    for (int i = 0; i < 8; ++i)
+        if (capacity_guard[i] != 0xBEEFu)
+            die("tokenizer capacity regression check modified output");
+    printf("Tokenizer insufficient-capacity check: PASS (no partial output)\n");
+
     const float saved_weight = model.tok_emb[0];
     const float saved_moment = opt.m_tok_emb[0];
     const float saved_variance = opt.v_tok_emb[0];
@@ -972,6 +984,63 @@ int main(int argc, char** argv) {
 
     printf("Checkpoint round-trip: PASS (weights, optimizer, step, RNG)\n");
     printf("Checkpoint compatibility: PASS (model architecture and tokenizer)\n");
+
+    /* A truncated checkpoint must not alter any live destination state. */
+    {
+        FILE* source = fopen("minima.model", "rb");
+        FILE* truncated = fopen("minima_truncated.model", "wb");
+        uint8_t prefix[64];
+        size_t bytes = source ? fread(prefix, 1, sizeof(prefix), source) : 0;
+        if (source) fclose(source);
+        if (!truncated || bytes != sizeof(prefix) ||
+            fwrite(prefix, 1, bytes, truncated) != bytes) {
+            if (truncated) fclose(truncated);
+            remove("minima_truncated.model");
+            die("checkpoint atomicity test setup failed");
+        }
+        if (fclose(truncated) != 0) {
+            remove("minima_truncated.model");
+            die("checkpoint atomicity test setup failed");
+        }
+
+        const float guard_weight = model.tok_emb[0];
+        const float guard_moment = opt.m_tok_emb[0];
+        const float guard_variance = opt.v_tok_emb[0];
+        const float guard_lr = opt.lr;
+        const int64_t guard_step = opt.step;
+        const uint64_t guard_rng = rng.state;
+        model.tok_emb[0] = guard_weight + 3.0f;
+        opt.m_tok_emb[0] = guard_moment + 4.0f;
+        opt.v_tok_emb[0] = guard_variance + 5.0f;
+        opt.lr = guard_lr + 0.125f;
+        opt.step = guard_step + 7;
+        rng.state ^= 0x1122334455667788ULL;
+
+        const float expected_weight = model.tok_emb[0];
+        const float expected_moment = opt.m_tok_emb[0];
+        const float expected_variance = opt.v_tok_emb[0];
+        const float expected_lr = opt.lr;
+        const int64_t expected_step = opt.step;
+        const uint64_t expected_rng = rng.state;
+        const bool rejected = !checkpoint_load("minima_truncated.model",
+            &model, &opt, &rng, tokenizer_hash);
+        const bool unchanged = model.tok_emb[0] == expected_weight &&
+            opt.m_tok_emb[0] == expected_moment &&
+            opt.v_tok_emb[0] == expected_variance &&
+            opt.lr == expected_lr && opt.step == expected_step &&
+            rng.state == expected_rng;
+
+        model.tok_emb[0] = guard_weight;
+        opt.m_tok_emb[0] = guard_moment;
+        opt.v_tok_emb[0] = guard_variance;
+        opt.lr = guard_lr;
+        opt.step = guard_step;
+        rng.state = guard_rng;
+        remove("minima_truncated.model");
+        if (!rejected || !unchanged)
+            die("checkpoint failed-load atomicity regression check failed");
+    }
+    printf("Checkpoint failed-load atomicity: PASS (destination unchanged)\n");
 
     // ------------------------------------------------------------------
     // 9. KV-cache parity and deterministic multi-prompt generation
