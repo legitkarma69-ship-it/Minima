@@ -31,6 +31,7 @@ static HWND g_lr, g_warmup, g_log_interval, g_validation_batches;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
+static HWND g_lr_schedule, g_tokenizer_sampling;
 static wchar_t g_metrics_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
@@ -204,6 +205,17 @@ static BOOL append_option(wchar_t* command, size_t capacity,
     return TRUE;
 }
 
+static BOOL append_combo_option(wchar_t* command,size_t capacity,const wchar_t* name,HWND combo) {
+    int index=(int)SendMessageW(combo,CB_GETCURSEL,0,0);
+    if(index<0)return FALSE;
+    wchar_t value[64];SendMessageW(combo,CB_GETLBTEXT,index,(LPARAM)value);
+    size_t used=wcslen(command),nl=wcslen(name),vl=wcslen(value);
+    if(used+nl+vl+3>=capacity)return FALSE;
+    command[used++]=L' ';wcscpy_s(command+used,capacity-used,name);used+=nl;
+    command[used++]=L' ';wcscpy_s(command+used,capacity-used,value);
+    return TRUE;
+}
+
 static void start_engine(BOOL chat_mode) {
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
 
@@ -220,7 +232,9 @@ static void start_engine(BOOL chat_mode) {
            !append_option(command,_countof(command),L"--layers",g_layers) ||
            !append_option(command,_countof(command),L"--heads",g_heads) ||
            !append_option(command,_countof(command),L"--ffn-dim",g_ffn) ||
-           !append_option(command,_countof(command),L"--max-seq",g_max_seq)){
+           !append_option(command,_countof(command),L"--max-seq",g_max_seq) ||
+           !append_combo_option(command,_countof(command),L"--lr-schedule",g_lr_schedule) ||
+           !append_combo_option(command,_countof(command),L"--tokenizer-sampling",g_tokenizer_sampling)){
             MessageBoxW(g_window,L"Check the generation settings.",L"ProjectMinima",MB_ICONWARNING);return;
         }
     } else {
@@ -413,6 +427,12 @@ static void create_controls(HWND hwnd) {
     g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,275,45,23,hwnd,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,309,75,18,hwnd,NULL,NULL,NULL);
     g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,306,48,23,hwnd,NULL,NULL,NULL);
+    CreateWindowW(L"STATIC",L"LR schedule",WS_CHILD|WS_VISIBLE,155,309,68,18,hwnd,NULL,NULL,NULL);
+    g_lr_schedule=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,225,306,95,100,hwnd,NULL,NULL,NULL);
+    SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"cosine");SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"constant");SendMessageW(g_lr_schedule,CB_SETCURSEL,0,0);
+    CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,309,95,18,hwnd,NULL,NULL,NULL);
+    g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,306,95,100,hwnd,NULL,NULL,NULL);
+    SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"spread");SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"prefix");SendMessageW(g_tokenizer_sampling,CB_SETCURSEL,0,0);
 
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
@@ -433,7 +453,7 @@ static void create_controls(HWND hwnd) {
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
-        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq };
+        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
 }
