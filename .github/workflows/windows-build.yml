@@ -26,6 +26,14 @@ jobs:
           & ".\x64\Release\Minima.exe" --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test GUI protocol line endings
+        shell: pwsh
+        run: |
+          cl /nologo /W4 /TC tests\\gui_protocol_test.c /Fe:gui_protocol_test.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ".\\gui_protocol_test.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Prepare deterministic smoke-test corpus
         shell: pwsh
         run: |
