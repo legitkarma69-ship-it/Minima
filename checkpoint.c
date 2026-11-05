@@ -82,7 +82,12 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
-        !model->rms_final_scale || opt->n_params != model_parameter_count(model))
+        !model->rms_final_scale || opt->n_params != model_parameter_count(model) ||
+        !isfinite(opt->schedule_base_lr) || opt->schedule_base_lr <= 0.0f ||
+        opt->schedule_total_steps < 1 || opt->step < 0 ||
+        opt->step > opt->schedule_total_steps || opt->schedule_warmup_steps < 0 ||
+        opt->schedule_warmup_steps >= opt->schedule_total_steps ||
+        (opt->schedule_type != 0 && opt->schedule_type != 1))
         return false;
 
     char temp_path[1024];
