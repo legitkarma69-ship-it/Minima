@@ -140,4 +140,10 @@ void model_summary(const Model* m) {
         model_param_count(m),
         model_param_count(m) / 1e6);
     printf("  weight mem : %.2f MB\n", m->weight_bytes / (1024.0 * 1024.0));
+    printf("  AdamW state: %.2f MB (two moment buffers)\n",
+        (2.0 * (double)m->weight_bytes) / (1024.0 * 1024.0));
+    printf("  gradients  : %.2f MB (one parameter-sized buffer)\n",
+        (double)m->weight_bytes / (1024.0 * 1024.0));
+    printf("  train core : %.2f MB (weights + AdamW + gradients; excludes activations)\n",
+        (4.0 * (double)m->weight_bytes) / (1024.0 * 1024.0));
 }
