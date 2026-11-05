@@ -26,6 +26,35 @@ jobs:
           & ".\x64\Release\Minima.exe" --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Prepare deterministic smoke-test corpus
+        shell: pwsh
+        run: |
+          $builder = [System.Text.StringBuilder]::new()
+          $line = "The quick brown fox jumps over the lazy dog. A small language model learns patterns from repeated text. Training tests should exercise validation, checkpoints, and generation."
+          for ($i = 0; $i -lt 256; $i++) {
+            [void]$builder.AppendLine("$line Example record number $i.")
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "minima_ci_corpus.txt"),
+            $builder.ToString(),
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Run fresh-training smoke test
+        shell: pwsh
+        run: |
+          & ".\x64\Release\Minima.exe" --steps 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
+            throw "Fresh-training smoke test did not produce a checkpoint and tokenizer."
+          }
+
+      - name: Verify checkpoint resume diagnostics
+        shell: pwsh
+        run: |
+          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --vocab-size 300 --batch-size 1 --sequence-length 8 --max-seq 32 --validation-batches 1 --metrics ".\minima_ci_resume_metrics.csv" ".\minima_ci_corpus.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Publish Windows executables
         uses: actions/upload-artifact@v4
         with:
