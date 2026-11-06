@@ -203,7 +203,7 @@ static void layout_controls(HWND hwnd) {
     if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,pad,chat_y,inner-scale_px(340),scale_px(30),TRUE);
+    if(g_chat_input)MoveWindow(g_chat_input,pad,chat_y,inner-scale_px(340),scale_px(180),TRUE);
     if(g_chat_test)MoveWindow(g_chat_test,width-pad-scale_px(326),chat_y,scale_px(100),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
