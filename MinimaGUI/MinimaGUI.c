@@ -59,7 +59,7 @@ static BOOL g_fresh_used_saved_tokenizer;
 static wchar_t g_prebuilt_vocab[64],g_prebuilt_tokenizer_bytes[64],g_prebuilt_sampling[64];
 static wchar_t g_engine_path[MAX_PATH];
 static HWND g_tooltip;
-static HWND g_group_corpus, g_group_model, g_group_training;
+static HWND g_group_corpus, g_group_model, g_group_training, g_output_label;
 static HWND g_group_advanced, g_group_monitor, g_group_output;
 static BOOL g_advanced_expanded = TRUE;
 static UINT g_dpi = 96;
@@ -200,6 +200,7 @@ static void layout_controls(HWND hwnd) {
     MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(586),actions_y,scale_px(112),action_h,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
     if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
+    if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
     if(g_chat_input)MoveWindow(g_chat_input,pad,chat_y,inner-scale_px(340),scale_px(30),TRUE);
@@ -1283,7 +1284,7 @@ static void create_controls(HWND hwnd) {
     g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL);
 
     g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
+    g_output_label=CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
     g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
         12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
