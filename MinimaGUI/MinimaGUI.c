@@ -73,6 +73,18 @@ static HWND g_advanced_controls[32];
 static int g_advanced_control_count;
 static float g_graph_train[512], g_graph_valid[512];
 static int g_graph_count;
+typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
+static GuiInitialRect g_initial_rects[160];
+static int g_initial_rect_count;
+static BOOL CALLBACK capture_initial_rect(HWND child, LPARAM unused) {
+    (void)unused;
+    if (g_initial_rect_count >= (int)_countof(g_initial_rects)) return FALSE;
+    RECT r; if (!GetWindowRect(child, &r)) return TRUE;
+    MapWindowPoints(NULL, g_window, (POINT*)&r, 2);
+    g_initial_rects[g_initial_rect_count].hwnd=child;
+    g_initial_rects[g_initial_rect_count].rect=r;
+    ++g_initial_rect_count; return TRUE;
+}
 
 static void register_advanced_control(HWND control) {
     if (control && g_advanced_control_count < (int)_countof(g_advanced_controls))
@@ -135,37 +147,65 @@ static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
 }
 
 static void layout_controls(HWND hwnd) {
-    RECT client;
-    GetClientRect(hwnd, &client);
-    const int width = client.right;
-    const int height = client.bottom;
-    const int pad = scale_px(12);
-    const int group_left = scale_px(8);
+    RECT client; GetClientRect(hwnd,&client);
+    const int width=client.right, height=client.bottom;
+    const int pad=scale_px(12), gap=scale_px(12), inner=width-2*pad;
+    if(inner<=0)return;
+    const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(8);
+    const int bottom_h=scale_px(82), action_h=scale_px(38);
+    const int output_top=work_top+scale_px(368);
+    const int output_bottom=height-bottom_h-scale_px(8);
+    const int output_h=output_bottom-output_top;
+    const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
+    const int advanced_y=work_top+scale_px(106);
+    if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(6),width-scale_px(16),corpus_h,TRUE);
+    if(g_corpus)MoveWindow(g_corpus,pad,scale_px(30),inner,scale_px(58),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(94),scale_px(104),scale_px(26),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(94),scale_px(136),scale_px(26),TRUE);
+    if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
+    if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
+    if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
+    if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(306),TRUE);
+    if(g_graph)MoveWindow(g_graph,right_x+scale_px(8),work_top+scale_px(22),right_w-scale_px(16),scale_px(272),TRUE);
 
-    if (g_group_corpus) MoveWindow(g_group_corpus, group_left, scale_px(6), width - scale_px(16), scale_px(168), TRUE);
-    if (g_group_model) MoveWindow(g_group_model, group_left, scale_px(168), scale_px(585), scale_px(38), TRUE);
-    if (g_group_training) MoveWindow(g_group_training, group_left, scale_px(202), scale_px(585), scale_px(38), TRUE);
-    if (g_group_advanced) MoveWindow(g_group_advanced, group_left, scale_px(236), scale_px(220), scale_px(24), TRUE);
-    if (g_group_monitor) MoveWindow(g_group_monitor, scale_px(590), scale_px(150), width - scale_px(598), scale_px(205), TRUE);
-    const int actions_y = scale_px(g_advanced_expanded ? 360 : 260);
-    const int output_top = scale_px(g_advanced_expanded ? 395 : 295);
-    if (g_group_output) MoveWindow(g_group_output, group_left, output_top, width - scale_px(16), height - output_top - scale_px(5), TRUE);
-
-    if (g_corpus) MoveWindow(g_corpus, pad, scale_px(34), width - 2 * pad, scale_px(105), TRUE);
-    if (g_graph) MoveWindow(g_graph, scale_px(600), scale_px(170), width - scale_px(624), scale_px(175), TRUE);
-    if (g_log) MoveWindow(g_log, pad, output_top + scale_px(27), width - 2 * pad,
-        height - output_top - scale_px(108), TRUE);
-    if (g_chat_input) MoveWindow(g_chat_input, pad, height - scale_px(75), width - scale_px(355), scale_px(180), TRUE);
-    if (g_chat_test) MoveWindow(g_chat_test, width - scale_px(340), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_SEND), width - scale_px(230), height - scale_px(75), scale_px(110), scale_px(26), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_STOP), width - scale_px(110), height - scale_px(75), scale_px(100), scale_px(26), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_START), scale_px(12), actions_y, scale_px(120), scale_px(30), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_STOP), scale_px(142), actions_y, scale_px(105), scale_px(30), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_CHAT_START), scale_px(257), actions_y, scale_px(90), scale_px(30), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_SAVE_NOW), scale_px(355), actions_y, scale_px(105), scale_px(30), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), scale_px(470), actions_y, scale_px(135), scale_px(30), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), scale_px(612), actions_y, scale_px(115), scale_px(30), TRUE);
-    MoveWindow(GetDlgItem(hwnd, IDC_STATUS), scale_px(738), actions_y + scale_px(6), scale_px(110), scale_px(20), TRUE);
+    const float xs=(float)(left_w-scale_px(20))/(float)scale_px(670);
+    for(int i=0;i<g_initial_rect_count;i++){
+        HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
+        if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
+           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_corpus||
+           child==g_graph||child==g_log||child==g_chat_input||child==g_chat_test)continue;
+        int id=GetDlgCtrlID(child);
+        if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
+           id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
+           id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG)continue;
+        int oy=r.top;
+        if(oy>=scale_px(168)&&oy<scale_px(250)){
+            int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
+            int y=work_top+scale_px(19)+(oy-scale_px(168));
+            int w=(int)((r.right-r.left)*xs);
+            MoveWindow(child,x,y,w>scale_px(20)?w:scale_px(20),r.bottom-r.top,TRUE);
+        }else if(oy>=scale_px(258)&&oy<scale_px(355)){
+            int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
+            int y=advanced_y+scale_px(28)+(oy-scale_px(258));
+            int w=(int)((r.right-r.left)*xs);
+            MoveWindow(child,x,y,w>scale_px(20)?w:scale_px(20),r.bottom-r.top,TRUE);
+        }
+    }
+    const int actions_y=work_top+scale_px(320);
+    MoveWindow(GetDlgItem(hwnd,IDC_START),pad,actions_y,scale_px(116),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_STOP),pad+scale_px(122),actions_y,scale_px(100),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad+scale_px(228),actions_y,scale_px(96),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_SAVE_NOW),pad+scale_px(330),actions_y,scale_px(112),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),pad+scale_px(448),actions_y,scale_px(132),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(586),actions_y,scale_px(112),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
+    if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
+    if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
+    const int chat_y=height-bottom_h+scale_px(4);
+    if(g_chat_input)MoveWindow(g_chat_input,pad,chat_y,inner-scale_px(340),scale_px(30),TRUE);
+    if(g_chat_test)MoveWindow(g_chat_test,width-pad-scale_px(326),chat_y,scale_px(100),scale_px(28),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
 }
 
 static void add_tooltip(HWND target, const wchar_t* text) {
@@ -1319,6 +1359,8 @@ static void create_controls(HWND hwnd) {
         SetWindowLongPtrW(g_tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
     }
 
+    g_initial_rect_count=0;
+    EnumChildWindows(hwnd,capture_initial_rect,0);
     load_settings();
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
