@@ -1337,6 +1337,8 @@ static void create_controls(HWND hwnd) {
 
     DpiScaleContext initial_scale = { hwnd, 96, g_dpi };
     EnumChildWindows(hwnd, scale_child_for_dpi, (LPARAM)&initial_scale);
+    g_initial_rect_count=0;
+    EnumChildWindows(hwnd,capture_initial_rect,0);
     layout_controls(hwnd);
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
@@ -1359,8 +1361,6 @@ static void create_controls(HWND hwnd) {
         SetWindowLongPtrW(g_tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
     }
 
-    g_initial_rect_count=0;
-    EnumChildWindows(hwnd,capture_initial_rect,0);
     load_settings();
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
