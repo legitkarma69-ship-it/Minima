@@ -64,7 +64,7 @@ static wchar_t g_engine_path[MAX_PATH];
 static HWND g_tooltip;
 static HWND g_group_corpus, g_group_model, g_group_training, g_output_label;
 static HWND g_group_advanced, g_group_monitor, g_group_output;
-static BOOL g_advanced_expanded = TRUE;
+static BOOL g_advanced_expanded = FALSE;
 static UINT g_dpi = 96;
 static HFONT g_ui_font;
 static HPEN g_graph_grid_pen, g_graph_train_pen, g_graph_valid_pen;
@@ -158,7 +158,7 @@ static BOOL is_advanced_page_control(HWND child) {
 
 static BOOL is_chat_page_control(HWND child) {
     return child == g_group_output || child == g_output_label || child == g_log ||
-        child == g_chat_input || child == g_chat_test ||
+        child == g_chat_input ||
         child == GetDlgItem(g_window, IDC_CHAT_START) ||
         child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
         child == GetDlgItem(g_window, IDC_CHAT_STOP);
@@ -190,7 +190,7 @@ static void layout_controls(HWND hwnd) {
     if(inner<=0)return;
     const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
     const int bottom_h=scale_px(82), action_h=scale_px(38);
-    const int output_top=work_top+scale_px(368);
+    const int output_top=(g_active_page==2?scale_px(46):work_top+scale_px(368));
     const int output_bottom=height-bottom_h-scale_px(8);
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
@@ -241,7 +241,8 @@ static void layout_controls(HWND hwnd) {
     if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,pad,chat_y,inner-scale_px(340),scale_px(180),TRUE);
+    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(112):pad,chat_y,inner-scale_px(340)-scale_px(112),scale_px(28),TRUE);
+    if(g_active_page==2)MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
     if(g_chat_test)MoveWindow(g_chat_test,width-pad-scale_px(326),chat_y,scale_px(100),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
@@ -1166,7 +1167,7 @@ static void load_settings(void) {
     load_combo_setting(L"lr_schedule",g_lr_schedule,L"cosine");
     load_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling,L"spread");
     const BOOL advanced_expanded = GetPrivateProfileIntW(
-        L"UI", L"advanced_expanded", 1, g_settings_path) ? TRUE : FALSE;
+        L"UI", L"advanced_expanded", 0, g_settings_path) ? TRUE : FALSE;
     set_advanced_expanded(g_window, advanced_expanded);
     SendMessageW(g_resume,BM_SETCHECK,
         GetPrivateProfileIntW(L"Training",L"resume",0,g_settings_path)?BST_CHECKED:BST_UNCHECKED,0);
@@ -1411,6 +1412,7 @@ static void create_controls(HWND hwnd) {
     }
 
     load_settings();
+    select_main_page(hwnd, 0);
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
     if(history_slash)wcscpy_s(history_slash+1,_countof(history_path)-(size_t)(history_slash+1-history_path),L"minima_chat.txt");
