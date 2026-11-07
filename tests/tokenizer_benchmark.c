@@ -125,6 +125,7 @@ int main(int argc, char** argv) {
     /* Tokenizer owns large fixed-size vocabulary/merge arrays. Keep it off the
        default Windows thread stack. The arena is reused between implementations. */
     static Tokenizer tokenizer;
+    printf("Corpus: %s\\n", corpus_path);
     int result = run_benchmark_case("reference", tokenizer_train_reference,
         &tokenizer, &arena, sample, sample_len, vocab_size,
         encode_repeats, encoded);
