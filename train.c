@@ -2,7 +2,6 @@
 
 #include "checkpoint.h"
 #include "forward.h"
-#include "train_validation.h"
 
 #include <math.h>
 #include <stdio.h>
