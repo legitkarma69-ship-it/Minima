@@ -126,6 +126,13 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
     if ((size_t)options.validation_batches >
         SIZE_MAX / (size_t)options.batch_size)
         return validation_fail(reason_out, "validation sample count overflows size_t");
+    const size_t validation_sample_count =
+        (size_t)options.validation_batches * (size_t)options.batch_size;
+    const size_t validation_span =
+        (size_t)validation_tokens - (size_t)options.sequence_length - 1;
+    if (validation_sample_count > 1 &&
+        validation_span > SIZE_MAX / (validation_sample_count - 1))
+        return validation_fail(reason_out, "validation window indexing overflows size_t");
 
     return true;
 }
