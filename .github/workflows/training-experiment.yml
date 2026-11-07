@@ -65,7 +65,7 @@ jobs:
 
           if ($steps -lt 1 -or $steps -gt 20000) { throw "steps must be between 1 and 20000." }
           if ($total -lt $steps -or $total -gt 20000) { throw "total_steps must be at least steps and no more than 20000." }
-          if ($warmup -lt 0 -or $warmup -ge $total) { throw "warmup_steps must be non-negative and less than total_steps." }
+          if ($warmup -lt 1 -or $warmup -ge $total) { throw "warmup_steps must be non-negative and less than total_steps." }
           if ($batch -lt 1 -or $batch -gt 16) { throw "batch_size must be between 1 and 16." }
           if ($sequence -lt 8 -or $sequence -gt 512) { throw "sequence_length must be between 8 and 512." }
 
@@ -82,6 +82,9 @@ jobs:
           }
           if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
             $corpora += ".\data\chatlogs.txt"
+          }
+          if ((Test-Path ".\data\britannica.txt") -and (Get-Item ".\data\britannica.txt").Length -gt 0) {
+            $corpora += ".\data\britannica.txt"
           }
           if ($corpora.Count -eq 0) { throw "No non-empty checked-in corpus files were found." }
 
@@ -106,6 +109,9 @@ jobs:
           if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
             $corpora += ".\data\chatlogs.txt"
           }
+          if ((Test-Path ".\data\britannica.txt") -and (Get-Item ".\data\britannica.txt").Length -gt 0) {
+            $corpora += ".\data\britannica.txt"
+          }
 
           & ".\x64\Release\Minima.exe" --retrain-tokenizer-only --vocab-size 2048 --tokenizer-sample-bytes 262144 --tokenizer-sampling spread --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --dim 64 --layers 2 --heads 2 --ffn-dim 128 --max-seq 512 $corpora
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -127,6 +133,9 @@ jobs:
           if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
             $corpora += ".\data\chatlogs.txt"
           }
+          if ((Test-Path ".\data\britannica.txt") -and (Get-Item ".\data\britannica.txt").Length -gt 0) {
+            $corpora += ".\data\britannica.txt"
+          }
 
           & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps ([int]$env:STEPS) --total-steps ([int]$env:TOTAL_STEPS) --warmup ([int]$env:WARMUP_STEPS) --log-interval 100 --validation-batches 16 --validation-interval 100 --checkpoint-interval 100 --seed 1234 --vocab-size 2048 --dim 64 --layers 2 --heads 2 --ffn-dim 128 --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --max-seq 512 --metrics ".\minima_training_metrics.csv" $corpora
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -146,9 +155,26 @@ jobs:
           if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
             $corpora += ".\data\chatlogs.txt"
           }
+          if ((Test-Path ".\data\britannica.txt") -and (Get-Item ".\data\britannica.txt").Length -gt 0) {
+            $corpora += ".\data\britannica.txt"
+          }
 
-          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --validation-batches 16 --vocab-size 2048 --dim 64 --layers 2 --heads 2 --ffn-dim 128 --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --max-seq 512 --metrics ".\minima_diagnostics_metrics.csv" $corpora
+          $output = & ".\x64\Release\Minima.exe" --resume --diagnostics-only --validation-batches 16 --vocab-size 2048 --dim 64 --layers 2 --heads 2 --ffn-dim 128 --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --max-seq 512 --metrics ".\minima_diagnostics_metrics.csv" $corpora 2>&1
+          $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "\`n"
+          if ($text -notmatch "Model-quality diagnostics complete") {
+            throw "Model-quality diagnostics did not complete."
+          }
+          if (@(Import-Csv ".\minima_token_frequency.csv").Count -ne 2048) {
+            throw "Tokenizer frequency report should contain all 2,048 vocabulary IDs."
+          }
+          if (@(Import-Csv ".\minima_frequency_loss.csv").Count -ne 10) {
+            throw "Frequency-loss report should contain 10 split/bucket rows."
+          }
+          if (@(Import-Csv ".\minima_generation_diagnostics.csv").Count -ne 40) {
+            throw "Generation report should contain 8 prompts x 5 deterministic modes."
+          }
 
       - name: Publish training outputs
         uses: actions/upload-artifact@v4
