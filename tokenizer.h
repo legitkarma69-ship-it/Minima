@@ -26,9 +26,10 @@ typedef struct {
     // merge table: ordered by creation (lower index = higher priority)
     Merge    merges[TOK_MAX_MERGES];
 
-    // fast lookup: pair (left,right) → new token id  (or 0 if none)
-    // we use a simple open-address hash for the training phase only
-    // at runtime we just walk the merge list (tiny, cache-friendly)
+    // Derived pair -> merge-rank hash index, rebuilt after training/load.
+    // Owned by the same arena as token strings; excluded from BPE1 persistence.
+    void* merge_rank_index;
+    uint32_t merge_rank_capacity;
 } Tokenizer;
 
 // ---------- Training ----------
@@ -53,6 +54,10 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
 // or -1 for invalid arguments / insufficient output capacity.
 // `out` must have room for at least `text_len` tokens (worst case).
 int  tokenizer_encode(const Tokenizer* tok,
+    const uint8_t* text, size_t text_len,
+    uint16_t* out, int out_cap);
+/* Reference multipass encoder retained for exact regression comparisons. */
+int tokenizer_encode_reference(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
     uint16_t* out, int out_cap);
 
