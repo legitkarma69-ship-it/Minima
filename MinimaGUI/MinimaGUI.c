@@ -151,7 +151,6 @@ static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
 
 static BOOL is_advanced_page_control(HWND child) {
     if (child == g_group_advanced) return TRUE;
-    if (!g_advanced_expanded) return FALSE;
     if (child == g_chat_test) return TRUE;
     for (int i = 0; i < g_advanced_control_count; ++i)
         if (g_advanced_controls[i] == child) return TRUE;
@@ -173,7 +172,8 @@ static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
     if (page == 0)
         visible = !is_advanced_page_control(child) && !is_chat_page_control(child);
     else if (page == 1)
-        visible = is_advanced_page_control(child);
+        visible = is_advanced_page_control(child) &&
+            (child == g_group_advanced || g_advanced_expanded);
     else
         visible = is_chat_page_control(child);
     ShowWindow(child, visible ? SW_SHOWNA : SW_HIDE);
