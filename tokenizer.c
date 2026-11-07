@@ -970,8 +970,18 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
     }
 
     uint32_t heap_count = 0;
-    for (uint32_t i = 0; i < node_count; i++)
-        encode_heap_refresh(tok, nodes, heap, &heap_count, i);
+    for (uint32_t i = 0; i < node_count; i++) {
+        const uint16_t rank = tokenizer_find_merge_rank(tok,
+            nodes[i].id, i + 1 < node_count ? nodes[i + 1].id : 0);
+        nodes[i].rank = rank;
+        if (rank != ENCODE_NO_RANK) {
+            heap[heap_count] = i;
+            nodes[i].heap_pos_plus1 = ++heap_count;
+        }
+    }
+    /* Bottom-up heap construction is linear, unlike repeated insertion. */
+    for (uint32_t i = heap_count / 2; i > 0; i--)
+        encode_heap_down(nodes, heap, heap_count, i - 1);
 
     while (heap_count > 0) {
         const uint32_t left_index = heap[0];
@@ -998,8 +1008,6 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
         const uint32_t prev_index = nodes[left_index].prev;
         const uint32_t next_index = nodes[right_index].next;
 
-        if (prev_index != ENCODE_NONE)
-            encode_heap_remove(nodes, heap, &heap_count, prev_index);
         encode_heap_remove(nodes, heap, &heap_count, right_index);
 
         nodes[left_index].id = new_id;
@@ -1041,8 +1049,8 @@ int tokenizer_encode(const Tokenizer* tok,
     if (text_len == 0) return 0;
     if (!out || (size_t)out_cap < text_len) return -1;
 
-    /* Keep short inputs on the low-overhead multipass path. */
-    if (text_len <= 100 || tok->n_merges <= 0 ||
+    /* Keep sub-64-KiB inputs on the lower-overhead multipass path. */
+    if (text_len < 64u * 1024u || tok->n_merges <= 0 ||
         !tok->merge_rank_index || tok->merge_rank_capacity == 0)
         return tokenizer_encode_reference(tok, text, text_len, out, out_cap);
 
