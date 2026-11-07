@@ -172,6 +172,30 @@ jobs:
           if (([regex]::Matches($text, "CHAT_READY")).Count -lt 2) {
             throw "The chat protocol did not return to ready state after the test generation."
           }
+      - name: Verify role-tagged conversational chat format
+        shell: pwsh
+        run: |
+          $chatInput = "Hello there.`r`nWhat is your name?`r`n/quit`r`n"
+          [System.IO.File]::WriteAllText(
+            "minima_role_chat_input.txt",
+            $chatInput,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          $command = 'type minima_role_chat_input.txt | x64\Release\Minima.exe --chat --resume --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --max-seq 72 --max-new-tokens 8'
+          $output = & cmd.exe /d /s /c $command 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+          Remove-Item "minima_role_chat_input.txt" -ErrorAction SilentlyContinue
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $text = $output -join "`n"
+          if ($text -notmatch "CHAT_FORMAT: Human:/Assistant:") {
+            throw "Chat engine did not announce the role-tagged conversation format."
+          }
+          if (([regex]::Matches($text, "BOT:")).Count -ne 2) {
+            throw "Role-tagged chat did not produce two assistant turns."
+          }
+          if (([regex]::Matches($text, "CHAT_READY")).Count -lt 3) {
+            throw "Chat protocol did not return to ready state after both turns."
+          }
       - name: Publish Windows executables
         uses: actions/upload-artifact@v4
         with:

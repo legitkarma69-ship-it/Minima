@@ -5,16 +5,35 @@ Place UTF-8 plain-text material in these files:
 - `books.txt`: books, essays, stories, documentation, and other long-form text.
 - `chatlogs.txt`: conversation logs in plain text.
 
-Keep the two sources separate so they can be loaded, sampled, and weighted independently later.
+Keep the sources separate. This makes it possible to introduce source-aware sampling and weighting without mixing literature and dialogue into one manually maintained file.
 
-Use ordinary text. Separate documents with a blank line. For chat logs, a readable format such as:
+Use UTF-8 plain text. For conversational data, use exactly these speaker labels:
 
 ```text
-User: ...
-Assistant: ...
+Human: Hey there, bot.
+Assistant: Hello! How can I help you today?
+
+Human: What is a black hole?
+Assistant: A black hole is a region of space where gravity is so strong that nothing, not even light, can escape from inside its event horizon.
+
+Human: Does that mean it sucks in everything nearby?
+Assistant: No. From far away, its gravity behaves like the gravity of any other object with the same mass.
 ```
 
-is fine. UTF-8 files with or without a byte-order mark (BOM) are supported.
+Formatting rules for `chatlogs.txt`:
+
+- Use `Human:` for user turns and `Assistant:` for assistant turns. Keep spelling and capitalization consistent.
+- Put one speaker turn on each line. Keep the speaker label and message on the same line.
+- Separate conversations with one blank line.
+- Keep consecutive turns in the same conversation together, in their original order.
+- Prefer complete exchanges. Do not leave an unanswered final Human turn or an incomplete Assistant response.
+- Preserve natural wording, punctuation, and meaningful paragraph breaks. Avoid artificial spelling, excessive filler, and duplicated conversations.
+- Do not mix book chapters, metadata, source notes, or preference-ranking records into this file.
+- Do not add a `System:` role yet. The current conversational format supports Human and Assistant turns only.
+
+The interactive chat engine uses the same serialized structure at inference time: it supplies `Human: <message>\nAssistant:` and carries the generated assistant response into the next turn. Generation Lab intentionally remains a raw text-continuation test and does not add conversational role tags.
+
+UTF-8 files with or without a byte-order mark (BOM) are supported. LF and CRLF line endings are both accepted.
 
 ## Loading data
 
