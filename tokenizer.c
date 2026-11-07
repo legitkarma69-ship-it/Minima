@@ -1050,6 +1050,72 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
     return output_count;
 }
 
+/* Encode large inputs in bounded windows. Every token is at most
+   TOK_MAX_TOKEN_LEN bytes, so 63 bytes of lookahead are sufficient to make
+   the emitted prefix independent of the next window. A token crossing the
+   core boundary is emitted whole and advances the next window start. */
+#define TOKENIZER_ENCODE_CHUNK_BYTES (4u * 1024u * 1024u)
+
+static int tokenizer_encode_chunked(const Tokenizer* tok,
+    const uint8_t* text, size_t text_len, uint16_t* out, int out_cap) {
+    const size_t chunk_bytes = TOKENIZER_ENCODE_CHUNK_BYTES;
+    const size_t lookahead = TOK_MAX_TOKEN_LEN - 1u;
+    const size_t scratch_capacity = text_len < chunk_bytes + lookahead
+        ? text_len : chunk_bytes + lookahead;
+    if (scratch_capacity > SIZE_MAX / sizeof(uint16_t))
+        return -1;
+
+    uint16_t* scratch = (uint16_t*)malloc(
+        scratch_capacity * sizeof(uint16_t));
+    if (!scratch) return -1;
+
+    size_t input_offset = 0;
+    int output_count = 0;
+    while (input_offset < text_len) {
+        const size_t remaining = text_len - input_offset;
+        const size_t core_len = remaining < chunk_bytes
+            ? remaining : chunk_bytes;
+        const size_t window_len = core_len +
+            (remaining > core_len
+                ? (remaining - core_len < lookahead
+                    ? remaining - core_len : lookahead)
+                : 0u);
+
+        int encoded = tokenizer_encode_heap(tok, text + input_offset,
+            window_len, scratch);
+        if (encoded == -2)
+            encoded = tokenizer_encode_reference(tok, text + input_offset,
+                window_len, scratch, (int)scratch_capacity);
+        if (encoded < 0) {
+            free(scratch);
+            return -1;
+        }
+
+        size_t consumed_bytes = 0;
+        int token_index = 0;
+        while (consumed_bytes < core_len && token_index < encoded) {
+            const uint16_t id = scratch[token_index++];
+            if (id >= tok->vocab_size || tok->token_len[id] <= 0 ||
+                (size_t)tok->token_len[id] > window_len - consumed_bytes ||
+                output_count >= out_cap) {
+                free(scratch);
+                return -1;
+            }
+            out[output_count++] = id;
+            consumed_bytes += (size_t)tok->token_len[id];
+        }
+
+        if (consumed_bytes < core_len) {
+            free(scratch);
+            return -1;
+        }
+        input_offset += consumed_bytes;
+    }
+
+    free(scratch);
+    return output_count;
+}
+
 int tokenizer_encode(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
     uint16_t* out, int out_cap) {
@@ -1059,10 +1125,14 @@ int tokenizer_encode(const Tokenizer* tok,
     if (text_len == 0) return 0;
     if (!out || (size_t)out_cap < text_len) return -1;
 
-    /* Keep sub-64-KiB inputs on the lower-overhead multipass path. */
+    /* Keep short inputs on the lower-overhead multipass path. */
     if (text_len < 64u * 1024u || tok->n_merges <= 0 ||
         !tok->merge_rank_index || tok->merge_rank_capacity == 0)
         return tokenizer_encode_reference(tok, text, text_len, out, out_cap);
+
+    /* Bound temporary node/heap memory for corpora larger than one window. */
+    if (text_len > TOKENIZER_ENCODE_CHUNK_BYTES)
+        return tokenizer_encode_chunked(tok, text, text_len, out, out_cap);
 
     const int result = tokenizer_encode_heap(tok, text, text_len, out);
     return result == -2
