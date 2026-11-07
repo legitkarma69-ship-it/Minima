@@ -464,8 +464,7 @@ static bool bpe_reference_tie_winner(const BpePairState* states,
     const uint32_t* first_slot_by_node,
     const uint64_t* first_occurrence_bits, size_t bit_words,
     size_t reference_table_size, BpeReferenceSlot* table,
-    uint32_t* generation_out, uint32_t* winner_key_out,
-    size_t* states_processed_out) {
+    uint32_t* generation_out, uint32_t* winner_key_out) {
     uint32_t generation = *generation_out + 1;
     if (generation == 0) {
         memset(table, 0, reference_table_size * sizeof(*table));
@@ -475,7 +474,6 @@ static bool bpe_reference_tie_winner(const BpePairState* states,
     uint32_t best_count = 0;
     size_t best_slot = SIZE_MAX;
     uint32_t best_key = 0;
-    size_t states_processed = 0;
     for (size_t word_index = 0; word_index < bit_words; word_index++) {
         uint64_t bits = first_occurrence_bits[word_index];
         while (bits) {
@@ -484,8 +482,6 @@ static bool bpe_reference_tie_winner(const BpePairState* states,
             const uint32_t state_slot = first_slot_by_node[node_index];
             if (state_slot == BPE_NONE || states[state_slot].count == 0)
                 return false;
-            states_processed++;
-
             const uint32_t key = states[state_slot].key;
             const uint16_t left = (uint16_t)(key >> 16);
             const uint16_t right = (uint16_t)key;
@@ -522,7 +518,6 @@ static bool bpe_reference_tie_winner(const BpePairState* states,
 
     *generation_out = generation;
     *winner_key_out = best_key;
-    *states_processed_out = states_processed;
     return best_count > 0;
 }
 
@@ -563,7 +558,10 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
         goto fail;
 
     size_t state_table_size = 8;
-    const size_t required_state_slots = max_pair_states * 2;
+    /* Keep linear-probing occupancy at or below 75% at the proven upper
+       bound, rather than reserving twice the maximum state count. */
+    const size_t required_state_slots =
+        max_pair_states + max_pair_states / 3 + 1;
     while (state_table_size < required_state_slots) {
         if (state_table_size > SIZE_MAX / 2) goto fail;
         state_table_size *= 2;
@@ -623,8 +621,7 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
 
     uint32_t reference_generation = 0;
     size_t active_count = sample_len;
-    size_t tie_fallback_count = 0;
-    size_t tie_state_visits = 0;
+
     const int merges_needed = target_vocab - tok->vocab_size;
     for (int merge_index = 0; merge_index < merges_needed; merge_index++) {
         if (heap_count == 0) break;
@@ -637,15 +634,12 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
             (heap_count > 2 &&
                 states[heap[2]].count == states[best_slot].count);
         if (tied_maximum) {
-            tie_fallback_count++;
             uint32_t winner_key = 0;
-            size_t states_processed = 0;
             if (!bpe_reference_tie_winner(states, first_slot_by_node,
                     first_occurrence_bits, first_occurrence_words,
                     reference_table_size, reference_table,
-                    &reference_generation, &winner_key, &states_processed))
+                    &reference_generation, &winner_key))
                 goto fail;
-            tie_state_visits += states_processed;
             const uint16_t winner_left = (uint16_t)(winner_key >> 16);
             const uint16_t winner_right = (uint16_t)winner_key;
             best_slot = bpe_pair_state_find(states, state_table_size,
@@ -729,10 +723,6 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
                 merge_index + 1, merges_needed, active_count);
     }
 
-    printf("BPE incremental finished. vocab = %d  merges = %d\n",
-        tok->vocab_size, tok->n_merges);
-    printf("BPE tie fallback scans = %zu  pair states examined = %zu\n",
-        tie_fallback_count, tie_state_visits);
     return true;
 
 fail:
