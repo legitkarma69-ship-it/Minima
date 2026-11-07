@@ -90,6 +90,11 @@ jobs:
           $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC /I. tests\tokenizer_benchmark.c tokenizer.c arena.c util.c /Fe:tokenizer_benchmark.exe && tokenizer_benchmark.exe .\minima_ci_corpus.txt 32768 512 2'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Measure a deterministic slice of the checked-in prose corpus as well
+          # as the generated smoke corpus above, so future comparisons use real data.
+          $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 65536 512 2'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test tokenizer-only rebuild
         shell: pwsh
