@@ -123,4 +123,17 @@ Correctness gates:
 
 ## Source snapshots reviewed
 
-The design above is based on the source files linked in the three sections. Upstream implementations evolve; record the commit SHAs used during implementation review in the pull request notes if exact reproducibility is required.
+The design above is based on the source files linked in the three sections. Upstream implementations evolve; the exact revisions reviewed are recorded below.
+
+### Reviewed source revisions
+
+The source files were fetched at these Git object revisions during this review:
+
+- tiktoken educational encoder: 317e77560c2b95c2c8a7b3d0d170b2af6de239c9
+- tiktoken Rust core: ea54eac8c54fe1d9655d9183dbdd161d90a748c8
+- Hugging Face BPE trainer: 97a05e64a9d86eeb346cd4a8d85d7d8eea0d84ca
+- Hugging Face BPE word representation: 2ae19dbbd459cb6db3c59a418069686beaefdc40
+- Hugging Face BPE inference model: 5fa02b766b39dd747a4ed15130d9fb4f63d44163
+- SentencePiece BPE trainer: bb0e252c1efd34a039eb80a5b8e3d8711efc4b22
+- SentencePiece BPE inference model: bedc1ff93242a6210a662c62f7cb03d2e037549c
+
