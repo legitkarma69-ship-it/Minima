@@ -38,6 +38,7 @@
 #define IDC_ADVANCED_TOGGLE 1017
 #define IDC_CHAT_TEST    1018
 #define IDC_MAIN_TABS    1019
+#define IDC_BASIC_DEFAULTS 1020
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
@@ -203,6 +204,7 @@ static void layout_controls(HWND hwnd) {
     if(g_corpus)MoveWindow(g_corpus,pad,scale_px(64),inner,scale_px(58),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(128),scale_px(104),scale_px(26),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(128),scale_px(136),scale_px(26),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_BASIC_DEFAULTS),pad+scale_px(256),scale_px(128),scale_px(132),scale_px(26),TRUE);
     if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
     if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
@@ -216,7 +218,7 @@ static void layout_controls(HWND hwnd) {
            child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
            child==g_graph||child==g_log||child==g_chat_input||child==g_chat_test)continue;
         int id=GetDlgCtrlID(child);
-        if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
+        if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
            id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG)continue;
         int oy=r.top;
@@ -304,6 +306,7 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
     EnableWindow(GetDlgItem(g_window,IDC_REBUILD_TOKENIZER),!running);
     EnableWindow(GetDlgItem(g_window,IDC_AUTO_SETTINGS),!running);
+    EnableWindow(GetDlgItem(g_window,IDC_BASIC_DEFAULTS),!running);
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
@@ -941,6 +944,7 @@ static void create_controls(HWND hwnd) {
         12, 34, 520, 105, hwnd, (HMENU)IDC_CORPUS, NULL, NULL);
     CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, hwnd, (HMENU)IDC_ADD, NULL, NULL);
     CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, hwnd, (HMENU)IDC_REMOVE, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"Basic defaults", WS_CHILD | WS_VISIBLE, 260, 146, 132, 26, hwnd, (HMENU)IDC_BASIC_DEFAULTS, NULL, NULL);
 
     CreateWindowW(L"STATIC",L"Model: vocab",WS_CHILD|WS_VISIBLE,12,176,78,18,hwnd,NULL,NULL,NULL);
     g_vocab=CreateWindowW(L"EDIT",L"2048",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,92,173,55,23,hwnd,NULL,NULL,NULL);
@@ -1056,6 +1060,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_tokenizer_sampling, L"Spread samples across the corpus; prefix samples from the beginning.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
+        add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
         add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
         add_tooltip(g_chat_input, L"Choose a sample prompt from the dropdown or type your own prompt.");
         add_tooltip(g_chat_test, L"Run one isolated generation with the current sampling settings. It does not change the active chat defaults or model checkpoint.");
@@ -1071,6 +1076,7 @@ static void create_controls(HWND hwnd) {
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
         g_corpus, GetDlgItem(hwnd,IDC_ADD), GetDlgItem(hwnd,IDC_REMOVE),
+        GetDlgItem(hwnd,IDC_BASIC_DEFAULTS),
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_steps,g_resume,
         g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
@@ -1178,6 +1184,14 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDC_CHAT_START: start_engine(TRUE,FALSE); return 0;
         case IDC_REBUILD_TOKENIZER: rebuild_tokenizer(); return 0;
         case IDC_AUTO_SETTINGS: apply_auto_settings(); return 0;
+        case IDC_BASIC_DEFAULTS:
+            if (!InterlockedCompareExchange(&g_running,0,0) &&
+                MessageBoxW(hwnd,L"Restore all model, training, tokenizer, and generation settings to their basic defaults? The selected corpus files will be kept.",
+                    L"Basic defaults",MB_YESNO|MB_ICONQUESTION)==IDYES) {
+                minima_settings_reset_defaults(&g_settings_context);
+                append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\\r\\n");
+            }
+            return 0;
         case IDC_ADVANCED_TOGGLE:
             set_advanced_expanded(hwnd,
                 SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);

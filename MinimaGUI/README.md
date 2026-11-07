@@ -18,6 +18,7 @@ The engine working directory is the executable directory. Keep the `data` folder
 
 - Add/remove multiple corpus files.
 - Set additional optimizer steps and choose whether to resume.
+- Restore the standard model, training, tokenizer, and generation settings with **Basic defaults**; selected corpus files are preserved.
 - Configure vocabulary size, embedding dimension, layers, attention heads, FFN dimension, and model context length.
 - Configure batch size and training sequence length.
 - Configure learning rate, warmup, and cosine or constant learning-rate schedule.
