@@ -21,7 +21,7 @@ int main(void) {
     const char* a = "corpus_sample_a.tmp";
     const char* b = "corpus_sample_b.tmp";
     const char* c = "corpus_sample_c.tmp";
-    char text_a[80], text_b[20], text_c[200];
+    char text_a[80], text_b[5], text_c[200];
     memset(text_a, 'A', sizeof(text_a));
     memset(text_b, 'B', sizeof(text_b));
     memset(text_c, 'C', sizeof(text_c));
@@ -45,10 +45,10 @@ int main(void) {
     const CorpusLoadResult result = corpus_sample_files(&arena, paths, 4,
         30, true, &sample, &sample_len, &sampled_files, &source_bytes);
     int failed = result != CORPUS_LOAD_OK || !sample ||
-        sampled_files != 3 || source_bytes != 300 ||
-        count_byte(sample, sample_len, 'A') != 10 ||
-        count_byte(sample, sample_len, 'B') != 10 ||
-        count_byte(sample, sample_len, 'C') != 10 ||
+        sampled_files != 3 || source_bytes != 285 ||
+        count_byte(sample, sample_len, 'A') != 13 ||
+        count_byte(sample, sample_len, 'B') != 5 ||
+        count_byte(sample, sample_len, 'C') != 12 ||
         sample_len != 34;
 
     if (!failed) {
@@ -60,7 +60,7 @@ int main(void) {
             &sampled_files, &source_bytes);
         failed = prefix_result != CORPUS_LOAD_OK || !sample ||
             sample_len != 34 || sample[0] != 'A' ||
-            sample[12] != 'B' || sample[24] != 'C';
+            sample[15] != 'B' || sample[22] != 'C';
     }
 
     arena_free(&arena);
