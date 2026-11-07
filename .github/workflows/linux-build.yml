@@ -55,49 +55,49 @@ jobs:
 
       - name: Run focused tokenizer tests
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/tokenizer_test.c tokenizer.c arena.c util.c \
             -lm -o tokenizer_test
           ./tokenizer_test
 
       - name: Test incremental tokenizer trainer equivalence
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/tokenizer_incremental_test.c tokenizer.c arena.c util.c \
             -lm -o tokenizer_incremental_test
           ./tokenizer_incremental_test
 
       - name: Test checkpoint validation and zero tokenizer fingerprint
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/checkpoint_hash_test.c checkpoint.c optim.c model.c \
             arena.c util.c -lm -o checkpoint_hash_test
           ./checkpoint_hash_test
 
       - name: Test numerical gradient stability and workspace reuse
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/gradcheck_test.c gradcheck.c backward.c forward.c \
             model.c arena.c util.c -lm -o gradcheck_test
           ./gradcheck_test
 
       - name: Test dynamic attention workspace at sequence boundaries
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/attention_workspace_test.c backward.c forward.c \
             model.c arena.c util.c -lm -o attention_workspace_test
           ./attention_workspace_test
 
       - name: Test train_run input boundaries
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/train_validation_test.c train_validation.c model.c \
             arena.c util.c -lm -o train_validation_test
           ./train_validation_test
 
       - name: Test reserved-token generation policy
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
             tests/generation_special_tokens_test.c generate.c forward.c \
             model.c tokenizer.c arena.c util.c -lm -o generation_special_tokens_test
           ./generation_special_tokens_test
