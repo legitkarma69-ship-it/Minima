@@ -58,6 +58,7 @@ bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
         return false;
 
     const size_t arena_used_before = arena->used;
+    const size_t arena_peak_before = arena->peak;
     memset(g, 0, sizeof(*g));
     g->vocab_size = model->vocab_size;
     g->dim = model->dim;
@@ -92,6 +93,7 @@ bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
 
     if (!gradients_check_layout(g, model, arena)) {
         arena->used = arena_used_before;
+        arena->peak = arena_peak_before;
         memset(g, 0, sizeof(*g));
         return false;
     }
