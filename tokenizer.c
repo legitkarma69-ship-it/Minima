@@ -45,7 +45,7 @@ static size_t pair_hash(uint16_t left, uint16_t right, size_t table_size) {
 // Training
 // ------------------------------------------------------------------
 
-bool tokenizer_train(Tokenizer* tok, Arena* arena,
+bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len,
     int target_vocab) {
 
@@ -219,6 +219,449 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
         tok->vocab_size, tok->n_merges);
     return true;
 }
+
+
+/* ------------------------------------------------------------------
+   Incremental BPE trainer.
+
+   The old recounting implementation remains available as the reference.
+   Pair occurrence lists are ordered by original byte position. Every newly
+   created pair contains the newest token ID, so occurrences for that pair
+   are appended in left-to-right order during a merge sweep.
+   ------------------------------------------------------------------ */
+
+#define BPE_NONE UINT32_MAX
+
+typedef struct {
+    uint16_t id;
+    uint16_t active;
+    uint32_t prev;
+    uint32_t next;
+    uint32_t occ_prev;
+    uint32_t occ_next;
+    uint32_t pair_slot;
+} BpeNode;
+
+typedef struct {
+    uint32_t key;
+    uint32_t count;
+    uint32_t head;
+    uint32_t tail;
+    uint32_t heap_pos_plus1;
+} BpePairState;
+
+typedef struct {
+    uint32_t key;
+    uint32_t count;
+    uint32_t generation;
+} BpeReferenceSlot;
+
+static bool bpe_pair_better(const BpePairState* states,
+    uint32_t left_slot, uint32_t right_slot) {
+    if (states[left_slot].count != states[right_slot].count)
+        return states[left_slot].count > states[right_slot].count;
+    return left_slot < right_slot;
+}
+
+static void bpe_heap_swap(BpePairState* states, uint32_t* heap,
+    uint32_t a, uint32_t b) {
+    const uint32_t tmp = heap[a];
+    heap[a] = heap[b];
+    heap[b] = tmp;
+    states[heap[a]].heap_pos_plus1 = a + 1;
+    states[heap[b]].heap_pos_plus1 = b + 1;
+}
+
+static void bpe_heap_up(BpePairState* states, uint32_t* heap,
+    uint32_t index) {
+    while (index > 0) {
+        const uint32_t parent = (index - 1) / 2;
+        if (!bpe_pair_better(states, heap[index], heap[parent]))
+            break;
+        bpe_heap_swap(states, heap, index, parent);
+        index = parent;
+    }
+}
+
+static void bpe_heap_down(BpePairState* states, uint32_t* heap,
+    uint32_t heap_count, uint32_t index) {
+    for (;;) {
+        const uint32_t left = index * 2 + 1;
+        const uint32_t right = left + 1;
+        uint32_t best = index;
+        if (left < heap_count &&
+            bpe_pair_better(states, heap[left], heap[best]))
+            best = left;
+        if (right < heap_count &&
+            bpe_pair_better(states, heap[right], heap[best]))
+            best = right;
+        if (best == index) break;
+        bpe_heap_swap(states, heap, index, best);
+        index = best;
+    }
+}
+
+static void bpe_heap_remove(BpePairState* states, uint32_t* heap,
+    uint32_t* heap_count, uint32_t slot) {
+    const uint32_t position_plus1 = states[slot].heap_pos_plus1;
+    if (!position_plus1) return;
+    const uint32_t position = position_plus1 - 1;
+    const uint32_t last_index = --(*heap_count);
+    states[slot].heap_pos_plus1 = 0;
+    if (position == last_index) return;
+    heap[position] = heap[last_index];
+    states[heap[position]].heap_pos_plus1 = position + 1;
+    if (position > 0 &&
+        bpe_pair_better(states, heap[position], heap[(position - 1) / 2]))
+        bpe_heap_up(states, heap, position);
+    else
+        bpe_heap_down(states, heap, *heap_count, position);
+}
+
+static void bpe_heap_changed(BpePairState* states, uint32_t* heap,
+    uint32_t* heap_count, uint32_t slot) {
+    if (states[slot].count == 0) {
+        bpe_heap_remove(states, heap, heap_count, slot);
+        return;
+    }
+    if (!states[slot].heap_pos_plus1) {
+        const uint32_t position = (*heap_count)++;
+        heap[position] = slot;
+        states[slot].heap_pos_plus1 = position + 1;
+        bpe_heap_up(states, heap, position);
+        return;
+    }
+    const uint32_t position = states[slot].heap_pos_plus1 - 1;
+    if (position > 0 &&
+        bpe_pair_better(states, heap[position], heap[(position - 1) / 2]))
+        bpe_heap_up(states, heap, position);
+    else
+        bpe_heap_down(states, heap, *heap_count, position);
+}
+
+static uint32_t bpe_pair_state_find(BpePairState* states,
+    size_t table_size, uint16_t left, uint16_t right, bool create) {
+    const uint32_t key = ((uint32_t)left << 16) | right;
+    const size_t start = pair_hash(left, right, table_size);
+    for (size_t probe = 0; probe < table_size; probe++) {
+        const size_t slot = (start + probe) & (table_size - 1);
+        if (states[slot].key == key)
+            return (uint32_t)slot;
+        if (states[slot].key == 0) {
+            if (!create) return BPE_NONE;
+            states[slot].key = key;
+            states[slot].head = BPE_NONE;
+            states[slot].tail = BPE_NONE;
+            return (uint32_t)slot;
+        }
+    }
+    return BPE_NONE;
+}
+
+static bool bpe_pair_add(BpeNode* nodes, const Tokenizer* tok,
+    BpePairState* states, size_t state_table_size,
+    uint32_t* heap, uint32_t* heap_count, uint32_t left_index) {
+    const uint32_t right_index = nodes[left_index].next;
+    if (right_index == BPE_NONE) return true;
+    const uint16_t left_id = nodes[left_index].id;
+    const uint16_t right_id = nodes[right_index].id;
+    const int left_len = tok->token_len[left_id];
+    const int right_len = tok->token_len[right_id];
+    if (left_len <= 0 || right_len <= 0 ||
+        left_len > TOK_MAX_TOKEN_LEN - right_len) {
+        nodes[left_index].pair_slot = BPE_NONE;
+        nodes[left_index].occ_prev = BPE_NONE;
+        nodes[left_index].occ_next = BPE_NONE;
+        return true;
+    }
+
+    const uint32_t slot = bpe_pair_state_find(states, state_table_size,
+        left_id, right_id, true);
+    if (slot == BPE_NONE || states[slot].count == UINT32_MAX)
+        return false;
+
+    nodes[left_index].pair_slot = slot;
+    nodes[left_index].occ_prev = states[slot].tail;
+    nodes[left_index].occ_next = BPE_NONE;
+    if (states[slot].tail != BPE_NONE)
+        nodes[states[slot].tail].occ_next = left_index;
+    else
+        states[slot].head = left_index;
+    states[slot].tail = left_index;
+    states[slot].count++;
+    bpe_heap_changed(states, heap, heap_count, slot);
+    return true;
+}
+
+static bool bpe_pair_remove(BpeNode* nodes, BpePairState* states,
+    uint32_t* heap, uint32_t* heap_count, uint32_t left_index) {
+    const uint32_t slot = nodes[left_index].pair_slot;
+    if (slot == BPE_NONE) return true;
+    if (states[slot].count == 0) return false;
+
+    const uint32_t before = nodes[left_index].occ_prev;
+    const uint32_t after = nodes[left_index].occ_next;
+    if (before != BPE_NONE)
+        nodes[before].occ_next = after;
+    else
+        states[slot].head = after;
+    if (after != BPE_NONE)
+        nodes[after].occ_prev = before;
+    else
+        states[slot].tail = before;
+
+    nodes[left_index].pair_slot = BPE_NONE;
+    nodes[left_index].occ_prev = BPE_NONE;
+    nodes[left_index].occ_next = BPE_NONE;
+    states[slot].count--;
+    bpe_heap_changed(states, heap, heap_count, slot);
+    return true;
+}
+
+/* Reconstruct the reference hash table only when the maximum frequency is
+   tied. This preserves the old trainer's exact lowest-final-hash-slot choice
+   without imposing a full-stream scan on the common unique-maximum case. */
+static bool bpe_reference_tie_winner(const BpeNode* nodes,
+    uint32_t first_node, const Tokenizer* tok, size_t reference_table_size,
+    BpeReferenceSlot* table, uint32_t* generation_out,
+    uint32_t* winner_key_out) {
+    uint32_t generation = *generation_out + 1;
+    if (generation == 0) {
+        memset(table, 0, reference_table_size * sizeof(*table));
+        generation = 1;
+    }
+
+    for (uint32_t i = first_node; i != BPE_NONE; i = nodes[i].next) {
+        const uint32_t j = nodes[i].next;
+        if (j == BPE_NONE) continue;
+        const uint16_t left = nodes[i].id;
+        const uint16_t right = nodes[j].id;
+        const int left_len = tok->token_len[left];
+        const int right_len = tok->token_len[right];
+        if (left_len <= 0 || right_len <= 0 ||
+            left_len > TOK_MAX_TOKEN_LEN - right_len)
+            continue;
+
+        const uint32_t key = ((uint32_t)left << 16) | right;
+        const size_t start = pair_hash(left, right, reference_table_size);
+        bool inserted = false;
+        for (size_t probe = 0; probe < reference_table_size; probe++) {
+            const size_t slot = (start + probe) & (reference_table_size - 1);
+            if (table[slot].generation != generation) {
+                table[slot].generation = generation;
+                table[slot].key = key;
+                table[slot].count = 1;
+                inserted = true;
+                break;
+            }
+            if (table[slot].key == key) {
+                if (table[slot].count == UINT32_MAX) return false;
+                table[slot].count++;
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) return false;
+    }
+
+    uint32_t best_count = 0;
+    uint32_t best_key = 0;
+    for (size_t i = 0; i < reference_table_size; i++) {
+        if (table[i].generation == generation &&
+            table[i].count > best_count) {
+            best_count = table[i].count;
+            best_key = table[i].key;
+        }
+    }
+    *generation_out = generation;
+    *winner_key_out = best_key;
+    return best_count > 0;
+}
+
+bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len, int target_vocab) {
+    if (!tok || !arena || !sample || sample_len == 0 ||
+        sample_len > UINT32_MAX ||
+        target_vocab < 260 || target_vocab > TOK_MAX_VOCAB ||
+        sample_len > SIZE_MAX / sizeof(BpeNode) ||
+        sample_len > SIZE_MAX / 2)
+        return false;
+
+    const size_t arena_used_before = arena->used;
+    memset(tok, 0, sizeof(*tok));
+    add_token(tok, arena, "<bos>", 5);
+    add_token(tok, arena, "<eos>", 5);
+    add_token(tok, arena, "<pad>", 5);
+    add_token(tok, arena, "<unk>", 5);
+    for (int b = 0; b < 256; b++) {
+        const char byte[1] = { (char)b };
+        add_token(tok, arena, byte, 1);
+    }
+
+    const uint32_t node_count = (uint32_t)sample_len;
+    BpeNode* nodes = (BpeNode*)arena_alloc_zero(arena,
+        sample_len * sizeof(BpeNode));
+    if (!nodes) goto fail;
+
+    size_t max_pair_states = sample_len - 1;
+    const size_t merge_limit = (size_t)(target_vocab - 260);
+    if (merge_limit > (SIZE_MAX - max_pair_states) / 2) goto fail;
+    max_pair_states += merge_limit * 2;
+    if (max_pair_states == 0) max_pair_states = 1;
+    if (max_pair_states > UINT32_MAX ||
+        max_pair_states > SIZE_MAX / 2)
+        goto fail;
+
+    size_t state_table_size = 8;
+    const size_t required_state_slots = max_pair_states * 2;
+    while (state_table_size < required_state_slots) {
+        if (state_table_size > SIZE_MAX / 2) goto fail;
+        state_table_size *= 2;
+    }
+    if (state_table_size > UINT32_MAX ||
+        state_table_size > SIZE_MAX / sizeof(BpePairState))
+        goto fail;
+
+    BpePairState* states = (BpePairState*)arena_alloc_zero(arena,
+        state_table_size * sizeof(BpePairState));
+    uint32_t* heap = (uint32_t*)arena_alloc(arena,
+        max_pair_states * sizeof(uint32_t));
+    if (!states || !heap) goto fail;
+
+    size_t reference_table_size = (size_t)1 << 18;
+    const size_t required_reference_slots = sample_len * 2;
+    while (reference_table_size < required_reference_slots) {
+        if (reference_table_size > SIZE_MAX / 2) goto fail;
+        reference_table_size *= 2;
+    }
+    if (reference_table_size > SIZE_MAX / sizeof(BpeReferenceSlot))
+        goto fail;
+    BpeReferenceSlot* reference_table =
+        (BpeReferenceSlot*)arena_alloc_zero(arena,
+            reference_table_size * sizeof(BpeReferenceSlot));
+    if (!reference_table) goto fail;
+
+    for (uint32_t i = 0; i < node_count; i++) {
+        nodes[i].id = (uint16_t)(TOK_BYTE_START + sample[i]);
+        nodes[i].active = 1;
+        nodes[i].prev = i == 0 ? BPE_NONE : i - 1;
+        nodes[i].next = i + 1 == node_count ? BPE_NONE : i + 1;
+        nodes[i].occ_prev = BPE_NONE;
+        nodes[i].occ_next = BPE_NONE;
+        nodes[i].pair_slot = BPE_NONE;
+    }
+
+    uint32_t heap_count = 0;
+    for (uint32_t i = 0; i + 1 < node_count; i++) {
+        if (!bpe_pair_add(nodes, tok, states, state_table_size,
+                heap, &heap_count, i))
+            goto fail;
+    }
+
+    uint32_t reference_generation = 0;
+    const int merges_needed = target_vocab - tok->vocab_size;
+    for (int merge_index = 0; merge_index < merges_needed; merge_index++) {
+        if (heap_count == 0) break;
+        uint32_t best_slot = heap[0];
+        if (states[best_slot].count < 2) break;
+
+        if (heap_count > 1 &&
+            states[heap[1]].count == states[best_slot].count) {
+            uint32_t winner_key = 0;
+            if (!bpe_reference_tie_winner(nodes, 0, tok,
+                    reference_table_size, reference_table,
+                    &reference_generation, &winner_key))
+                goto fail;
+            const uint16_t winner_left = (uint16_t)(winner_key >> 16);
+            const uint16_t winner_right = (uint16_t)winner_key;
+            best_slot = bpe_pair_state_find(states, state_table_size,
+                winner_left, winner_right, false);
+            if (best_slot == BPE_NONE || states[best_slot].count < 2)
+                goto fail;
+        }
+
+        const uint16_t best_left = (uint16_t)(states[best_slot].key >> 16);
+        const uint16_t best_right = (uint16_t)states[best_slot].key;
+        const int left_len = tok->token_len[best_left];
+        const int right_len = tok->token_len[best_right];
+        if (left_len <= 0 || right_len <= 0 ||
+            left_len > TOK_MAX_TOKEN_LEN - right_len)
+            goto fail;
+
+        const int new_id = tok->vocab_size;
+        char* new_str = (char*)arena_alloc(arena,
+            (size_t)left_len + (size_t)right_len + 1);
+        if (!new_str) goto fail;
+        memcpy(new_str, tok->token_str[best_left], (size_t)left_len);
+        memcpy(new_str + left_len, tok->token_str[best_right],
+            (size_t)right_len);
+        new_str[left_len + right_len] = 0;
+        tok->token_str[new_id] = new_str;
+        tok->token_len[new_id] = left_len + right_len;
+        tok->vocab_size++;
+        tok->merges[tok->n_merges].left = best_left;
+        tok->merges[tok->n_merges].right = best_right;
+        tok->n_merges++;
+
+        /* The selected pair's occurrence list is left-to-right. Removing
+           the outgoing edge of the right node also invalidates an overlapping
+           occurrence, exactly matching the reference's greedy sweep. */
+        while (states[best_slot].head != BPE_NONE) {
+            const uint32_t left_index = states[best_slot].head;
+            const uint32_t right_index = nodes[left_index].next;
+            if (right_index == BPE_NONE ||
+                !nodes[left_index].active || !nodes[right_index].active ||
+                nodes[left_index].id != best_left ||
+                nodes[right_index].id != best_right ||
+                nodes[left_index].pair_slot != best_slot)
+                goto fail;
+
+            const uint32_t prev_index = nodes[left_index].prev;
+            const uint32_t next_index = nodes[right_index].next;
+            if (prev_index != BPE_NONE &&
+                !bpe_pair_remove(nodes, states, heap, &heap_count,
+                    prev_index))
+                goto fail;
+            if (!bpe_pair_remove(nodes, states, heap, &heap_count,
+                    left_index))
+                goto fail;
+            if (next_index != BPE_NONE &&
+                !bpe_pair_remove(nodes, states, heap, &heap_count,
+                    right_index))
+                goto fail;
+
+            nodes[left_index].id = (uint16_t)new_id;
+            nodes[left_index].next = next_index;
+            if (next_index != BPE_NONE)
+                nodes[next_index].prev = left_index;
+            nodes[right_index].active = 0;
+            nodes[right_index].prev = BPE_NONE;
+            nodes[right_index].next = BPE_NONE;
+
+            if (prev_index != BPE_NONE &&
+                !bpe_pair_add(nodes, tok, states, state_table_size,
+                    heap, &heap_count, prev_index))
+                goto fail;
+            if (!bpe_pair_add(nodes, tok, states, state_table_size,
+                    heap, &heap_count, left_index))
+                goto fail;
+        }
+
+        if ((merge_index + 1) % 500 == 0)
+            printf("merge %d / %d   tokens left in sample: incremental\n",
+                merge_index + 1, merges_needed);
+    }
+
+    printf("BPE incremental finished. vocab = %d  merges = %d\n",
+        tok->vocab_size, tok->n_merges);
+    return true;
+
+fail:
+    arena->used = arena_used_before;
+    memset(tok, 0, sizeof(*tok));
+    return false;
+}
+
 
 // ------------------------------------------------------------------
 // Encode
