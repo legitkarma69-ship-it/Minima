@@ -41,7 +41,11 @@ static bool check_tensor(Model* model, Activations* act,
     }
 
     const float original = tensor->weights[best_index];
-    const float epsilon = 1.0e-2f;
+    /* The model forward pass is float32. A 0.01 perturbation can make the
+       loss delta comparable to float rounding for small gradients, producing
+       noisy central differences. A larger symmetric step improves signal
+       while remaining small relative to initialized parameter magnitudes. */
+    const float epsilon = 5.0e-2f;
 
     tensor->weights[best_index] = original + epsilon;
     const float loss_plus = evaluate_loss(model, act, tokens, targets,
