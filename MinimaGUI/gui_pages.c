@@ -10,7 +10,7 @@ void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
     if (tabs) {
         *tabs = CreateWindowW(WC_TABCONTROLW, L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-            12, 6, 920, 28, parent, (HMENU)IDC_MAIN_TABS,
+            12, 6, 920, 28, parent, (HMENU)(INT_PTR)IDC_MAIN_TABS,
             GetModuleHandleW(NULL), NULL);
         if (*tabs) {
             TCITEMW item;
@@ -39,7 +39,7 @@ void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
     if (advanced_toggle) {
         *advanced_toggle = CreateWindowW(L"BUTTON", L"Show advanced settings",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-            8, 236, 220, 24, parent, (HMENU)IDC_ADVANCED_TOGGLE,
+            8, 236, 220, 24, parent, (HMENU)(INT_PTR)IDC_ADVANCED_TOGGLE,
             NULL, NULL);
         if (*advanced_toggle)
             SendMessageW(*advanced_toggle, BM_SETCHECK, BST_CHECKED, 0);
@@ -93,10 +93,10 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_chat_test (*page_controls->chat_test)
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, parent, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
-        12, 34, 520, 105, parent, (HMENU)IDC_CORPUS, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, parent, (HMENU)IDC_ADD, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, parent, (HMENU)IDC_REMOVE, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Basic defaults", WS_CHILD | WS_VISIBLE, 260, 146, 132, 26, parent, (HMENU)IDC_BASIC_DEFAULTS, NULL, NULL);
+        12, 34, 520, 105, parent, (HMENU)(INT_PTR)IDC_CORPUS, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, parent, (HMENU)(INT_PTR)IDC_ADD, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, parent, (HMENU)(INT_PTR)IDC_REMOVE, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"Basic defaults", WS_CHILD | WS_VISIBLE, 260, 146, 132, 26, parent, (HMENU)(INT_PTR)IDC_BASIC_DEFAULTS, NULL, NULL);
 
     CreateWindowW(L"STATIC",L"Model: vocab",WS_CHILD|WS_VISIBLE,12,176,78,18,parent,NULL,NULL,NULL);
     g_vocab=CreateWindowW(L"EDIT",L"2048",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,92,173,55,23,parent,NULL,NULL,NULL);
@@ -112,8 +112,8 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     g_max_seq=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,540,173,42,23,parent,NULL,NULL,NULL);
 
     CreateWindowW(L"STATIC",L"Steps",WS_CHILD|WS_VISIBLE,12,210,42,18,parent,NULL,NULL,NULL);
-    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,parent,(HMENU)IDC_STEPS,NULL,NULL);
-    g_resume=CreateWindowW(L"BUTTON",L"Resume",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,118,208,75,23,parent,(HMENU)IDC_RESUME,NULL,NULL);
+    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,parent,(HMENU)(INT_PTR)IDC_STEPS,NULL,NULL);
+    g_resume=CreateWindowW(L"BUTTON",L"Resume",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,118,208,75,23,parent,(HMENU)(INT_PTR)IDC_RESUME,NULL,NULL);
     CreateWindowW(L"STATIC",L"Batch",WS_CHILD|WS_VISIBLE,198,210,38,18,parent,NULL,NULL,NULL);
     g_batch_size=CreateWindowW(L"EDIT",L"4",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,237,207,35,23,parent,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Seq",WS_CHILD|WS_VISIBLE,278,210,30,18,parent,NULL,NULL,NULL);
@@ -155,23 +155,23 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,parent,NULL,NULL,NULL));
     g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_total_steps);
 
-    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,parent,(HMENU)IDC_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,parent,(HMENU)IDC_STOP,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,parent,(HMENU)IDC_CHAT_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,parent,(HMENU)IDC_SAVE_NOW,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Rebuild tokenizer",WS_CHILD|WS_VISIBLE,470,340,135,30,parent,(HMENU)IDC_REBUILD_TOKENIZER,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Auto settings",WS_CHILD|WS_VISIBLE,612,340,115,30,parent,(HMENU)IDC_AUTO_SETTINGS,NULL,NULL);
-    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,parent,(HMENU)IDC_STATUS,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,parent,(HMENU)(INT_PTR)IDC_START,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,parent,(HMENU)(INT_PTR)IDC_STOP,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,parent,(HMENU)(INT_PTR)IDC_CHAT_START,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,parent,(HMENU)(INT_PTR)IDC_SAVE_NOW,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Rebuild tokenizer",WS_CHILD|WS_VISIBLE,470,340,135,30,parent,(HMENU)(INT_PTR)IDC_REBUILD_TOKENIZER,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Auto settings",WS_CHILD|WS_VISIBLE,612,340,115,30,parent,(HMENU)(INT_PTR)IDC_AUTO_SETTINGS,NULL,NULL);
+    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,parent,(HMENU)(INT_PTR)IDC_STATUS,NULL,NULL);
 
     g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,parent,NULL,NULL,NULL);
     g_output_label=CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,parent,NULL,NULL,NULL);
     g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
-        12,402,850,250,parent,(HMENU)IDC_LOG,NULL,NULL);
+        12,402,850,250,parent,(HMENU)(INT_PTR)IDC_LOG,NULL,NULL);
     SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
     g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"COMBOBOX",L"",
         WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_VSCROLL,
-        12,665,600,180,parent,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
+        12,665,600,180,parent,(HMENU)(INT_PTR)IDC_CHAT_INPUT,NULL,NULL);
     SendMessageW(g_chat_input,CB_LIMITTEXT,1024,0);
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The quick brown fox");
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Once upon a time");
@@ -181,10 +181,10 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Hello there, how do you do?");
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
     EnableWindow(g_chat_input,FALSE);
-    g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,parent,(HMENU)IDC_CHAT_TEST,NULL,NULL);
+    g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,parent,(HMENU)(INT_PTR)IDC_CHAT_TEST,NULL,NULL);
     REGISTER_ADVANCED(g_chat_test);
-    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,parent,(HMENU)IDC_CHAT_SEND,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,parent,(HMENU)IDC_CHAT_STOP,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,parent,(HMENU)(INT_PTR)IDC_CHAT_SEND,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,parent,(HMENU)(INT_PTR)IDC_CHAT_STOP,NULL,NULL);
 #undef g_corpus
 #undef g_steps
 #undef g_resume

@@ -22,9 +22,6 @@
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-#define IDC_STEPS        1004
-#define IDC_LOG          1008
-#define IDC_CHAT_INPUT   1011
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
