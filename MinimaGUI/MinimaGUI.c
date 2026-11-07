@@ -16,13 +16,13 @@
 #include "engine_io.h"
 #include "gui_layout.h"
 #include "gui_pages.h"
+#include "gui_actions.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #define IDC_STEPS        1004
-#define IDC_RESUME       1005
 #define IDC_LOG          1008
 #define IDC_CHAT_INPUT   1011
 #define WM_APPEND_LOG    (WM_APP + 1)
@@ -958,6 +958,52 @@ static void create_controls(HWND hwnd) {
     }
 }
 
+static void action_add_corpus(HWND hwnd) {
+    (void)hwnd;
+    g_use_saved_tokenizer=FALSE;
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+    add_corpus_files();
+}
+static void action_remove_corpus(HWND hwnd) {
+    (void)hwnd;
+    g_use_saved_tokenizer=FALSE;
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+    int selected[32];
+    LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
+    for (int i = (int)n - 1; i >= 0; --i)
+        SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
+}
+static void action_resume_changed(HWND hwnd) { (void)hwnd; update_fresh_only_controls(); }
+static void action_start_training(HWND hwnd) { (void)hwnd; start_engine(FALSE,FALSE); }
+static void action_stop_training(HWND hwnd) { (void)hwnd; stop_engine(); }
+static void action_start_chat(HWND hwnd) { (void)hwnd; start_engine(TRUE,FALSE); }
+static void action_rebuild_tokenizer(HWND hwnd) { (void)hwnd; rebuild_tokenizer(); }
+static void action_auto_settings(HWND hwnd) { (void)hwnd; apply_auto_settings(); }
+static void action_basic_defaults(HWND hwnd) {
+    if (!InterlockedCompareExchange(&g_running,0,0) &&
+        MessageBoxW(hwnd,L"Restore all model, training, tokenizer, and generation settings to their basic defaults? The selected corpus files will be kept.",
+            L"Basic defaults",MB_YESNO|MB_ICONQUESTION)==IDYES) {
+        minima_settings_reset_defaults(&g_settings_context);
+        append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\\r\\n");
+    }
+}
+static void action_advanced_toggle(HWND hwnd) {
+    set_advanced_expanded(hwnd,
+        SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);
+}
+static void action_chat_send(HWND hwnd) { (void)hwnd; send_chat_message(); }
+static void action_chat_test(HWND hwnd) { (void)hwnd; test_generation_settings(); }
+static void action_chat_stop(HWND hwnd) { (void)hwnd; stop_generation(); }
+static void action_save_checkpoint(HWND hwnd) { (void)hwnd; request_checkpoint_save(); }
+
+static const GuiActionHandlers g_action_handlers = {
+    action_add_corpus, action_remove_corpus, action_resume_changed,
+    action_start_training, action_stop_training, action_start_chat,
+    action_rebuild_tokenizer, action_auto_settings, action_basic_defaults,
+    action_advanced_toggle, action_chat_send, action_chat_test,
+    action_chat_stop, action_save_checkpoint
+};
+
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE:
@@ -1007,40 +1053,8 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         break;
     case WM_COMMAND:
-        switch (LOWORD(wp)) {
-        case IDC_ADD: g_use_saved_tokenizer=FALSE; WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path); add_corpus_files(); return 0;
-        case IDC_REMOVE: {
-            g_use_saved_tokenizer=FALSE;
-            WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
-            int selected[32];
-            LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
-            for (int i = (int)n - 1; i >= 0; --i)
-                SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
+        if (gui_actions_dispatch(hwnd, LOWORD(wp), &g_action_handlers))
             return 0;
-        }
-        case IDC_RESUME: update_fresh_only_controls(); return 0;
-        case IDC_START: start_engine(FALSE,FALSE); return 0;
-        case IDC_STOP: stop_engine(); return 0;
-        case IDC_CHAT_START: start_engine(TRUE,FALSE); return 0;
-        case IDC_REBUILD_TOKENIZER: rebuild_tokenizer(); return 0;
-        case IDC_AUTO_SETTINGS: apply_auto_settings(); return 0;
-        case IDC_BASIC_DEFAULTS:
-            if (!InterlockedCompareExchange(&g_running,0,0) &&
-                MessageBoxW(hwnd,L"Restore all model, training, tokenizer, and generation settings to their basic defaults? The selected corpus files will be kept.",
-                    L"Basic defaults",MB_YESNO|MB_ICONQUESTION)==IDYES) {
-                minima_settings_reset_defaults(&g_settings_context);
-                append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\\r\\n");
-            }
-            return 0;
-        case IDC_ADVANCED_TOGGLE:
-            set_advanced_expanded(hwnd,
-                SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);
-            return 0;
-        case IDC_CHAT_SEND: send_chat_message(); return 0;
-        case IDC_CHAT_TEST: test_generation_settings(); return 0;
-        case IDC_CHAT_STOP: stop_generation(); return 0;
-        case IDC_SAVE_NOW: request_checkpoint_save(); return 0;
-        }
         break;
     case WM_CHAT_READY:
         minima_gui_set_chat_send_ready(GetDlgItem(hwnd,IDC_CHAT_SEND),
