@@ -1356,6 +1356,7 @@ static void create_controls(HWND hwnd) {
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
     EnableWindow(g_chat_input,FALSE);
     g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,hwnd,(HMENU)IDC_CHAT_TEST,NULL,NULL);
+    register_advanced_control(g_chat_test);
     CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
