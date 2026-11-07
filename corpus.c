@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdint.h>
+#include <limits.h>
 
 #define CORPUS_MAX_PATHS 32
 
