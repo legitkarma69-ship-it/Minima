@@ -175,7 +175,8 @@ float* model_forward(Model* model, Activations* act,
         model->n_heads * model->head_dim != model->dim ||
         !act->x || !act->x_norm || !act->qkv || !act->attn_out ||
         !act->up_buf || !act->gate_buf || !act->ffn_buf ||
-        !act->resid_attn || !act->resid_ffn || !act->logits)
+        !act->resid_attn || !act->resid_ffn || !act->logits ||
+        !act->attention_scores)
         return NULL;
 
     const int dim = model->dim;
