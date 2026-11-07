@@ -1,0 +1,166 @@
+name: Reproducible training experiment
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: Optimizer steps to run
+        type: number
+        default: 2000
+        required: true
+      total_steps:
+        description: Full learning-rate schedule horizon
+        type: number
+        default: 2000
+        required: true
+      warmup_steps:
+        description: Linear warmup steps
+        type: number
+        default: 100
+        required: true
+      batch_size:
+        description: Training batch size
+        type: number
+        default: 4
+        required: true
+      sequence_length:
+        description: Training sequence length
+        type: number
+        default: 32
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    name: Train and evaluate Minima
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Minima
+        run: msbuild Minima.sln /m /p:Configuration=Release /p:Platform=x64 /p:RestoreIgnoreFailedSources=true
+
+      - name: Validate experiment settings and select corpus
+        id: settings
+        shell: pwsh
+        env:
+          STEPS: ${{ inputs.steps }}
+          TOTAL_STEPS: ${{ inputs.total_steps }}
+          WARMUP_STEPS: ${{ inputs.warmup_steps }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          SEQUENCE_LENGTH: ${{ inputs.sequence_length }}
+        run: |
+          $steps = [int]$env:STEPS
+          $total = [int]$env:TOTAL_STEPS
+          $warmup = [int]$env:WARMUP_STEPS
+          $batch = [int]$env:BATCH_SIZE
+          $sequence = [int]$env:SEQUENCE_LENGTH
+
+          if ($steps -lt 1 -or $steps -gt 20000) { throw "steps must be between 1 and 20000." }
+          if ($total -lt $steps -or $total -gt 20000) { throw "total_steps must be at least steps and no more than 20000." }
+          if ($warmup -lt 0 -or $warmup -ge $total) { throw "warmup_steps must be non-negative and less than total_steps." }
+          if ($batch -lt 1 -or $batch -gt 16) { throw "batch_size must be between 1 and 16." }
+          if ($sequence -lt 8 -or $sequence -gt 512) { throw "sequence_length must be between 8 and 512." }
+
+          $trainingTokens = [long]$batch * [long]$sequence
+          $activationFloats = $trainingTokens * ((9 + 6 * 2) * 64 + (3 * 2 + 3) * 128 + 2 * 2048) + $sequence
+          $activationMiB = ($activationFloats * 4.0) / (1024.0 * 1024.0)
+          if ($activationMiB -gt 192.0) {
+            throw ("Selected batch/sequence settings require {0:N1} MiB of activation scratch, above the 192 MiB safety limit." -f $activationMiB)
+          }
+
+          $corpora = @()
+          if ((Test-Path ".\data\books.txt") -and (Get-Item ".\data\books.txt").Length -gt 0) {
+            $corpora += ".\data\books.txt"
+          }
+          if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
+            $corpora += ".\data\chatlogs.txt"
+          }
+          if ($corpora.Count -eq 0) { throw "No non-empty checked-in corpus files were found." }
+
+          "### Minima training experiment" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Optimizer steps: $steps" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- LR schedule horizon: $total" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Warmup steps: $warmup" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Batch size: $batch" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Sequence length: $sequence" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- Corpus: $($corpora -join ', ')" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Rebuild tokenizer from the selected corpus
+        shell: pwsh
+        env:
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          SEQUENCE_LENGTH: ${{ inputs.sequence_length }}
+        run: |
+          $corpora = @()
+          if ((Test-Path ".\data\books.txt") -and (Get-Item ".\data\books.txt").Length -gt 0) {
+            $corpora += ".\data\books.txt"
+          }
+          if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
+            $corpora += ".\data\chatlogs.txt"
+          }
+
+          & ".\x64\Release\Minima.exe" --retrain-tokenizer-only --vocab-size 2048 --tokenizer-sample-bytes 262144 --tokenizer-sampling spread --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --dim 64 --layers 2 --heads 2 --ffn-dim 128 --max-seq 512 $corpora
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path ".\minima.bpe")) { throw "Tokenizer rebuild did not produce minima.bpe." }
+
+      - name: Run fresh training experiment
+        shell: pwsh
+        env:
+          STEPS: ${{ inputs.steps }}
+          TOTAL_STEPS: ${{ inputs.total_steps }}
+          WARMUP_STEPS: ${{ inputs.warmup_steps }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          SEQUENCE_LENGTH: ${{ inputs.sequence_length }}
+        run: |
+          $corpora = @()
+          if ((Test-Path ".\data\books.txt") -and (Get-Item ".\data\books.txt").Length -gt 0) {
+            $corpora += ".\data\books.txt"
+          }
+          if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
+            $corpora += ".\data\chatlogs.txt"
+          }
+
+          & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps ([int]$env:STEPS) --total-steps ([int]$env:TOTAL_STEPS) --warmup ([int]$env:WARMUP_STEPS) --log-interval 100 --validation-batches 16 --validation-interval 100 --checkpoint-interval 100 --seed 1234 --vocab-size 2048 --dim 64 --layers 2 --heads 2 --ffn-dim 128 --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --max-seq 512 --metrics ".\minima_training_metrics.csv" $corpora
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path ".\minima.model")) { throw "Training did not produce minima.model." }
+          if (!(Test-Path ".\minima_training_metrics.csv")) { throw "Training did not produce its metrics CSV." }
+
+      - name: Run checkpoint diagnostics
+        shell: pwsh
+        env:
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          SEQUENCE_LENGTH: ${{ inputs.sequence_length }}
+        run: |
+          $corpora = @()
+          if ((Test-Path ".\data\books.txt") -and (Get-Item ".\data\books.txt").Length -gt 0) {
+            $corpora += ".\data\books.txt"
+          }
+          if ((Test-Path ".\data\chatlogs.txt") -and (Get-Item ".\data\chatlogs.txt").Length -gt 0) {
+            $corpora += ".\data\chatlogs.txt"
+          }
+
+          & ".\x64\Release\Minima.exe" --resume --diagnostics-only --validation-batches 16 --vocab-size 2048 --dim 64 --layers 2 --heads 2 --ffn-dim 128 --batch-size ([int]$env:BATCH_SIZE) --sequence-length ([int]$env:SEQUENCE_LENGTH) --max-seq 512 --metrics ".\minima_diagnostics_metrics.csv" $corpora
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish training outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Minima-training-experiment
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            minima.model
+            minima.bpe
+            minima_training_metrics.csv
+            minima_diagnostics_metrics.csv
+            minima_token_frequency.csv
+            minima_frequency_loss.csv
+            minima_generation_diagnostics.csv
