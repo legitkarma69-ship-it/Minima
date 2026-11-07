@@ -292,64 +292,83 @@ int main(int argc, char** argv) {
         die("temp arena failed");
 
     // ------------------------------------------------------------------
-    // 2. Load plain-text training data
+    // 2. Select corpus sources and sample the tokenizer directly from disk
     // ------------------------------------------------------------------
+    const char* project_paths[] = {
+        "../data/books.txt",
+        "../data/chatlogs.txt",
+        "../data/britannica.txt"
+    };
+    const char* root_paths[] = {
+        "data/books.txt",
+        "data/chatlogs.txt",
+        "data/britannica.txt"
+    };
+    const char* const* corpus_paths = user_path_count > 0
+        ? user_paths : project_paths;
+    size_t corpus_path_count = user_path_count > 0
+        ? (size_t)user_path_count : 3u;
+    const bool default_paths = user_path_count == 0;
+
+    uint8_t* tokenizer_sample = NULL;
+    size_t tokenizer_sample_len = 0;
+    size_t tokenizer_sample_files = 0;
+    size_t tokenizer_source_bytes = 0;
+
+    if (!options.chat_mode && !resume && !options.use_existing_tokenizer) {
+        CorpusLoadResult sample_result = corpus_sample_files(&temp,
+            corpus_paths, corpus_path_count, options.tokenizer_sample_bytes,
+            options.tokenizer_spread, &tokenizer_sample,
+            &tokenizer_sample_len, &tokenizer_sample_files,
+            &tokenizer_source_bytes);
+
+        if (sample_result == CORPUS_LOAD_EMPTY && default_paths) {
+            corpus_paths = root_paths;
+            sample_result = corpus_sample_files(&temp, corpus_paths,
+                corpus_path_count, options.tokenizer_sample_bytes,
+                options.tokenizer_spread, &tokenizer_sample,
+                &tokenizer_sample_len, &tokenizer_sample_files,
+                &tokenizer_source_bytes);
+        }
+        if (sample_result == CORPUS_LOAD_ERROR)
+            die("streaming tokenizer sampling failed (check corpus file access and available memory)");
+        if (sample_result == CORPUS_LOAD_EMPTY && options.tokenizer_only)
+            die("tokenizer rebuild requires actual corpus text; synthetic smoke text is not allowed");
+        if (sample_result == CORPUS_LOAD_OK) {
+            printf("Tokenizer sample sources: %zu files, %zu source bytes\n",
+                tokenizer_sample_files, tokenizer_source_bytes);
+            printf("Tokenizer training sample: %zu bytes (source-balanced, %s)\n",
+                tokenizer_sample_len,
+                options.tokenizer_spread ? "spread" : "prefix");
+        }
+    }
+
+    // Tokenizer-only mode deliberately does not load the complete corpus.
+    // This keeps a 900+ MiB source set out of RAM while rebuilding minima.bpe.
     const size_t max_corpus_bytes = SIZE_MAX;
     Corpus loaded_corpus;
     bool have_corpus = false;
-
-    if (options.chat_mode) {
-        have_corpus=false; /* Chat only needs the saved tokenizer and checkpoint. */
-    }
-    else if (user_path_count > 0) {
+    if (!options.tokenizer_only && !options.chat_mode) {
         const CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
-            &arena, user_paths, (size_t)user_path_count, max_corpus_bytes);
+            &arena, corpus_paths, corpus_path_count, max_corpus_bytes);
         if (load_result == CORPUS_LOAD_ERROR)
             die("corpus loading failed (check file access, available memory, and supported corpus size)");
-        if (load_result == CORPUS_LOAD_EMPTY)
-            die("the supplied corpus paths contained no usable text");
-        have_corpus = true;
-    }
-    else {
-        const char* project_paths[] = {
-            "../data/books.txt",
-            "../data/chatlogs.txt"
-        };
-        CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
-            &arena, project_paths, 2, max_corpus_bytes);
-
-        if (load_result == CORPUS_LOAD_ERROR)
-            die("corpus loading failed (check file access, available memory, and supported corpus size)");
-
-        if (load_result == CORPUS_LOAD_EMPTY) {
-            const char* root_paths[] = {
-                "data/books.txt",
-                "data/chatlogs.txt"
-            };
-            load_result = corpus_load_files(&loaded_corpus, &arena,
-                root_paths, 2, max_corpus_bytes);
-            if (load_result == CORPUS_LOAD_ERROR)
-                die("corpus loading failed (check file access, available memory, and supported corpus size)");
-        }
-        have_corpus = (load_result == CORPUS_LOAD_OK);
+        have_corpus = load_result == CORPUS_LOAD_OK;
+        if (!have_corpus && user_path_count > 0)
+            die("the supplied corpus files contained no usable text");
     }
 
     uint8_t* corpus = NULL;
     size_t corpus_len = 0;
-
-    if (options.tokenizer_only && !have_corpus)
-        die("tokenizer rebuild requires actual corpus text; synthetic smoke text is not allowed");
-
     if (have_corpus) {
         corpus = loaded_corpus.data;
         corpus_len = loaded_corpus.length;
         printf("\nCorpus: %zu bytes from %zu file(s)\n",
             corpus_len, loaded_corpus.files_loaded);
+        printf("Estimated token-ID backing allocation: %.1f MiB (worst case)\n",
+            (double)corpus_len * sizeof(uint16_t) / (1024.0 * 1024.0));
     }
-    else {
-        if (user_path_count > 0 && !options.chat_mode)
-            die("the supplied corpus files contained no usable text");
-
+    else if (!options.tokenizer_only) {
         const char* smoke_text =
             "The quick brown fox jumps over the lazy dog. "
             "Hello world from a tiny language model. "
@@ -358,20 +377,22 @@ int main(int argc, char** argv) {
         corpus_len = smoke_len * 80;
         corpus = (uint8_t*)arena_alloc(&arena, corpus_len + 1);
         if (!corpus) die("smoke corpus allocation failed");
-
         for (size_t i = 0; i < 80; i++)
             memcpy(corpus + i * smoke_len, smoke_text, smoke_len);
         corpus[corpus_len] = 0;
-        if(options.chat_mode)
+        if (options.chat_mode)
             printf("Chat mode: corpus loading skipped; using a tiny placeholder buffer for tokenizer setup.\n");
         else
             printf("No training text found; using synthetic smoke corpus.\n");
     }
 
-    if (corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
-        die("corpus too small: need at least %d bytes", options.batch_size * options.sequence_length + 1);
-    if (corpus_len > (size_t)INT_MAX)
-        die("corpus exceeds tokenizer's current INT_MAX byte/token-capacity limit");
+    if (!options.tokenizer_only) {
+        if (corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
+            die("corpus too small: need at least %d bytes",
+                options.batch_size * options.sequence_length + 1);
+        if (corpus_len > (size_t)INT_MAX)
+            die("corpus exceeds tokenizer's current INT_MAX byte/token-capacity limit");
+    }
 
     // ------------------------------------------------------------------
     // 3. Load or train tokenizer
@@ -387,33 +408,21 @@ int main(int argc, char** argv) {
             resume ? "checkpoint" : "prebuilt", tok.vocab_size);
     }
     else {
-        const size_t train_corpus_len = (corpus_len * 95u) / 100u;
-        if (train_corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
-            die("training portion is too small");
-
-        const size_t tokenizer_sample_cap = options.tokenizer_sample_bytes;
-        const size_t sample_len = train_corpus_len < tokenizer_sample_cap
-            ? train_corpus_len : tokenizer_sample_cap;
-        uint8_t* tokenizer_sample = (uint8_t*)arena_alloc(&arena, sample_len);
-        if (!tokenizer_sample) die("tokenizer sample allocation failed");
-
-        if (train_corpus_len <= tokenizer_sample_cap || !options.tokenizer_spread) {
-            memcpy(tokenizer_sample, corpus, sample_len);
-        }
-        else {
-            const size_t chunks = 64;
-            const size_t chunk_len = sample_len / chunks;
-            for (size_t i = 0; i < chunks; i++) {
-                const size_t dst = i * chunk_len;
-                const size_t this_len = (i == chunks - 1)
-                    ? sample_len - dst : chunk_len;
-                const size_t start =
-                    ((train_corpus_len - this_len) * i) / (chunks - 1);
-                memcpy(tokenizer_sample + dst, corpus + start, this_len);
-            }
+        if (!tokenizer_sample) {
+            if (options.tokenizer_only)
+                die("tokenizer rebuild requires a non-empty corpus sample");
+            const size_t train_corpus_len = (corpus_len * 95u) / 100u;
+            if (train_corpus_len < (size_t)options.batch_size * options.sequence_length + 1)
+                die("training portion is too small");
+            tokenizer_sample_len = train_corpus_len < options.tokenizer_sample_bytes
+                ? train_corpus_len : options.tokenizer_sample_bytes;
+            tokenizer_sample = (uint8_t*)arena_alloc(&arena, tokenizer_sample_len);
+            if (!tokenizer_sample) die("tokenizer sample allocation failed");
+            memcpy(tokenizer_sample, corpus, tokenizer_sample_len);
         }
 
-        printf("Tokenizer training sample: %zu bytes\n", sample_len);
+        const size_t sample_len = tokenizer_sample_len;
+        printf("Tokenizer trainer sample: %zu bytes\n", sample_len);
         if (!tokenizer_train(&tok, &arena, tokenizer_sample,
             sample_len, options.model.vocab_size))
             die("tokenizer_train failed");
