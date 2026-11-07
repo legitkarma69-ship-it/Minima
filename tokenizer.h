@@ -10,6 +10,13 @@
 #define TOK_MAX_MERGES    (TOK_MAX_VOCAB - 256)
 #define TOK_MAX_TOKEN_LEN 64          // longest token string we keep
 
+/* Reserved token IDs are serialized but not emitted by the raw-byte encoder. */
+#define TOK_BOS_ID        0
+#define TOK_EOS_ID        1
+#define TOK_PAD_ID        2
+#define TOK_UNK_ID        3
+#define TOK_SPECIAL_COUNT 4
+
 typedef struct {
     uint16_t left;                    // token id
     uint16_t right;                   // token id
