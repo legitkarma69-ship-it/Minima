@@ -11,6 +11,9 @@
 #include <math.h>
 #include "gui_protocol.h"
 #include "gui_chat_state.h"
+#include "graph.h"
+#include "settings.h"
+#include "engine_io.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
@@ -34,12 +37,16 @@
 #define IDC_AUTO_SETTINGS 1016
 #define IDC_ADVANCED_TOGGLE 1017
 #define IDC_CHAT_TEST    1018
+#define IDC_MAIN_TABS    1019
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
 #define IDT_GRAPH_REFRESH 1
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
+static HWND g_main_tabs;
+static MinimaSettingsContext g_settings_context;
+static int g_active_page;
 static HWND g_tab_controls[40];
 static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_total_steps, g_log_interval, g_validation_batches;
@@ -61,18 +68,11 @@ static wchar_t g_engine_path[MAX_PATH];
 static HWND g_tooltip;
 static HWND g_group_corpus, g_group_model, g_group_training, g_output_label;
 static HWND g_group_advanced, g_group_monitor, g_group_output;
-static BOOL g_advanced_expanded = TRUE;
+static BOOL g_advanced_expanded = FALSE;
 static UINT g_dpi = 96;
 static HFONT g_ui_font;
-static HPEN g_graph_grid_pen, g_graph_train_pen, g_graph_valid_pen;
-static HDC g_graph_back_dc;
-static HBITMAP g_graph_back_bitmap;
-static HGDIOBJ g_graph_back_old_bitmap;
-static int g_graph_back_width, g_graph_back_height;
 static HWND g_advanced_controls[32];
 static int g_advanced_control_count;
-static float g_graph_train[512], g_graph_valid[512];
-static int g_graph_count;
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 static GuiInitialRect g_initial_rects[160];
 static int g_initial_rect_count;
@@ -146,22 +146,63 @@ static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
+static BOOL is_advanced_page_control(HWND child) {
+    if (child == g_group_advanced) return TRUE;
+    if (child == g_chat_test) return TRUE;
+    for (int i = 0; i < g_advanced_control_count; ++i)
+        if (g_advanced_controls[i] == child) return TRUE;
+    return FALSE;
+}
+
+static BOOL is_chat_page_control(HWND child) {
+    return child == g_group_output || child == g_output_label || child == g_log ||
+        child == g_chat_input ||
+        child == GetDlgItem(g_window, IDC_CHAT_START) ||
+        child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
+        child == GetDlgItem(g_window, IDC_CHAT_STOP);
+}
+
+static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
+    const int page = (int)page_parameter;
+    if (child == g_main_tabs) return TRUE;
+    BOOL visible;
+    if (page == 0)
+        visible = !is_advanced_page_control(child) && !is_chat_page_control(child);
+    else if (page == 1)
+        visible = is_advanced_page_control(child) &&
+            (child == g_group_advanced || g_advanced_expanded);
+    else
+        visible = is_chat_page_control(child);
+    ShowWindow(child, visible ? SW_SHOWNA : SW_HIDE);
+    return TRUE;
+}
+
+static void select_main_page(HWND hwnd, int page) {
+    if (page < 0 || page > 2) return;
+    g_active_page = page;
+    if (g_main_tabs) TabCtrl_SetCurSel(g_main_tabs, page);
+    EnumChildWindows(hwnd, apply_page_visibility, (LPARAM)page);
+    layout_controls(hwnd);
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 static void layout_controls(HWND hwnd) {
     RECT client; GetClientRect(hwnd,&client);
     const int width=client.right, height=client.bottom;
     const int pad=scale_px(12), gap=scale_px(12), inner=width-2*pad;
     if(inner<=0)return;
-    const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(8);
+    const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
     const int bottom_h=scale_px(82), action_h=scale_px(38);
-    const int output_top=work_top+scale_px(368);
+    const int output_top=(g_active_page==2?scale_px(46):work_top+scale_px(368));
     const int output_bottom=height-bottom_h-scale_px(8);
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
     const int advanced_y=work_top+scale_px(106);
-    if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(6),width-scale_px(16),corpus_h,TRUE);
-    if(g_corpus)MoveWindow(g_corpus,pad,scale_px(30),inner,scale_px(58),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(94),scale_px(104),scale_px(26),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(94),scale_px(136),scale_px(26),TRUE);
+    if(g_main_tabs)MoveWindow(g_main_tabs,pad,scale_px(6),inner,scale_px(28),TRUE);
+    if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(40),width-scale_px(16),corpus_h,TRUE);
+    if(g_corpus)MoveWindow(g_corpus,pad,scale_px(64),inner,scale_px(58),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(128),scale_px(104),scale_px(26),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(128),scale_px(136),scale_px(26),TRUE);
     if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
     if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
@@ -172,7 +213,7 @@ static void layout_controls(HWND hwnd) {
     for(int i=0;i<g_initial_rect_count;i++){
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
-           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_corpus||
+           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
            child==g_graph||child==g_log||child==g_chat_input||child==g_chat_test)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
@@ -203,8 +244,9 @@ static void layout_controls(HWND hwnd) {
     if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,pad,chat_y,inner-scale_px(340),scale_px(180),TRUE);
-    if(g_chat_test)MoveWindow(g_chat_test,width-pad-scale_px(326),chat_y,scale_px(100),scale_px(28),TRUE);
+    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(112):pad,chat_y,inner-scale_px(340)-scale_px(112),scale_px(180),TRUE);
+    if(g_active_page==2)MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
+    if(g_chat_test)MoveWindow(g_chat_test,right_x,advanced_y+scale_px(28),scale_px(120),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
 }
@@ -219,170 +261,6 @@ static void add_tooltip(HWND target, const wchar_t* text) {
     info.uId = (UINT_PTR)target;
     info.lpszText = (LPWSTR)text;
     SendMessageW(g_tooltip, TTM_ADDTOOLW, 0, (LPARAM)&info);
-}
-
-static void refresh_graph_metrics(void) {
-    g_graph_count = 0;
-    FILE* file = _wfopen(g_metrics_path, L"rt");
-    if (!file) return;
-
-    char line[512];
-    if (fseek(file, 0, SEEK_END) == 0) {
-        long end = ftell(file);
-        long start = end > 262144 ? end - 262144 : 0;
-        if (start > 0) {
-            fseek(file, start, SEEK_SET);
-            (void)fgets(line, sizeof(line), file);
-        } else {
-            rewind(file);
-            (void)fgets(line, sizeof(line), file);
-        }
-    }
-    while (fgets(line, sizeof(line), file)) {
-        double step, train, valid, lr, train_ppl, valid_ppl, elapsed;
-        if (sscanf_s(line, "%lf,%lf,%lf,%lf,%lf,%lf,%lf", &step, &train, &valid, &lr, &train_ppl, &valid_ppl, &elapsed) == 7) {
-            if (g_graph_count == 512) {
-                memmove(g_graph_train, g_graph_train + 1, 511 * sizeof(float));
-                memmove(g_graph_valid, g_graph_valid + 1, 511 * sizeof(float));
-                g_graph_count = 511;
-            }
-            g_graph_train[g_graph_count] = (float)train;
-            g_graph_valid[g_graph_count] = (float)valid;
-            ++g_graph_count;
-        }
-    }
-    fclose(file);
-}
-
-static void release_graph_backbuffer(void) {
-    if (g_graph_back_dc && g_graph_back_old_bitmap)
-        SelectObject(g_graph_back_dc, g_graph_back_old_bitmap);
-    if (g_graph_back_bitmap) {
-        DeleteObject(g_graph_back_bitmap);
-        g_graph_back_bitmap = NULL;
-    }
-    if (g_graph_back_dc) {
-        DeleteDC(g_graph_back_dc);
-        g_graph_back_dc = NULL;
-    }
-    g_graph_back_old_bitmap = NULL;
-    g_graph_back_width = 0;
-    g_graph_back_height = 0;
-}
-
-static BOOL ensure_graph_backbuffer(HDC reference, int width, int height) {
-    if (width <= 0 || height <= 0) return FALSE;
-    if (!g_graph_back_dc) {
-        g_graph_back_dc = CreateCompatibleDC(reference);
-        if (!g_graph_back_dc) return FALSE;
-    }
-    if (g_graph_back_bitmap && width == g_graph_back_width &&
-        height == g_graph_back_height)
-        return TRUE;
-
-    if (g_graph_back_bitmap) {
-        SelectObject(g_graph_back_dc, g_graph_back_old_bitmap);
-        DeleteObject(g_graph_back_bitmap);
-        g_graph_back_bitmap = NULL;
-        g_graph_back_old_bitmap = NULL;
-    }
-
-    HBITMAP bitmap = CreateCompatibleBitmap(reference, width, height);
-    if (!bitmap) return FALSE;
-    HGDIOBJ previous = SelectObject(g_graph_back_dc, bitmap);
-    if (!previous || previous == HGDI_ERROR) {
-        DeleteObject(bitmap);
-        return FALSE;
-    }
-    g_graph_back_bitmap = bitmap;
-    g_graph_back_old_bitmap = previous;
-    g_graph_back_width = width;
-    g_graph_back_height = height;
-    return TRUE;
-}
-
-static LRESULT CALLBACK graph_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    (void)wp; (void)lp;
-    if (msg == WM_CREATE) {
-        g_graph_grid_pen = CreatePen(PS_SOLID, 1, RGB(220,220,220));
-        g_graph_train_pen = CreatePen(PS_SOLID, 2, RGB(35,105,190));
-        g_graph_valid_pen = CreatePen(PS_SOLID, 2, RGB(190,85,45));
-        return 0;
-    }
-    if (msg == WM_DESTROY) {
-        release_graph_backbuffer();
-        if (g_graph_grid_pen) { DeleteObject(g_graph_grid_pen); g_graph_grid_pen = NULL; }
-        if (g_graph_train_pen) { DeleteObject(g_graph_train_pen); g_graph_train_pen = NULL; }
-        if (g_graph_valid_pen) { DeleteObject(g_graph_valid_pen); g_graph_valid_pen = NULL; }
-        return 0;
-    }
-    if (msg == WM_PAINT) {
-        PAINTSTRUCT ps;
-        HDC dc = BeginPaint(hwnd, &ps);
-        RECT rect;
-        GetClientRect(hwnd, &rect);
-        const int width = rect.right - rect.left;
-        const int height = rect.bottom - rect.top;
-        if (ensure_graph_backbuffer(dc, width, height)) {
-            HDC back = g_graph_back_dc;
-            FillRect(back, &rect, (HBRUSH)(COLOR_WINDOW + 1));
-            SetBkMode(back, TRANSPARENT);
-            SetTextColor(back, RGB(40,40,40));
-            TextOutW(back, scale_px(8), scale_px(5), L"Training / validation loss", 26);
-
-            const int left = scale_px(58), top = scale_px(30);
-            const int right = width - scale_px(12), bottom = height - scale_px(27);
-            float low = 0.0f, high = 1.0f;
-            if (g_graph_count > 0) {
-                low = g_graph_train[0];
-                high = g_graph_train[0];
-                for (int i = 0; i < g_graph_count; ++i) {
-                    if (g_graph_train[i] < low) low = g_graph_train[i];
-                    if (g_graph_valid[i] < low) low = g_graph_valid[i];
-                    if (g_graph_train[i] > high) high = g_graph_train[i];
-                    if (g_graph_valid[i] > high) high = g_graph_valid[i];
-                }
-                if (high - low < 0.001f) high = low + 0.001f;
-            }
-
-            if (g_graph_grid_pen) SelectObject(back, g_graph_grid_pen);
-            for (int i = 0; i <= 4; ++i) {
-                const int y = top + (bottom - top) * i / 4;
-                MoveToEx(back, left, y, NULL);
-                LineTo(back, right, y);
-                wchar_t label[24];
-                const float value = high - (high - low) * (float)i / 4.0f;
-                swprintf_s(label, _countof(label), L"%.2f", value);
-                TextOutW(back, scale_px(3), y - scale_px(7), label, (int)wcslen(label));
-            }
-
-            if (g_graph_count > 1) {
-                for (int series = 0; series < 2; ++series) {
-                    SelectObject(back, series ? g_graph_valid_pen : g_graph_train_pen);
-                    for (int i = 0; i < g_graph_count; ++i) {
-                        const float value = series ? g_graph_valid[i] : g_graph_train[i];
-                        const int x = left + (right - left) * i / (g_graph_count - 1);
-                        const int y = bottom - (int)((value - low) / (high - low) * (bottom - top));
-                        if (i == 0) MoveToEx(back, x, y, NULL);
-                        else LineTo(back, x, y);
-                    }
-                }
-                wchar_t legend[96];
-                swprintf_s(legend, _countof(legend), L"Train %.3f   Valid %.3f",
-                    g_graph_train[g_graph_count - 1], g_graph_valid[g_graph_count - 1]);
-                SetTextColor(back, RGB(35,105,190));
-                TextOutW(back, left, bottom + scale_px(5), legend, (int)wcslen(legend));
-            } else {
-                TextOutW(back, left, top + scale_px(35), L"Waiting for training metrics...", 31);
-            }
-            BitBlt(dc, 0, 0, width, height, back, 0, 0, SRCCOPY);
-        } else {
-            FillRect(dc, &rect, (HBRUSH)(COLOR_WINDOW + 1));
-        }
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
-    return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 static void save_chat_text(const wchar_t* text) {
@@ -439,76 +317,6 @@ static void set_running(BOOL running) {
     EnableWindow(g_chat_test,FALSE);
     SetWindowTextW(g_status,running?(g_chat_mode?L"Chat running":L"Training running"):L"Idle");
     update_fresh_only_controls();
-}
-
-static void post_chat_ready(void* context) {
-    PostMessageW((HWND)context, WM_CHAT_READY, 0, 0);
-}
-
-static DWORD WINAPI reader_thread(void* parameter) {
-    HANDLE pipe = (HANDLE)parameter;
-    char buffer[2048];
-    DWORD got;
-    char* carry = (char*)calloc(1, 65536);
-    size_t used = 0;
-    if (!carry) {
-        CloseHandle(pipe);
-        if(g_process)TerminateProcess(g_process,1);
-        PostMessageW(g_window,WM_ENGINE_EXIT,1,0);
-        return 1;
-    }
-
-    while (ReadFile(pipe, buffer, sizeof(buffer), &got, NULL) && got) {
-        for (DWORD i = 0; i < got; ++i) {
-            if (used + 2 >= 65536) used = 0;
-            carry[used++] = buffer[i];
-            if (buffer[i] == '\n' || used >= 60000) {
-                carry[used] = 0;
-                const int protocol_marker=minima_protocol_dispatch(carry, used, post_chat_ready, g_window);
-                if(protocol_marker==MINIMA_PROTOCOL_CHAT_READY){
-                    used=0;continue;
-                }
-                if(protocol_marker==MINIMA_PROTOCOL_CHAT_CLOSED){used=0;continue;}
-                UINT code_page=CP_UTF8;
-                int needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);
-                if(needed<=0){code_page=CP_ACP;needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);}
-                if (needed > 0) {
-                    wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
-                    if (wide) {
-                        MultiByteToWideChar(code_page, 0, carry, (int)used, wide, needed);
-                        PostMessageW(g_window, WM_APPEND_LOG, 0, (LPARAM)wide);
-                    }
-                }
-                used = 0;
-            }
-        }
-    }
-    if (used) {
-        carry[used] = 0;
-        UINT code_page = CP_UTF8;
-        int needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
-        if (needed <= 0) {
-            code_page = CP_ACP;
-            needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
-        }
-        if (needed > 0) {
-            wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
-            if (wide) {
-                MultiByteToWideChar(code_page, 0, carry, (int)used, wide, needed);
-                PostMessageW(g_window, WM_APPEND_LOG, 0, (LPARAM)wide);
-            }
-        }
-    }
-    free(carry);
-    CloseHandle(pipe);
-
-    if (g_process) {
-        WaitForSingleObject(g_process, INFINITE);
-        DWORD code = 1;
-        GetExitCodeProcess(g_process, &code);
-        PostMessageW(g_window, WM_ENGINE_EXIT, (WPARAM)code, 0);
-    }
-    return 0;
 }
 
 static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* arg) {
@@ -795,7 +603,8 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":
         (tokenizer_only?L"\r\n--- Rebuilding tokenizer from selected corpus ---\r\n":L"\r\n--- Starting Minima training engine ---\r\n"));
-    g_thread = CreateThread(NULL, 0, reader_thread, read_pipe, 0, NULL);
+    g_thread = minima_engine_start_reader(read_pipe, g_window, g_process,
+        WM_APPEND_LOG, WM_ENGINE_EXIT, WM_CHAT_READY);
     if (!g_thread) {
         TerminateProcess(g_process, 1);
         if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
@@ -1073,124 +882,30 @@ static void stop_engine(void) {
     }
 }
 
-static void load_edit_setting(const wchar_t* key,HWND control,const wchar_t* fallback) {
-    wchar_t value[128];
-    GetPrivateProfileStringW(L"Training",key,fallback,value,_countof(value),g_settings_path);
-    SetWindowTextW(control,value);
-}
+static void initialize_settings_context(HWND hwnd) {
+    ZeroMemory(&g_settings_context, sizeof(g_settings_context));
+    g_settings_context.path = g_settings_path;
+    g_settings_context.window = hwnd;
+    g_settings_context.use_saved_tokenizer = &g_use_saved_tokenizer;
+    g_settings_context.advanced_expanded = &g_advanced_expanded;
+    g_settings_context.prebuilt_vocab = g_prebuilt_vocab;
+    g_settings_context.prebuilt_tokenizer_bytes = g_prebuilt_tokenizer_bytes;
+    g_settings_context.prebuilt_sampling = g_prebuilt_sampling;
+    g_settings_context.set_advanced_expanded = set_advanced_expanded;
+    g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-static void save_edit_setting(const wchar_t* key,HWND control) {
-    wchar_t value[128];
-    GetWindowTextW(control,value,_countof(value));
-    WritePrivateProfileStringW(L"Training",key,value,g_settings_path);
-}
-
-static void load_combo_setting(const wchar_t* key,HWND control,const wchar_t* fallback) {
-    wchar_t value[64];
-    GetPrivateProfileStringW(L"Training",key,fallback,value,_countof(value),g_settings_path);
-    LRESULT index=SendMessageW(control,CB_FINDSTRINGEXACT,(WPARAM)-1,(LPARAM)value);
-    if(index>=0)SendMessageW(control,CB_SETCURSEL,(WPARAM)index,0);
-}
-
-static void save_combo_setting(const wchar_t* key,HWND control) {
-    int index=(int)SendMessageW(control,CB_GETCURSEL,0,0);
-    if(index<0)return;
-    wchar_t value[64];
-    SendMessageW(control,CB_GETLBTEXT,(WPARAM)index,(LPARAM)value);
-    WritePrivateProfileStringW(L"Training",key,value,g_settings_path);
-}
-
-static void load_settings(void) {
-    if(!g_settings_path[0])return;
-    load_edit_setting(L"steps",g_steps,L"2000");
-    load_edit_setting(L"vocab",g_vocab,L"2048");
-    load_edit_setting(L"dim",g_dim,L"64");
-    load_edit_setting(L"layers",g_layers,L"2");
-    load_edit_setting(L"heads",g_heads,L"2");
-    load_edit_setting(L"ffn",g_ffn,L"128");
-    load_edit_setting(L"context",g_max_seq,L"64");
-    load_edit_setting(L"batch",g_batch_size,L"4");
-    load_edit_setting(L"sequence",g_sequence_length,L"32");
-    load_edit_setting(L"learning_rate",g_lr,L"0.0003");
-    load_edit_setting(L"warmup",g_warmup,L"100");
-    load_edit_setting(L"total_steps",g_total_steps,L"2000");
-    load_edit_setting(L"log_interval",g_log_interval,L"100");
-    load_edit_setting(L"validation_interval",g_validation_interval,L"100");
-    load_edit_setting(L"validation_batches",g_validation_batches,L"16");
-    load_edit_setting(L"checkpoint_interval",g_checkpoint_interval,L"100");
-    load_edit_setting(L"seed",g_seed,L"1234");
-    load_edit_setting(L"tokenizer_bytes",g_tokenizer_bytes,L"262144");
-    load_edit_setting(L"temperature",g_temperature,L"0.8");
-    load_edit_setting(L"top_k",g_top_k,L"40");
-    load_edit_setting(L"top_p",g_top_p,L"0.9");
-    load_edit_setting(L"repetition",g_repetition,L"1.1");
-    load_edit_setting(L"max_tokens",g_max_tokens,L"32");
-    load_combo_setting(L"lr_schedule",g_lr_schedule,L"cosine");
-    load_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling,L"spread");
-    const BOOL advanced_expanded = GetPrivateProfileIntW(
-        L"UI", L"advanced_expanded", 1, g_settings_path) ? TRUE : FALSE;
-    set_advanced_expanded(g_window, advanced_expanded);
-    SendMessageW(g_resume,BM_SETCHECK,
-        GetPrivateProfileIntW(L"Training",L"resume",0,g_settings_path)?BST_CHECKED:BST_UNCHECKED,0);
-    g_use_saved_tokenizer=GetPrivateProfileIntW(L"Training",L"prebuilt_tokenizer",0,g_settings_path)?TRUE:FALSE;
-    GetPrivateProfileStringW(L"Training",L"prebuilt_vocab",L"",g_prebuilt_vocab,_countof(g_prebuilt_vocab),g_settings_path);
-    GetPrivateProfileStringW(L"Training",L"prebuilt_tokenizer_bytes",L"",g_prebuilt_tokenizer_bytes,_countof(g_prebuilt_tokenizer_bytes),g_settings_path);
-    GetPrivateProfileStringW(L"Training",L"prebuilt_sampling",L"",g_prebuilt_sampling,_countof(g_prebuilt_sampling),g_settings_path);
-
-    int count=GetPrivateProfileIntW(L"Corpus",L"count",0,g_settings_path);
-    if(count<0)count=0;if(count>32)count=32;
-    for(int i=0;i<count;i++){
-        wchar_t key[32],path[MAX_PATH*2];
-        _snwprintf_s(key,_countof(key),_TRUNCATE,L"file%d",i);
-        GetPrivateProfileStringW(L"Corpus",key,L"",path,_countof(path),g_settings_path);
-        if(path[0])SendMessageW(g_corpus,LB_ADDSTRING,0,(LPARAM)path);
-    }
-    update_fresh_only_controls();
-}
-
-static void save_settings(void) {
-    if(!g_settings_path[0])return;
-    save_edit_setting(L"steps",g_steps);
-    save_edit_setting(L"vocab",g_vocab);
-    save_edit_setting(L"dim",g_dim);
-    save_edit_setting(L"layers",g_layers);
-    save_edit_setting(L"heads",g_heads);
-    save_edit_setting(L"ffn",g_ffn);
-    save_edit_setting(L"context",g_max_seq);
-    save_edit_setting(L"batch",g_batch_size);
-    save_edit_setting(L"sequence",g_sequence_length);
-    save_edit_setting(L"learning_rate",g_lr);
-    save_edit_setting(L"warmup",g_warmup);
-    save_edit_setting(L"total_steps",g_total_steps);
-    save_edit_setting(L"log_interval",g_log_interval);
-    save_edit_setting(L"validation_interval",g_validation_interval);
-    save_edit_setting(L"validation_batches",g_validation_batches);
-    save_edit_setting(L"checkpoint_interval",g_checkpoint_interval);
-    save_edit_setting(L"seed",g_seed);
-    save_edit_setting(L"tokenizer_bytes",g_tokenizer_bytes);
-    save_edit_setting(L"temperature",g_temperature);
-    save_edit_setting(L"top_k",g_top_k);
-    save_edit_setting(L"top_p",g_top_p);
-    save_edit_setting(L"repetition",g_repetition);
-    save_edit_setting(L"max_tokens",g_max_tokens);
-    save_combo_setting(L"lr_schedule",g_lr_schedule);
-    save_combo_setting(L"tokenizer_sampling",g_tokenizer_sampling);
-    WritePrivateProfileStringW(L"UI",L"advanced_expanded",
-        g_advanced_expanded?L"1":L"0",g_settings_path);
-    WritePrivateProfileStringW(L"Training",L"resume",
-        SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED?L"1":L"0",g_settings_path);
-    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",g_use_saved_tokenizer?L"1":L"0",g_settings_path);
-    int count=(int)SendMessageW(g_corpus,LB_GETCOUNT,0,0);
-    if(count>32)count=32;
-    wchar_t number[16];
-    _snwprintf_s(number,_countof(number),_TRUNCATE,L"%d",count);
-    WritePrivateProfileStringW(L"Corpus",L"count",number,g_settings_path);
-    for(int i=0;i<count;i++){
-        wchar_t key[32],path[MAX_PATH*2];
-        _snwprintf_s(key,_countof(key),_TRUNCATE,L"file%d",i);
-        SendMessageW(g_corpus,LB_GETTEXT,(WPARAM)i,(LPARAM)path);
-        WritePrivateProfileStringW(L"Corpus",key,path,g_settings_path);
-    }
+    HWND edits[23] = {
+        g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
+        g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
+        g_log_interval, g_validation_interval, g_validation_batches,
+        g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
+        g_top_k, g_top_p, g_repetition, g_max_tokens
+    };
+    HWND combos[2] = { g_lr_schedule, g_tokenizer_sampling };
+    CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
+    CopyMemory(g_settings_context.combo_controls, combos, sizeof(combos));
+    g_settings_context.resume_control = g_resume;
+    g_settings_context.corpus_control = g_corpus;
 }
 
 static void create_controls(HWND hwnd) {
@@ -1198,13 +913,22 @@ static void create_controls(HWND hwnd) {
     if (!g_dpi) g_dpi = 96;
     rebuild_ui_font(hwnd);
 
+    g_main_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD|WS_VISIBLE|WS_TABSTOP,
+        12, 6, 920, 28, hwnd, (HMENU)IDC_MAIN_TABS, GetModuleHandleW(NULL), NULL);
+    if (g_main_tabs) {
+        TCITEMW item; ZeroMemory(&item, sizeof(item)); item.mask = TCIF_TEXT;
+        item.pszText = L"Training"; TabCtrl_InsertItem(g_main_tabs, 0, &item);
+        item.pszText = L"Advanced"; TabCtrl_InsertItem(g_main_tabs, 1, &item);
+        item.pszText = L"Chat & Generation"; TabCtrl_InsertItem(g_main_tabs, 2, &item);
+    }
+
     g_group_corpus = CreateWindowW(L"BUTTON", L"Corpus", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
         8, 6, 920, 168, hwnd, NULL, NULL, NULL);
     g_group_model = CreateWindowW(L"BUTTON", L"Model", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
         8, 168, 585, 38, hwnd, NULL, NULL, NULL);
     g_group_training = CreateWindowW(L"BUTTON", L"Training", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
         8, 202, 585, 38, hwnd, NULL, NULL, NULL);
-    g_group_advanced = CreateWindowW(L"BUTTON", L"Advanced / generation", WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX,
+    g_group_advanced = CreateWindowW(L"BUTTON", L"Show advanced settings", WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX,
         8, 236, 220, 24, hwnd, (HMENU)IDC_ADVANCED_TOGGLE, NULL, NULL);
     SendMessageW(g_group_advanced, BM_SETCHECK, BST_CHECKED, 0);
     g_group_monitor = CreateWindowW(L"BUTTON", L"Monitor", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
@@ -1302,6 +1026,7 @@ static void create_controls(HWND hwnd) {
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
     EnableWindow(g_chat_input,FALSE);
     g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,hwnd,(HMENU)IDC_CHAT_TEST,NULL,NULL);
+    register_advanced_control(g_chat_test);
     CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
@@ -1341,6 +1066,7 @@ static void create_controls(HWND hwnd) {
     g_initial_rect_count=0;
     EnumChildWindows(hwnd,capture_initial_rect,0);
     layout_controls(hwnd);
+    select_main_page(hwnd, 0);
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
@@ -1362,7 +1088,9 @@ static void create_controls(HWND hwnd) {
         SetWindowLongPtrW(g_tab_controls[i],GWL_STYLE,style|WS_TABSTOP);
     }
 
-    load_settings();
+    initialize_settings_context(hwnd);
+    minima_settings_load(&g_settings_context);
+    select_main_page(hwnd, 0);
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
     if(history_slash)wcscpy_s(history_slash+1,_countof(history_path)-(size_t)(history_slash+1-history_path),L"minima_chat.txt");
@@ -1388,12 +1116,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CREATE:
         g_window = hwnd;
         create_controls(hwnd);
-        refresh_graph_metrics();
+        minima_graph_refresh();
         SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL);
         return 0;
     case WM_TIMER:
         if(wp==IDT_GRAPH_REFRESH && g_graph) {
-            refresh_graph_metrics();
+            minima_graph_refresh();
             InvalidateRect(g_graph,NULL,FALSE);
         }
         return 0;
@@ -1418,12 +1146,20 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DpiScaleContext context = { hwnd, old_dpi, new_dpi };
         EnumChildWindows(hwnd, scale_child_for_dpi, (LPARAM)&context);
         g_dpi = new_dpi;
+        minima_graph_set_dpi(g_dpi);
         rebuild_ui_font(hwnd);
         layout_controls(hwnd);
-        refresh_graph_metrics();
+        minima_graph_refresh();
         if (g_graph) InvalidateRect(g_graph, NULL, FALSE);
         return 0;
     }
+    case WM_NOTIFY:
+        if (((NMHDR*)lp)->hwndFrom == g_main_tabs &&
+            ((NMHDR*)lp)->code == TCN_SELCHANGE) {
+            select_main_page(hwnd, TabCtrl_GetCurSel(g_main_tabs));
+            return 0;
+        }
+        break;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case IDC_ADD: g_use_saved_tokenizer=FALSE; WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path); add_corpus_files(); return 0;
@@ -1490,12 +1226,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
             if (MessageBoxW(hwnd,L"An engine process is running. Stop it and close?",
                 L"ProjectMinima",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
-            save_settings();
+            minima_settings_save(&g_settings_context);
             if(g_chat_mode){g_close_when_done=TRUE;TerminateProcess(g_process,3);}
             else {if(!request_cooperative_stop())return 0;g_close_when_done=TRUE;}
             return 0;
         }
-        save_settings();
+        minima_settings_save(&g_settings_context);
         DestroyWindow(hwnd);
         return 0;
     case WM_DESTROY:
@@ -1515,7 +1251,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     /* Per-Monitor V2 awareness is declared in the embedded application manifest. */
     g_dpi = GetDpiForSystem();
     if (!g_dpi) g_dpi = 96;
-    INITCOMMONCONTROLSEX controls = { sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS };
+    INITCOMMONCONTROLSEX controls = { sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS | ICC_TAB_CLASSES };
     InitCommonControlsEx(&controls);
 
     DWORD n = GetModuleFileNameW(NULL, g_engine_path, _countof(g_engine_path));
@@ -1528,13 +1264,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     if(settings_slash)wcscpy_s(settings_slash+1,_countof(g_settings_path)-(size_t)(settings_slash+1-g_settings_path),L"minima_gui.ini");
 
     WNDCLASSW gwc; ZeroMemory(&gwc,sizeof(gwc));
-    gwc.lpfnWndProc=graph_proc;gwc.hInstance=instance;gwc.lpszClassName=L"MinimaLossGraph";
+    gwc.lpfnWndProc=minima_graph_window_proc;gwc.hInstance=instance;gwc.lpszClassName=L"MinimaLossGraph";
     gwc.hCursor=LoadCursorW(NULL,IDC_ARROW);gwc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);
     if(!RegisterClassW(&gwc))return 1;
     DWORD plen=GetModuleFileNameW(NULL,g_metrics_path,_countof(g_metrics_path));
     if(!plen||plen>=_countof(g_metrics_path))return 1;
     wchar_t* pslash=wcsrchr(g_metrics_path,L'\\');
     if(pslash)wcscpy_s(pslash+1,_countof(g_metrics_path)-(size_t)(pslash+1-g_metrics_path),L"minima_metrics.csv");
+    minima_graph_set_metrics_path(g_metrics_path);
+    minima_graph_set_dpi(g_dpi);
 
     WNDCLASSW wc; ZeroMemory(&wc,sizeof(wc));
     wc.lpfnWndProc = window_proc;
