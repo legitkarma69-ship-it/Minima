@@ -8,6 +8,7 @@
 #include "gradcheck.h"
 #include "generate.h"
 #include "corpus.h"
+#include "mapped_buffer.h"
 #include "checkpoint.h"
 #include "config.h"
 #include "train.h"
@@ -301,11 +302,16 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------
     Arena arena;
     Arena temp;
+    Arena corpus_arena;
+    memset(&corpus_arena, 0, sizeof(corpus_arena));
 
     if (!arena_init(&arena, 8ull * 1024 * 1024 * 1024))
         die("permanent arena failed");
     if (!arena_init(&temp, 256ull * 1024 * 1024))
         die("temp arena failed");
+    if (!options.tokenizer_only && !options.chat_mode &&
+        !arena_init(&corpus_arena, 4ull * 1024 * 1024 * 1024))
+        die("corpus arena failed");
 
     // ------------------------------------------------------------------
     // 2. Select corpus sources and sample the tokenizer directly from disk
@@ -366,7 +372,7 @@ int main(int argc, char** argv) {
     bool have_corpus = false;
     if (!options.tokenizer_only && !options.chat_mode) {
         const CorpusLoadResult load_result = corpus_load_files(&loaded_corpus,
-            &arena, corpus_paths, corpus_path_count, max_corpus_bytes);
+            &corpus_arena, corpus_paths, corpus_path_count, max_corpus_bytes);
         if (load_result == CORPUS_LOAD_ERROR)
             die("corpus loading failed (check file access, available memory, and supported corpus size)");
         have_corpus = load_result == CORPUS_LOAD_OK;
@@ -464,6 +470,7 @@ int main(int argc, char** argv) {
     if (options.tokenizer_only) {
         printf("Tokenizer rebuild completed: minima.bpe was replaced.\n");
         printf("The existing model checkpoint is now incompatible; start a fresh training run.\n");
+        arena_free(&corpus_arena);
         arena_free(&temp);
         arena_free(&arena);
         return 0;
@@ -472,14 +479,28 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------
     // 4. Encode the complete corpus and create held-out validation region
     // ------------------------------------------------------------------
-    uint16_t* all_ids = (uint16_t*)arena_alloc(&arena,
-        corpus_len * sizeof(uint16_t));
-    if (!all_ids) die("token id allocation failed");
+    if (corpus_len > SIZE_MAX / sizeof(uint16_t))
+        die("token ID mapping size overflow");
+    MappedBuffer token_ids_mapping;
+    memset(&token_ids_mapping, 0, sizeof(token_ids_mapping));
+#ifndef _WIN32
+    token_ids_mapping.file_descriptor = -1;
+#endif
+    if (!mapped_buffer_create(&token_ids_mapping,
+            corpus_len * sizeof(uint16_t)))
+        die("could not create disk-backed token ID mapping");
+    uint16_t* all_ids = (uint16_t*)token_ids_mapping.data;
 
     const int n_tokens = tokenizer_encode(&tok, corpus, corpus_len,
         all_ids, (int)corpus_len);
     if (n_tokens <= 0) die("corpus tokenization failed");
-    printf("total tokens = %d\n\n", n_tokens);
+    printf("total tokens = %d (disk-backed token array: %.1f MiB)\n\n",
+        n_tokens, (double)corpus_len * sizeof(uint16_t) /
+            (1024.0 * 1024.0));
+
+    /* Raw source bytes are no longer needed after tokenization. Releasing this
+       separate arena avoids retaining the complete text beside the token map. */
+    arena_free(&corpus_arena);
 
     const int train_tokens = n_tokens - n_tokens / 20;
     const int validation_tokens = n_tokens - train_tokens;
@@ -533,7 +554,8 @@ int main(int argc, char** argv) {
             .max_new_tokens = options.max_new_tokens
         };
         int chat_result=chat_run_console(&model,&tok,&chat_cache,&chat_options);
-        arena_free(&temp);arena_free(&arena);return chat_result;
+        mapped_buffer_destroy(&token_ids_mapping);
+        arena_free(&corpus_arena);arena_free(&temp);arena_free(&arena);return chat_result;
     }
 
     Gradients grads;
@@ -754,6 +776,8 @@ int main(int argc, char** argv) {
     printf("\nSmoke test finished.\n");
     printf("Training, validation, persistence, and generation checks completed.\n");
 
+    mapped_buffer_destroy(&token_ids_mapping);
+    arena_free(&corpus_arena);
     arena_free(&temp);
     arena_free(&arena);
     return 0;
