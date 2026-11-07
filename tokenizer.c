@@ -1048,15 +1048,14 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
     return output_count;
 }
 
-/* Encode large inputs in bounded windows. Every token is at most
-   TOK_MAX_TOKEN_LEN bytes, so 63 bytes of lookahead are sufficient to make
-   the emitted prefix independent of the next window. A token crossing the
-   core boundary is emitted whole and advances the next window start. */
-#define TOKENIZER_ENCODE_CHUNK_BYTES (4u * 1024u * 1024u)
+/* Encode large inputs in independent 1 MiB cores. A 63-byte overlap on
+   either side is enough because no token can exceed TOK_MAX_TOKEN_LEN bytes.
+   Workers emit only tokens whose starting byte belongs to their core. */
+#define TOKENIZER_ENCODE_CHUNK_BYTES (1024u * 1024u)
 
 static int tokenizer_encode_chunked(const Tokenizer* tok,
     const uint8_t* text, size_t text_len, uint16_t* out, int out_cap) {
-    const size_t chunk_bytes = 1024u * 1024u;
+    const size_t chunk_bytes = TOKENIZER_ENCODE_CHUNK_BYTES;
     const size_t lookahead = TOK_MAX_TOKEN_LEN - 1u;
     const size_t chunk_count_size =
         (text_len + chunk_bytes - 1u) / chunk_bytes;
