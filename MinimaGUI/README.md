@@ -69,3 +69,15 @@ Chat requires `minima.model` and `minima.bpe`. Set the model configuration contr
 A Windows x64 GitHub Actions workflow builds both executables and publishes them as a downloadable artifact for each successful build.
 
 The UI is deliberately a controller. It must not own model weights, perform forward/backward passes, or block the window thread with training or generation work.
+
+
+## GUI module boundaries
+
+The Win32 shell is being split into focused modules while keeping the existing window procedure and control behavior intact:
+
+- `gui_layout.c/.h` owns responsive control positioning, tab visibility, and DPI scaling.
+- `gui_pages.c/.h` owns the tab strip and the top-level page group containers.
+- `gui_actions.c/.h` owns command-ID dispatch and routes commands to the application action callbacks.
+- `MinimaGUI.c` retains process orchestration, application state, and the concrete callbacks that connect UI actions to settings and engine operations.
+
+This is an incremental extraction: the detailed child-control construction and some action implementations remain in the application file and can be moved behind the page/action interfaces in subsequent changes. The goal is to keep each extraction behavior-preserving and independently buildable.
