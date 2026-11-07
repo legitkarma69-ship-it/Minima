@@ -17,7 +17,7 @@ Minima.exe --retrain-tokenizer-only --tokenizer-sample-bytes 1048576 ^
 
 ## Full-corpus encoding and training
 
-- Large inputs are encoded in 1 MiB windows with 63 bytes of lookahead. The encoder emits complete tokens at window boundaries, so chunked output is checked against the reference encoder in regression tests.
+- Large inputs are encoded in 1 MiB windows with a 63-byte overlap on both sides. The encoder emits complete tokens at window boundaries, so chunked output is checked against the reference encoder in regression tests.
 - The token-ID array is stored in a temporary disk-backed memory mapping. The operating system pages it in as training and diagnostics access it.
 - After encoding, Minima releases the raw corpus arena. The mapped token IDs remain available for random training and validation windows.
 - The temporary directory needs enough free space for the token-ID mapping. A corpus of about 950 MB can require up to about 1.9 GB for the worst-case \`uint16_t\` token array.
