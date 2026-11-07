@@ -298,8 +298,8 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
 }
 
 
-/* Keep the production entry point on the proven reference path until the
-   incremental trainer passes equivalence and benchmark acceptance gates. */
+/* Production training uses the incremental implementation; the reference
+   path remains available for regression tests and benchmark comparisons. */
 bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab) {
     return tokenizer_train_incremental(tok, arena, sample, sample_len,
