@@ -18,7 +18,7 @@ static const wchar_t* const g_edit_keys[23] = {
 static const wchar_t* const g_edit_defaults[23] = {
     L"2000", L"2048", L"64", L"2", L"2", L"128", L"64", L"4", L"32",
     L"0.0003", L"100", L"20000", L"100", L"100", L"16", L"100", L"1234",
-    L"262144", L"0.8", L"40", L"0.9", L"1.1", L"32"
+    L"1048576", L"0.8", L"40", L"0.9", L"1.1", L"32"
 };
 static const wchar_t* const g_combo_keys[2] = {
     L"lr_schedule", L"tokenizer_sampling"
