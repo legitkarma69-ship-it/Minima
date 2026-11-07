@@ -338,8 +338,7 @@ typedef struct {
 } BpePairState;
 
 typedef struct {
-    uint32_t key;
-    uint32_t count;
+    uint32_t state_slot;
     uint32_t generation;
 } BpeReferenceSlot;
 
@@ -569,13 +568,12 @@ static bool bpe_reference_tie_winner(const BpePairState* states,
                     (reference_table_size - 1);
                 if (table[slot].generation != generation) {
                     table[slot].generation = generation;
-                    table[slot].key = key;
-                    table[slot].count = states[state_slot].count;
+                    table[slot].state_slot = state_slot;
                     final_slot = slot;
                     inserted = true;
                     break;
                 }
-                if (table[slot].key == key)
+                if (states[table[slot].state_slot].key == key)
                     return false; /* each pair state must appear only once */
             }
             if (!inserted) return false;
