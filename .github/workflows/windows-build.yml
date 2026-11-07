@@ -102,6 +102,17 @@ jobs:
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test default-model numerical gradient stability
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw "Visual C++ x64 tools were not found." }
+          $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC /I. tests\gradcheck_test.c gradcheck.c backward.c forward.c model.c arena.c util.c /Fe:gradcheck_test.exe && gradcheck_test.exe'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Test direct zero-allocation gradient initialization
         shell: pwsh
         run: |
