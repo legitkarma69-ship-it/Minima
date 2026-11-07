@@ -74,6 +74,13 @@ jobs:
             -lm -o tokenizer_test
           ./tokenizer_test
 
+      - name: Test chunked large-input tokenizer equivalence
+        run: |
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/tokenizer_chunked_encode_test.c tokenizer.c arena.c util.c \
+            -lm -o tokenizer_chunked_encode_test
+          ./tokenizer_chunked_encode_test
+
       - name: Test incremental tokenizer trainer equivalence
         run: |
           gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
