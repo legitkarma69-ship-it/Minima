@@ -8,6 +8,9 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 #else
 #include <unistd.h>
 #endif
@@ -265,6 +268,16 @@ typedef struct {
     uint32_t generation;
 } BpeReferenceSlot;
 
+static uint32_t bpe_ctz64(uint64_t value) {
+#ifdef _MSC_VER
+    unsigned long bit = 0;
+    _BitScanForward64(&bit, value);
+    return (uint32_t)bit;
+#else
+    return (uint32_t)__builtin_ctzll(value);
+#endif
+}
+
 static bool bpe_pair_better(const BpePairState* states,
     uint32_t left_slot, uint32_t right_slot) {
     if (states[left_slot].count != states[right_slot].count)
@@ -369,7 +382,8 @@ static uint32_t bpe_pair_state_find(BpePairState* states,
 
 static bool bpe_pair_add(BpeNode* nodes, const Tokenizer* tok,
     BpePairState* states, size_t state_table_size,
-    uint32_t* heap, uint32_t* heap_count, uint32_t left_index) {
+    uint32_t* heap, uint32_t* heap_count, uint32_t left_index,
+    uint32_t* first_slot_by_node, uint64_t* first_occurrence_bits) {
     const uint32_t right_index = nodes[left_index].next;
     if (right_index == BPE_NONE) return true;
     const uint16_t left_id = nodes[left_index].id;
@@ -389,6 +403,7 @@ static bool bpe_pair_add(BpeNode* nodes, const Tokenizer* tok,
     if (slot == BPE_NONE || states[slot].count == UINT32_MAX)
         return false;
 
+    const bool was_empty = states[slot].count == 0;
     nodes[left_index].pair_slot = slot;
     nodes[left_index].occ_prev = states[slot].tail;
     nodes[left_index].occ_next = BPE_NONE;
@@ -397,23 +412,38 @@ static bool bpe_pair_add(BpeNode* nodes, const Tokenizer* tok,
     else
         states[slot].head = left_index;
     states[slot].tail = left_index;
+    if (was_empty) {
+        first_slot_by_node[left_index] = slot;
+        first_occurrence_bits[left_index >> 6] |=
+            (uint64_t)1 << (left_index & 63);
+    }
     states[slot].count++;
     bpe_heap_changed(states, heap, heap_count, slot);
     return true;
 }
 
 static bool bpe_pair_remove(BpeNode* nodes, BpePairState* states,
-    uint32_t* heap, uint32_t* heap_count, uint32_t left_index) {
+    uint32_t* heap, uint32_t* heap_count, uint32_t left_index,
+    uint32_t* first_slot_by_node, uint64_t* first_occurrence_bits) {
     const uint32_t slot = nodes[left_index].pair_slot;
     if (slot == BPE_NONE) return true;
     if (states[slot].count == 0) return false;
 
     const uint32_t before = nodes[left_index].occ_prev;
     const uint32_t after = nodes[left_index].occ_next;
-    if (before != BPE_NONE)
+    if (before != BPE_NONE) {
         nodes[before].occ_next = after;
-    else
+    } else {
         states[slot].head = after;
+        first_slot_by_node[left_index] = BPE_NONE;
+        first_occurrence_bits[left_index >> 6] &=
+            ~((uint64_t)1 << (left_index & 63));
+        if (after != BPE_NONE) {
+            first_slot_by_node[after] = slot;
+            first_occurrence_bits[after >> 6] |=
+                (uint64_t)1 << (after & 63);
+        }
+    }
     if (after != BPE_NONE)
         nodes[after].occ_prev = before;
     else
@@ -427,61 +457,66 @@ static bool bpe_pair_remove(BpeNode* nodes, BpePairState* states,
     return true;
 }
 
-/* Reconstruct the reference hash table only when the maximum frequency is
-   tied. This preserves the old trainer's exact lowest-final-hash-slot choice
-   without imposing a full-stream scan on the common unique-maximum case. */
-static bool bpe_reference_tie_winner(const BpeNode* nodes,
-    uint32_t first_node, const Tokenizer* tok, size_t reference_table_size,
-    BpeReferenceSlot* table, uint32_t* generation_out,
-    uint32_t* winner_key_out) {
+/* Recreate the old hash table's insertion order without rescanning every
+   active edge. The bitset contains exactly one bit per nonempty pair state,
+   at the original position of that pair's first active occurrence. */
+static bool bpe_reference_tie_winner(const BpePairState* states,
+    const uint32_t* first_slot_by_node,
+    const uint64_t* first_occurrence_bits, size_t bit_words,
+    size_t reference_table_size, BpeReferenceSlot* table,
+    uint32_t* generation_out, uint32_t* winner_key_out) {
     uint32_t generation = *generation_out + 1;
     if (generation == 0) {
         memset(table, 0, reference_table_size * sizeof(*table));
         generation = 1;
     }
 
-    for (uint32_t i = first_node; i != BPE_NONE; i = nodes[i].next) {
-        const uint32_t j = nodes[i].next;
-        if (j == BPE_NONE) continue;
-        const uint16_t left = nodes[i].id;
-        const uint16_t right = nodes[j].id;
-        const int left_len = tok->token_len[left];
-        const int right_len = tok->token_len[right];
-        if (left_len <= 0 || right_len <= 0 ||
-            left_len > TOK_MAX_TOKEN_LEN - right_len)
-            continue;
-
-        const uint32_t key = ((uint32_t)left << 16) | right;
-        const size_t start = pair_hash(left, right, reference_table_size);
-        bool inserted = false;
-        for (size_t probe = 0; probe < reference_table_size; probe++) {
-            const size_t slot = (start + probe) & (reference_table_size - 1);
-            if (table[slot].generation != generation) {
-                table[slot].generation = generation;
-                table[slot].key = key;
-                table[slot].count = 1;
-                inserted = true;
-                break;
-            }
-            if (table[slot].key == key) {
-                if (table[slot].count == UINT32_MAX) return false;
-                table[slot].count++;
-                inserted = true;
-                break;
-            }
-        }
-        if (!inserted) return false;
-    }
-
     uint32_t best_count = 0;
+    size_t best_slot = SIZE_MAX;
     uint32_t best_key = 0;
-    for (size_t i = 0; i < reference_table_size; i++) {
-        if (table[i].generation == generation &&
-            table[i].count > best_count) {
-            best_count = table[i].count;
-            best_key = table[i].key;
+    for (size_t word_index = 0; word_index < bit_words; word_index++) {
+        uint64_t bits = first_occurrence_bits[word_index];
+        while (bits) {
+            const uint32_t bit = bpe_ctz64(bits);
+            const size_t node_index = word_index * 64 + bit;
+            const uint32_t state_slot = first_slot_by_node[node_index];
+            if (state_slot == BPE_NONE || states[state_slot].count == 0)
+                return false;
+
+            const uint32_t key = states[state_slot].key;
+            const uint16_t left = (uint16_t)(key >> 16);
+            const uint16_t right = (uint16_t)key;
+            const size_t start = pair_hash(left, right,
+                reference_table_size);
+            bool inserted = false;
+            size_t final_slot = SIZE_MAX;
+            for (size_t probe = 0; probe < reference_table_size; probe++) {
+                const size_t slot = (start + probe) &
+                    (reference_table_size - 1);
+                if (table[slot].generation != generation) {
+                    table[slot].generation = generation;
+                    table[slot].key = key;
+                    table[slot].count = states[state_slot].count;
+                    final_slot = slot;
+                    inserted = true;
+                    break;
+                }
+                if (table[slot].key == key)
+                    return false; /* each pair state must appear only once */
+            }
+            if (!inserted) return false;
+
+            const uint32_t count = states[state_slot].count;
+            if (count > best_count ||
+                (count == best_count && final_slot < best_slot)) {
+                best_count = count;
+                best_slot = final_slot;
+                best_key = key;
+            }
+            bits &= bits - 1;
         }
     }
+
     *generation_out = generation;
     *winner_key_out = best_key;
     return best_count > 0;
