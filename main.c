@@ -417,7 +417,8 @@ int main(int argc, char** argv) {
             sample_len, options.model.vocab_size))
             die("tokenizer_train failed");
         if (tok.vocab_size != options.model.vocab_size)
-            die("BPE could not reach the configured vocabulary size");
+            die("BPE stopped at vocabulary %d before the configured model vocabulary %d; the sample may not contain enough repeated pairs or eligible merges",
+                tok.vocab_size, options.model.vocab_size);
         if (!tokenizer_save(&tok, "minima.bpe"))
             die("failed to save tokenizer to minima.bpe");
     }
