@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #define CHECK(x) do { if (!(x)) { \
-    fprintf(stderr, "FAIL %s:%d: %s\\n", __FILE__, __LINE__, #x); \
+    fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); \
     return 1; } } while (0)
 
 static bool write_checkpoint_bytes(const char* path,
