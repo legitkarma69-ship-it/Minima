@@ -28,9 +28,47 @@ static void fill_normal(float* p, size_t n, float std, Rng* rng) {
         p[i] = randn(rng) * std;
 }
 
-// Fill with zeros
-static void fill_zero(float* p, size_t n) {
-    memset(p, 0, n * sizeof(float));
+bool model_config_validate(const ModelConfig* config) {
+    return config &&
+        config->vocab_size >= MODEL_MIN_VOCAB_SIZE &&
+        config->vocab_size <= MODEL_MAX_VOCAB_SIZE &&
+        config->dim > 0 && config->dim <= MODEL_MAX_DIM &&
+        config->n_layers > 0 && config->n_layers <= MODEL_MAX_LAYERS &&
+        config->n_heads > 0 && config->n_heads <= MODEL_MAX_HEADS &&
+        config->dim % config->n_heads == 0 &&
+        config->ffn_dim > 0 && config->ffn_dim <= MODEL_MAX_FFN_DIM &&
+        config->max_seq >= MODEL_MIN_SEQ &&
+        config->max_seq <= MODEL_MAX_SEQ;
+}
+
+bool model_validate(const Model* model) {
+    if (!model) return false;
+    const ModelConfig config = {
+        model->vocab_size, model->dim, model->n_layers,
+        model->n_heads, model->ffn_dim, model->max_seq
+    };
+    if (!model_config_validate(&config) ||
+        model->head_dim != model->dim / model->n_heads ||
+        !model->tok_emb || !model->pos_emb ||
+        !model->attn_qkv || !model->attn_proj ||
+        !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
+        !model->rms1_scale || !model->rms2_scale ||
+        !model->rms_final_scale)
+        return false;
+
+    const size_t dim = (size_t)model->dim;
+    const size_t layers = (size_t)model->n_layers;
+    const size_t ffn = (size_t)model->ffn_dim;
+    const size_t params =
+        (size_t)model->vocab_size * dim +
+        (size_t)model->max_seq * dim +
+        layers * 3 * dim * dim +
+        layers * dim * dim +
+        layers * ffn * dim * 2 +
+        layers * dim * ffn +
+        layers * dim * 2 + dim;
+    return params <= SIZE_MAX / sizeof(float) &&
+        model->weight_bytes == params * sizeof(float);
 }
 
 // ------------------------------------------------------------------
@@ -38,16 +76,9 @@ static void fill_zero(float* p, size_t n) {
 // ------------------------------------------------------------------
 
 bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig* config) {
-    if (!m || !arena || !config ||
-        config->vocab_size < 260 || config->vocab_size > 8192 ||
-        config->dim <= 0 || config->dim > 512 ||
-        config->n_layers <= 0 || config->n_layers > 16 ||
-        config->n_heads <= 0 || config->n_heads > 32 ||
-        config->dim % config->n_heads != 0 ||
-        config->ffn_dim <= 0 || config->ffn_dim > 1024 ||
-        config->max_seq < 32 || config->max_seq > 512)
+    if (!m || !arena || !model_config_validate(config))
         return false;
-    int vocab_size=config->vocab_size;
+    const int vocab_size = config->vocab_size;
 
     memset(m, 0, sizeof(*m));
 
