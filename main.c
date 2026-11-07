@@ -445,6 +445,9 @@ int main(int argc, char** argv) {
 
         const size_t sample_len = tokenizer_sample_len;
         printf("Tokenizer trainer sample: %zu bytes\n", sample_len);
+        printf("Estimated BPE workspace: approximately %.1f MiB (conservative)\n",
+            ((double)sample_len * 230.0 + 3.0 * 1024.0 * 1024.0) /
+                (1024.0 * 1024.0));
         if (!tokenizer_train(&tok, &arena, tokenizer_sample,
             sample_len, options.model.vocab_size))
             die("tokenizer_train failed");
