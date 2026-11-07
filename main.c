@@ -22,6 +22,9 @@
 #include <math.h>
 #include <errno.h>
 #include <time.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #define DEFAULT_BATCH_SIZE 4
 #define DEFAULT_SEQUENCE_LENGTH 32
@@ -31,7 +34,7 @@
 #define DEFAULT_LOG_INTERVAL 100
 #define DEFAULT_VALIDATION_BATCHES 16
 #define DEFAULT_CHECKPOINT_INTERVAL 100
-#define DEFAULT_TOKENIZER_SAMPLE_BYTES (256u * 1024u)
+#define DEFAULT_TOKENIZER_SAMPLE_BYTES (1024u * 1024u)
 
 typedef struct {
     float learning_rate;
@@ -41,6 +44,7 @@ typedef struct {
     int batch_size, sequence_length;
     uint64_t seed;
     size_t tokenizer_sample_bytes;
+    int threads;
     const char* metrics_path;
     const char* stop_file;
     const char* save_file;
@@ -104,6 +108,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->validation_interval=DEFAULT_LOG_INTERVAL;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
+    o->threads=0;
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->save_file=NULL;
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
@@ -138,6 +143,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             strcmp(argv[i], "--checkpoint-interval") == 0 ||
             strcmp(argv[i], "--seed") == 0 ||
             strcmp(argv[i], "--tokenizer-sample-bytes") == 0 ||
+            strcmp(argv[i], "--threads") == 0 ||
             strcmp(argv[i], "--vocab-size") == 0 ||
             strcmp(argv[i], "--dim") == 0 ||
             strcmp(argv[i], "--layers") == 0 ||
@@ -152,6 +158,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if(strcmp(opt,"--validation-batches")==0)hi=4096;
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=4194304; }
+            if (strcmp(opt,"--threads")==0) { lo=1; hi=256; }
             if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=8192; }
             if (strcmp(opt,"--dim")==0) { lo=1; hi=512; }
             if (strcmp(opt,"--layers")==0) { lo=1; hi=16; }
@@ -177,6 +184,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--max-seq")==0) o->model.max_seq=(int)v;
             else if (strcmp(opt,"--batch-size")==0) o->batch_size=(int)v;
             else if (strcmp(opt,"--sequence-length")==0) o->sequence_length=(int)v;
+            else if (strcmp(opt,"--threads")==0) o->threads=(int)v;
             else o->tokenizer_sample_bytes=(size_t)v;
         }
         else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
@@ -249,6 +257,14 @@ int main(int argc, char** argv) {
     TrainOptions options;
     const int user_path_count = parse_arguments(argc, argv,
         &resume, &diagnostics_only, &steps_to_run, user_paths, &options);
+#ifdef _OPENMP
+    omp_set_dynamic(0);
+    if (options.threads > 0) omp_set_num_threads(options.threads);
+    printf("CPU parallelism: OpenMP enabled, %d worker threads\\n", omp_get_max_threads());
+#else
+    if (options.threads > 0)
+        printf("Warning: this build has no OpenMP support; --threads is ignored.\\n");
+#endif
     if(options.sequence_length>options.model.max_seq)
         die("sequence length cannot exceed model context length");
     const size_t training_tokens=(size_t)options.batch_size*(size_t)options.sequence_length;
