@@ -481,7 +481,7 @@ static bool bpe_reference_tie_winner(const BpeNode* nodes,
 bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab) {
     if (!tok || !arena || !sample || sample_len == 0 ||
-        sample_len > UINT32_MAX ||
+        sample_len > INT32_MAX ||
         target_vocab < 260 || target_vocab > TOK_MAX_VOCAB ||
         sample_len > SIZE_MAX / sizeof(BpeNode) ||
         sample_len > SIZE_MAX / 2)
@@ -509,7 +509,8 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
     max_pair_states += merge_limit * 2;
     if (max_pair_states == 0) max_pair_states = 1;
     if (max_pair_states > UINT32_MAX ||
-        max_pair_states > SIZE_MAX / 2)
+        max_pair_states > SIZE_MAX / 2 ||
+        max_pair_states > SIZE_MAX / sizeof(uint32_t))
         goto fail;
 
     size_t state_table_size = 8;
@@ -559,14 +560,19 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
     }
 
     uint32_t reference_generation = 0;
+    size_t active_count = sample_len;
     const int merges_needed = target_vocab - tok->vocab_size;
     for (int merge_index = 0; merge_index < merges_needed; merge_index++) {
         if (heap_count == 0) break;
         uint32_t best_slot = heap[0];
         if (states[best_slot].count < 2) break;
 
-        if (heap_count > 1 &&
-            states[heap[1]].count == states[best_slot].count) {
+        const bool tied_maximum =
+            (heap_count > 1 &&
+                states[heap[1]].count == states[best_slot].count) ||
+            (heap_count > 2 &&
+                states[heap[2]].count == states[best_slot].count);
+        if (tied_maximum) {
             uint32_t winner_key = 0;
             if (!bpe_reference_tie_winner(nodes, 0, tok,
                     reference_table_size, reference_table,
@@ -635,6 +641,7 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
             if (next_index != BPE_NONE)
                 nodes[next_index].prev = left_index;
             nodes[right_index].active = 0;
+            active_count--;
             nodes[right_index].prev = BPE_NONE;
             nodes[right_index].next = BPE_NONE;
 
