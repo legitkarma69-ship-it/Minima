@@ -80,6 +80,17 @@ jobs:
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test incremental tokenizer trainer equivalence
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw "Visual C++ x64 tools were not found." }
+          $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC /I. tests\tokenizer_incremental_test.c tokenizer.c arena.c util.c /Fe:tokenizer_incremental_test.exe && tokenizer_incremental_test.exe'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run tokenizer baseline benchmark
         shell: pwsh
         run: |
@@ -93,6 +104,9 @@ jobs:
           # Measure a deterministic slice of the checked-in prose corpus as well
           # as the generated smoke corpus above, so future comparisons use real data.
           $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 65536 512 2'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 262144 1024 2'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
