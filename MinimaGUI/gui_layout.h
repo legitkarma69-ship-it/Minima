@@ -3,6 +3,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #define IDC_CORPUS 1001
+#define IDC_STEPS 1004
+#define IDC_LOG 1008
+#define IDC_CHAT_INPUT 1011
 #define IDC_ADD 1002
 #define IDC_REMOVE 1003
 #define IDC_RESUME 1005
