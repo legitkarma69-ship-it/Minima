@@ -135,7 +135,7 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,261,55,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_seed);
 
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,298,92,18,parent,NULL,NULL,NULL));
-    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_tokenizer_bytes);
+    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"1048576",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_tokenizer_bytes);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,parent,NULL,NULL,NULL));
     g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_temperature);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,parent,NULL,NULL,NULL));
