@@ -837,9 +837,9 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_sequence_length, L"Number of tokens processed per sequence. Must not exceed model context length.");
         add_tooltip(g_lr, L"Base learning rate. The cosine or constant schedule is applied to this value.");
         add_tooltip(g_warmup, L"Number of initial optimizer steps used for linear learning-rate warmup.");
-        add_tooltip(g_tokenizer_bytes, L"Maximum corpus bytes sampled when training the BPE tokenizer.");
+        add_tooltip(g_tokenizer_bytes, L"Maximum sample bytes used for BPE training. The sample is split evenly across each selected source file without loading the full files.");
         add_tooltip(g_lr_schedule, L"Cosine decay reaches zero at the saved global schedule horizon. Constant keeps the base rate.");
-        add_tooltip(g_tokenizer_sampling, L"Spread samples across the corpus; prefix samples from the beginning.");
+        add_tooltip(g_tokenizer_sampling, L"Spread samples across each selected source file; prefix samples from the beginning of each source.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
