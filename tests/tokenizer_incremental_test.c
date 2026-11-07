@@ -123,6 +123,22 @@ int main(void) {
     printf("Incremental trainer: %zu exhaustive cases passed.\n",
         exhaustive_cases);
 
+    /* A target vocabulary is a ceiling: unique adjacent pairs cannot merge. */
+    {
+        static const uint8_t all_unique[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        CHECK(compare_trainers(all_unique, sizeof(all_unique), 300));
+        CHECK(reference_tokenizer.vocab_size == 260);
+        CHECK(reference_tokenizer.n_merges == 0);
+        CHECK(incremental_tokenizer.vocab_size == 260);
+        incremental_arena.used = 0;
+        incremental_arena.peak = 0;
+        static Tokenizer public_tokenizer;
+        CHECK(tokenizer_train(&public_tokenizer, &incremental_arena,
+            all_unique, sizeof(all_unique), 300));
+        CHECK(public_tokenizer.vocab_size == 260);
+        CHECK(public_tokenizer.n_merges == 0);
+    }
+
     /* Explicit overlap and token-length boundary cases. */
     {
         static const char* patterns[] = {
@@ -136,8 +152,11 @@ int main(void) {
                 strlen(patterns[i]), 300));
         memset(sample, 'A', sizeof(sample));
         CHECK(compare_trainers(sample, sizeof(sample), 300));
+        CHECK(reference_tokenizer.vocab_size < 300);
+        CHECK(incremental_tokenizer.vocab_size == reference_tokenizer.vocab_size);
         /* Exactly 64 KiB crosses the production encoder's heap-path threshold. */
         CHECK(compare_trainers(sample, 64u * 1024u, 300));
+        CHECK(reference_tokenizer.vocab_size < 300);
     }
 
     /* Deterministic randomized inputs with varied alphabets and lengths. */

@@ -35,8 +35,11 @@ typedef struct {
 // ---------- Training ----------
 // Train BPE from a raw text buffer (bytes).
 // `sample` is the text, `sample_len` its length.
-// `vocab_size` target (must be >= 256 + specials).
-// Returns true on success. Everything is allocated from `arena`.
+// `vocab_size` is an upper bound (must be >= 260). Training can stop below
+// it when no pair occurs at least twice or all remaining pairs exceed the
+// maximum token length. True means a valid tokenizer was produced, not that
+// the requested upper bound was necessarily reached. Everything is allocated
+// from `arena`.
 bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len,
     int vocab_size);
