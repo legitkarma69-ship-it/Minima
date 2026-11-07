@@ -141,6 +141,7 @@
     <ClCompile Include="..\optim.c" />
     <ClCompile Include="..\tokenizer.c" />
     <ClCompile Include="..\train.c" />
+    <ClCompile Include="..\train_validation.c" />
     <ClCompile Include="..\util.c" />
   </ItemGroup>
   <ItemGroup>

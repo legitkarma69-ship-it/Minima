@@ -80,6 +80,12 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
     // ------------------------------------------------------------------
     // 7. Continue training; optimizer step and RNG state are global
     // ------------------------------------------------------------------
+    const char* validation_error = NULL;
+    if (!train_run_validate_inputs(model, opt, grads, temp, all_ids,
+            train_tokens, validation_tokens, rng, options, &validation_error))
+        die("train_run input validation failed: %s",
+            validation_error ? validation_error : "unknown validation error");
+
     Activations act;
     uint16_t* batch_tokens;
     uint16_t* batch_targets;
