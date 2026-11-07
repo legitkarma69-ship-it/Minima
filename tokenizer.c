@@ -1058,63 +1058,115 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
 
 static int tokenizer_encode_chunked(const Tokenizer* tok,
     const uint8_t* text, size_t text_len, uint16_t* out, int out_cap) {
-    const size_t chunk_bytes = TOKENIZER_ENCODE_CHUNK_BYTES;
+    const size_t chunk_bytes = 1024u * 1024u;
     const size_t lookahead = TOK_MAX_TOKEN_LEN - 1u;
-    const size_t scratch_capacity = text_len < chunk_bytes + lookahead
-        ? text_len : chunk_bytes + lookahead;
-    if (scratch_capacity > SIZE_MAX / sizeof(uint16_t))
+    const size_t chunk_count_size =
+        (text_len + chunk_bytes - 1u) / chunk_bytes;
+    if (chunk_count_size == 0 || chunk_count_size > (size_t)INT_MAX)
         return -1;
+    const int chunk_count = (int)chunk_count_size;
 
-    uint16_t* scratch = (uint16_t*)malloc(
-        scratch_capacity * sizeof(uint16_t));
-    if (!scratch) return -1;
-
-    size_t input_offset = 0;
-    int output_count = 0;
-    while (input_offset < text_len) {
-        const size_t remaining = text_len - input_offset;
-        const size_t core_len = remaining < chunk_bytes
-            ? remaining : chunk_bytes;
-        const size_t window_len = core_len +
-            (remaining > core_len
-                ? (remaining - core_len < lookahead
-                    ? remaining - core_len : lookahead)
-                : 0u);
-
-        int encoded = tokenizer_encode_heap(tok, text + input_offset,
-            window_len, scratch);
-        if (encoded == -2)
-            encoded = tokenizer_encode_reference(tok, text + input_offset,
-                window_len, scratch, (int)scratch_capacity);
-        if (encoded < 0) {
-            free(scratch);
-            return -1;
-        }
-
-        size_t consumed_bytes = 0;
-        int token_index = 0;
-        while (consumed_bytes < core_len && token_index < encoded) {
-            const uint16_t id = scratch[token_index++];
-            if (id >= tok->vocab_size || tok->token_len[id] <= 0 ||
-                (size_t)tok->token_len[id] > window_len - consumed_bytes ||
-                output_count >= out_cap) {
-                free(scratch);
-                return -1;
-            }
-            out[output_count++] = id;
-            consumed_bytes += (size_t)tok->token_len[id];
-        }
-
-        if (consumed_bytes < core_len) {
-            free(scratch);
-            return -1;
-        }
-        input_offset += consumed_bytes;
+    int* chunk_counts = (int*)calloc((size_t)chunk_count, sizeof(int));
+    int* chunk_errors = (int*)calloc((size_t)chunk_count, sizeof(int));
+    if (!chunk_counts || !chunk_errors) {
+        free(chunk_counts);
+        free(chunk_errors);
+        return -1;
     }
 
-    free(scratch);
-    return output_count;
+    /* Windows overlap by the maximum token length on both sides. Each worker
+       writes only into its own byte-offset-sized output slot; a final ordered
+       compaction joins the variable-length token sequences deterministically. */
+    int chunk_index;
+    #pragma omp parallel for schedule(static) if(chunk_count >= 2)
+    for (chunk_index = 0; chunk_index < chunk_count; chunk_index++) {
+        const size_t core_start = (size_t)chunk_index * chunk_bytes;
+        const size_t remaining = text_len - core_start;
+        const size_t core_len = remaining < chunk_bytes
+            ? remaining : chunk_bytes;
+        const size_t core_end = core_start + core_len;
+        const size_t window_start = core_start > lookahead
+            ? core_start - lookahead : 0u;
+        const size_t right_context = text_len - core_end < lookahead
+            ? text_len - core_end : lookahead;
+        const size_t window_end = core_end + right_context;
+        const size_t window_len = window_end - window_start;
+
+        uint16_t* scratch = (uint16_t*)malloc(
+            window_len * sizeof(uint16_t));
+        if (!scratch) {
+            chunk_errors[chunk_index] = 1;
+            continue;
+        }
+
+        int encoded = tokenizer_encode_heap(tok, text + window_start,
+            window_len, scratch);
+        if (encoded == -2)
+            encoded = tokenizer_encode_reference(tok, text + window_start,
+                window_len, scratch, (int)window_len);
+        if (encoded < 0) {
+            free(scratch);
+            chunk_errors[chunk_index] = 1;
+            continue;
+        }
+
+        size_t consumed = 0;
+        size_t local_count = 0;
+        for (int token_index = 0; token_index < encoded; token_index++) {
+            const uint16_t id = scratch[token_index];
+            if (id >= tok->vocab_size || tok->token_len[id] <= 0 ||
+                (size_t)tok->token_len[id] > window_len - consumed) {
+                chunk_errors[chunk_index] = 1;
+                break;
+            }
+
+            const size_t token_start = window_start + consumed;
+            if (token_start >= core_end) break;
+            if (token_start >= core_start) {
+                if (local_count >= core_len) {
+                    chunk_errors[chunk_index] = 1;
+                    break;
+                }
+                out[core_start + local_count] = id;
+                local_count++;
+            }
+            consumed += (size_t)tok->token_len[id];
+        }
+
+        if (consumed < core_end - window_start)
+            chunk_errors[chunk_index] = 1;
+        if (!chunk_errors[chunk_index])
+            chunk_counts[chunk_index] = (int)local_count;
+        free(scratch);
+    }
+
+    for (int i = 0; i < chunk_count; i++) {
+        if (chunk_errors[i]) {
+            free(chunk_counts);
+            free(chunk_errors);
+            return -1;
+        }
+    }
+
+    size_t output_count = 0;
+    for (int i = 0; i < chunk_count; i++) {
+        const size_t source_offset = (size_t)i * chunk_bytes;
+        const size_t count = (size_t)chunk_counts[i];
+        if (count > (size_t)out_cap - output_count) {
+            free(chunk_counts);
+            free(chunk_errors);
+            return -1;
+        }
+        memmove(out + output_count, out + source_offset,
+            count * sizeof(uint16_t));
+        output_count += count;
+    }
+
+    free(chunk_counts);
+    free(chunk_errors);
+    return (int)output_count;
 }
+
 
 int tokenizer_encode(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
