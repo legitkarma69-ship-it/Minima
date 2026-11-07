@@ -83,7 +83,7 @@ jobs:
       - name: Run tokenizer baseline benchmark
         shell: pwsh
         run: |
-          $vswhere = Join-Path \${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
           $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (!$vs) { throw "Visual C++ x64 tools were not found." }
           $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
