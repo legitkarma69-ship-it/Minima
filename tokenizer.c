@@ -1,4 +1,4 @@
-﻿#include "tokenizer.h"
+#include "tokenizer.h"
 #include "util.h"
 #include <string.h>
 #include <stdio.h>
@@ -267,19 +267,32 @@ int tokenizer_decode(const Tokenizer* tok,
     const uint16_t* ids, int n_ids,
     char* out, int out_cap) {
 
-    int pos = 0;
+    if (!tok || n_ids < 0 || out_cap <= 0 || !out ||
+        (n_ids > 0 && !ids) ||
+        tok->vocab_size < 260 || tok->vocab_size > TOK_MAX_VOCAB)
+        return -1;
+
+    size_t required = 0;
     for (int i = 0; i < n_ids; i++) {
-        uint16_t id = ids[i];
-        if (id >= tok->vocab_size) continue;
-
-        int len = tok->token_len[id];
-        if (pos + len >= out_cap) break;
-
-        memcpy(out + pos, tok->token_str[id], len);
-        pos += len;
+        const uint16_t id = ids[i];
+        if (id >= tok->vocab_size || !tok->token_str[id] ||
+            tok->token_len[id] <= 0 ||
+            tok->token_len[id] > TOK_MAX_TOKEN_LEN ||
+            required > (size_t)(out_cap - 1) ||
+            (size_t)tok->token_len[id] >
+                (size_t)(out_cap - 1) - required)
+            return -1;
+        required += (size_t)tok->token_len[id];
     }
-    if (pos < out_cap) out[pos] = 0;
-    return pos;
+
+    size_t pos = 0;
+    for (int i = 0; i < n_ids; i++) {
+        const int len = tok->token_len[ids[i]];
+        memcpy(out + pos, tok->token_str[ids[i]], (size_t)len);
+        pos += (size_t)len;
+    }
+    out[pos] = 0;
+    return (int)pos;
 }
 
 // ------------------------------------------------------------------
@@ -337,23 +350,29 @@ bool tokenizer_save(const Tokenizer* tok, const char* path) {
         tok->n_merges > tok->vocab_size - 260)
         return false;
 
-    FILE* f = fopen(path, "wb");
-    if (!f) return false;
+    const size_t path_len = strlen(path);
+    if (path_len > SIZE_MAX - 5) return false;
+    char* temp_path = (char*)malloc(path_len + 5);
+    if (!temp_path) return false;
+    memcpy(temp_path, path, path_len);
+    memcpy(temp_path + path_len, ".tmp", 5);
 
-    uint32_t magic = 0x42504531; // "BPE1"
+    FILE* f = fopen(temp_path, "wb");
+    if (!f) { free(temp_path); return false; }
+
+    uint32_t magic = 0x42504531;
     bool ok = fwrite(&magic, sizeof(magic), 1, f) == 1 &&
         fwrite(&tok->vocab_size, sizeof(tok->vocab_size), 1, f) == 1 &&
         fwrite(&tok->n_merges, sizeof(tok->n_merges), 1, f) == 1;
 
     for (int i = 0; ok && i < tok->vocab_size; i++) {
-        int token_len = tok->token_len[i];
+        const int token_len = tok->token_len[i];
         if (!tok->token_str[i] || token_len <= 0 ||
             token_len > TOK_MAX_TOKEN_LEN || token_len > UINT16_MAX) {
             ok = false;
             break;
         }
-
-        uint16_t len = (uint16_t)token_len;
+        const uint16_t len = (uint16_t)token_len;
         ok = fwrite(&len, sizeof(len), 1, f) == 1 &&
             fwrite(tok->token_str[i], 1, len, f) == len;
     }
@@ -361,14 +380,32 @@ bool tokenizer_save(const Tokenizer* tok, const char* path) {
     if (ok && tok->n_merges > 0)
         ok = fwrite(tok->merges, sizeof(Merge),
             (size_t)tok->n_merges, f) == (size_t)tok->n_merges;
-
+    if (ok && fflush(f) != 0) ok = false;
+    if (ok) {
+#ifdef _WIN32
+        if (_commit(_fileno(f)) != 0) ok = false;
+#else
+        if (fsync(fileno(f)) != 0) ok = false;
+#endif
+    }
     if (fclose(f) != 0) ok = false;
+
+    if (ok) {
+#ifdef _WIN32
+        ok = MoveFileExA(temp_path, path,
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+        ok = rename(temp_path, path) == 0;
+#endif
+    }
+    if (!ok) remove(temp_path);
+    free(temp_path);
     return ok;
 }
 
 bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
     if (!tok || !arena || !path) return false;
-
+    const size_t arena_used_before = arena->used;
     FILE* f = fopen(path, "rb");
     if (!f) return false;
 
@@ -381,10 +418,8 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
         fread(&n_merges, sizeof(n_merges), 1, f) != 1 ||
         vocab_size < 260 || vocab_size > TOK_MAX_VOCAB ||
         n_merges < 0 || n_merges > TOK_MAX_MERGES ||
-        n_merges > vocab_size - 260) {
-        fclose(f);
-        return false;
-    }
+        n_merges > vocab_size - 260)
+        goto fail;
 
     Tokenizer loaded;
     memset(&loaded, 0, sizeof(loaded));
@@ -394,16 +429,11 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
     for (int i = 0; i < vocab_size; i++) {
         uint16_t len = 0;
         if (fread(&len, sizeof(len), 1, f) != 1 ||
-            len == 0 || len > TOK_MAX_TOKEN_LEN) {
-            fclose(f);
-            return false;
-        }
-
+            len == 0 || len > TOK_MAX_TOKEN_LEN)
+            goto fail;
         char* s = (char*)arena_alloc(arena, (size_t)len + 1);
-        if (!s || fread(s, 1, len, f) != len) {
-            fclose(f);
-            return false;
-        }
+        if (!s || fread(s, 1, len, f) != len)
+            goto fail;
         s[len] = 0;
         loaded.token_str[i] = s;
         loaded.token_len[i] = len;
@@ -411,32 +441,54 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
 
     if (n_merges > 0 &&
         fread(loaded.merges, sizeof(Merge), (size_t)n_merges, f) !=
-            (size_t)n_merges) {
-        fclose(f);
-        return false;
+            (size_t)n_merges)
+        goto fail;
+
+    {
+        static const char* reserved[4] = { "<bos>", "<eos>", "<pad>", "<unk>" };
+        for (int i = 0; i < 4; i++) {
+            if (loaded.token_len[i] != 5 ||
+                memcmp(loaded.token_str[i], reserved[i], 5) != 0)
+                goto fail;
+        }
+        for (int b = 0; b < 256; b++) {
+            const int id = TOK_BYTE_START + b;
+            if (loaded.token_len[id] != 1 ||
+                (uint8_t)loaded.token_str[id][0] != (uint8_t)b)
+                goto fail;
+        }
     }
 
-    // Each merge may only combine tokens that existed before its result.
     for (int i = 0; i < n_merges; i++) {
         const uint16_t new_id = (uint16_t)(260 + i);
         const uint16_t left = loaded.merges[i].left;
         const uint16_t right = loaded.merges[i].right;
-        if (left >= new_id || right >= new_id ||
-            loaded.token_len[left] <= 0 || loaded.token_len[right] <= 0 ||
-            loaded.token_len[left] > TOK_MAX_TOKEN_LEN - loaded.token_len[right] ||
-            loaded.token_len[new_id] !=
-                loaded.token_len[left] + loaded.token_len[right]) {
-            fclose(f);
-            return false;
-        }
+        if (left >= new_id || right >= new_id)
+            goto fail;
+        const int left_len = loaded.token_len[left];
+        const int right_len = loaded.token_len[right];
+        if (left_len <= 0 || right_len <= 0 ||
+            left_len > TOK_MAX_TOKEN_LEN - right_len ||
+            loaded.token_len[new_id] != left_len + right_len ||
+            memcmp(loaded.token_str[new_id], loaded.token_str[left],
+                (size_t)left_len) != 0 ||
+            memcmp(loaded.token_str[new_id] + left_len,
+                loaded.token_str[right], (size_t)right_len) != 0)
+            goto fail;
     }
 
-    if (fgetc(f) != EOF || ferror(f)) {
-        fclose(f);
+    if (fgetc(f) != EOF || ferror(f))
+        goto fail;
+    if (fclose(f) != 0) {
+        arena->used = arena_used_before;
         return false;
     }
-    if (fclose(f) != 0) return false;
-
     *tok = loaded;
     return true;
+
+fail:
+    fclose(f);
+    arena->used = arena_used_before;
+    return false;
 }
+
