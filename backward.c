@@ -247,6 +247,8 @@ static void matmul_backward(float* dx, float* dw,
     const float* x, const float* w, const float* dout,
     int n, int d_in, int d_out) {
 
+    /* dx rows are independent; each element keeps its original reduction order. */
+    #pragma omp parallel for schedule(static) if(n >= 32)
     for (int i = 0; i < n; i++) {
         for (int k = 0; k < d_in; k++) {
             float sum = 0.0f;
@@ -256,6 +258,8 @@ static void matmul_backward(float* dx, float* dw,
         }
     }
 
+    /* Every (output,input) weight gradient is independent. */
+    #pragma omp parallel for schedule(static) if(d_out >= 32)
     for (int j = 0; j < d_out; j++) {
         for (int k = 0; k < d_in; k++) {
             float sum = 0.0f;
