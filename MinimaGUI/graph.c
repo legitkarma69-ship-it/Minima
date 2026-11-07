@@ -6,6 +6,10 @@
 #include <string.h>
 #include "graph.h"
 
+#ifndef _countof
+#define _countof(array) (sizeof(array) / sizeof((array)[0]))
+#endif
+
 static wchar_t g_metrics_path[MAX_PATH];
 static UINT g_graph_dpi = 96;
 static HPEN g_graph_grid_pen, g_graph_train_pen, g_graph_valid_pen;
@@ -21,7 +25,7 @@ static int graph_scale_px(int value) {
 }
 
 void minima_graph_set_metrics_path(const wchar_t* path) {
-    if (!path) { g_metrics_path[0] = L'\\0'; return; }
+    if (!path) { g_metrics_path[0] = L'\0'; return; }
     wcsncpy_s(g_metrics_path, _countof(g_metrics_path), path, _TRUNCATE);
 }
 
