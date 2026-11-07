@@ -62,20 +62,73 @@ static bool parse_test_settings(const char* line, ChatOptions* settings) {
     return true;
 }
 
+#define CHAT_HISTORY_BYTES 65536
+#define CHAT_PROMPT_BYTES 49152
+
+static bool build_chat_prompt(const char* history, const char* user_text,
+    char* prompt_text, size_t prompt_capacity) {
+    if (!history || !user_text || !prompt_text || prompt_capacity == 0)
+        return false;
+
+    const char* separator = history[0] ? "\nHuman: " : "Human: ";
+    int written = snprintf(prompt_text, prompt_capacity, "%s%s%s\nAssistant:",
+        history, separator, user_text);
+    return written >= 0 && (size_t)written < prompt_capacity;
+}
+
+static bool encode_chat_prompt(Tokenizer* tok, const char* text,
+    uint16_t* ids, int capacity, int* count) {
+    if (!tok || !text || !ids || capacity <= 0 || !count) return false;
+    const size_t bytes = strlen(text);
+    if (bytes == 0 || bytes > INT_MAX) return false;
+    const int encoded = tokenizer_encode(tok, (const uint8_t*)text,
+        bytes, ids, capacity);
+    if (encoded <= 0 || encoded > capacity) return false;
+    *count = encoded;
+    return true;
+}
+
+/* Remove the oldest complete user turn, keeping the next Human marker intact. */
+static bool trim_oldest_chat_turn(char* history) {
+    if (!history || !history[0]) return false;
+    char* next = strstr(history + 1, "\nHuman: ");
+    if (!next) {
+        history[0] = '\0';
+        return true;
+    }
+    memmove(history, next + 1, strlen(next + 1) + 1);
+    return true;
+}
+
+static void strip_generated_next_role(char* response) {
+    if (!response) return;
+    char* marker = strstr(response, "\nHuman:");
+    if (marker) *marker = '\0';
+}
+
 int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
     const ChatOptions* options) {
-    uint16_t history[512], input_ids[8192], prompt[512], output[512];
-    int history_len=0;
-    char line[8192], decoded[512* TOK_MAX_TOKEN_LEN+1];
+    uint16_t input_ids[8192], prompt[512], output[512];
+    char line[8192], decoded[512 * TOK_MAX_TOKEN_LEN + 1];
+    char history[CHAT_HISTORY_BYTES] = "";
+    char prompt_text[CHAT_PROMPT_BYTES];
     ChatOptions active_options = *options;
     bool test_pending = false;
+
     puts("CHAT_READY");
+    puts("CHAT_FORMAT: Human:/Assistant:");
     puts("ProjectMinima chat. Type /quit to exit.");
-    for(;;){
-        if(!fgets(line,sizeof(line),stdin))break;
-        size_t bytes=strlen(line);while(bytes && (line[bytes-1]=='\n'||line[bytes-1]=='\r'))line[--bytes]=0;
-        if(strcmp(line,"/quit")==0||strcmp(line,"/exit")==0)break;
-        if(strncmp(line,"/test ",6)==0) {
+
+    for (;;) {
+        if (!fgets(line, sizeof(line), stdin)) break;
+        size_t bytes = strlen(line);
+        while (bytes && (line[bytes - 1] == '\n' || line[bytes - 1] == '\r'))
+            line[--bytes] = '\0';
+
+        if (strcmp(line, "/quit") == 0 || strcmp(line, "/exit") == 0)
+            break;
+
+        if (strncmp(line, "/test ", 6) == 0) {
             ChatOptions requested = *options;
             if (!parse_test_settings(line, &requested)) {
                 printf("TEST_ERROR: invalid sampling settings: [%s]\n", line);
@@ -83,60 +136,123 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
                 continue;
             }
             active_options = requested;
-            history_len = 0;
             test_pending = true;
             continue;
         }
-        if(!bytes){
+
+        if (!bytes) {
             if (test_pending) {
                 active_options = *options;
                 test_pending = false;
-                history_len = 0;
             }
             puts("CHAT_READY");
             continue;
         }
-        int input_count=tokenizer_encode(tok,(const uint8_t*)line,bytes,input_ids,(int)(sizeof(input_ids)/sizeof(input_ids[0])));
-        if(input_count<=0){puts(test_pending ? "TEST: [input encoding failed]" : "BOT: [input encoding failed]");active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;}
-        if(input_count>=model->max_seq){memmove(input_ids,input_ids+(input_count-(model->max_seq-1)),(size_t)(model->max_seq-1)*sizeof(uint16_t));input_count=model->max_seq-1;}
-        uint16_t separator[4];
-        int separator_count=history_len
-            ? tokenizer_encode(tok,(const uint8_t*)"\n",1,separator,4) : 0;
-        int prompt_len=history_len+separator_count+input_count;
-        if(prompt_len>model->max_seq-1){
-            int drop=prompt_len-(model->max_seq-1);
-            if(drop<history_len){memmove(history,history+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
-            else {history_len=0;separator_count=0;}
-            prompt_len=history_len+separator_count+input_count;
+
+        int prompt_len = 0;
+        bool is_test = test_pending;
+
+        if (is_test) {
+            /* Generation Lab deliberately tests raw text continuation. */
+            if (!encode_chat_prompt(tok, line, prompt,
+                model->max_seq - 1, &prompt_len)) {
+                puts("TEST: [input encoding failed]");
+                active_options = *options;
+                test_pending = false;
+                puts("CHAT_READY");
+                continue;
+            }
+        } else {
+            bool built = false;
+            for (;;) {
+                if (!build_chat_prompt(history, line, prompt_text,
+                    sizeof(prompt_text))) {
+                    puts("BOT: [prompt formatting failed]");
+                    break;
+                }
+                if (encode_chat_prompt(tok, prompt_text, prompt,
+                    model->max_seq - 1, &prompt_len)) {
+                    built = true;
+                    break;
+                }
+                if (!trim_oldest_chat_turn(history)) break;
+            }
+
+            if (!built) {
+                /*
+                 * If a single user message is too long, keep its trailing
+                 * bytes while preserving both role markers.
+                 */
+                const char* prefix = history[0] ? "\nHuman: " : "Human: ";
+                const char* suffix = "\nAssistant:";
+                const size_t fixed_bytes = strlen(history) + strlen(prefix) +
+                    strlen(suffix);
+                if (fixed_bytes + 1 >= sizeof(prompt_text)) {
+                    history[0] = '\0';
+                    prefix = "Human: ";
+                }
+                size_t available = sizeof(prompt_text) -
+                    strlen(history) - strlen(prefix) - strlen(suffix) - 1;
+                size_t user_bytes = strlen(line);
+                if (user_bytes > available) {
+                    memmove(line, line + (user_bytes - available), available);
+                    line[available] = '\0';
+                }
+                if (!build_chat_prompt(history, line, prompt_text,
+                    sizeof(prompt_text)) ||
+                    !encode_chat_prompt(tok, prompt_text, prompt,
+                        model->max_seq - 1, &prompt_len)) {
+                    puts("BOT: [input encoding failed]");
+                    puts("CHAT_READY");
+                    continue;
+                }
+            }
         }
-        memcpy(prompt,history,(size_t)history_len*sizeof(uint16_t));
-        if(separator_count)memcpy(prompt+history_len,separator,(size_t)separator_count*sizeof(uint16_t));
-        memcpy(prompt+history_len+separator_count,input_ids,(size_t)input_count*sizeof(uint16_t));
-        Rng rng; rng_seed(&rng,((uint64_t)clock()<<17)^(uint64_t)active_options.seed^(uint64_t)history_len);
-        int max_new=active_options.max_new_tokens;
-        if(max_new>model->max_seq-prompt_len)max_new=model->max_seq-prompt_len;
-        int total=generate_ex(model,tok,cache,prompt,prompt_len,output,512,max_new,
-            active_options.temperature,active_options.top_k,active_options.top_p,
-            active_options.repetition_penalty,&rng);
-        if(total<=prompt_len){
-            puts(test_pending ? "TEST: [generation failed]" : "BOT: [generation failed]");
-            active_options=*options;test_pending=false;history_len=0;puts("CHAT_READY");continue;
+
+        Rng rng;
+        rng_seed(&rng, ((uint64_t)clock() << 17) ^
+            (uint64_t)active_options.seed ^ (uint64_t)prompt_len);
+        int max_new = active_options.max_new_tokens;
+        if (max_new > model->max_seq - prompt_len)
+            max_new = model->max_seq - prompt_len;
+
+        int total = generate_ex(model, tok, cache, prompt, prompt_len,
+            output, 512, max_new, active_options.temperature,
+            active_options.top_k, active_options.top_p,
+            active_options.repetition_penalty, &rng);
+
+        if (total <= prompt_len) {
+            puts(is_test ? "TEST: [generation failed]" :
+                "BOT: [generation failed]");
+            active_options = *options;
+            test_pending = false;
+            history[0] = '\0';
+            puts("CHAT_READY");
+            continue;
         }
-        int decoded_bytes=tokenizer_decode(tok,output+prompt_len,total-prompt_len,decoded,(int)sizeof(decoded));
-        if(decoded_bytes<0)decoded[0]=0;
-        printf("%s: %s\n", test_pending ? "TEST" : "BOT", decoded);
-        if (test_pending) {
-            /* A test is isolated: it neither consumes nor changes chat history. */
-            history_len = 0;
+
+        int decoded_bytes = tokenizer_decode(tok, output + prompt_len,
+            total - prompt_len, decoded, (int)sizeof(decoded));
+        if (decoded_bytes < 0) decoded[0] = '\0';
+        else decoded[decoded_bytes] = '\0';
+
+        if (!is_test) strip_generated_next_role(decoded);
+        printf("%s: %s\n", is_test ? "TEST" : "BOT", decoded);
+
+        if (is_test) {
+            /* A lab test is isolated and does not alter conversational history. */
             active_options = *options;
             test_pending = false;
         } else {
-            history_len=total;
-            if(history_len>model->max_seq-1){int drop=history_len-(model->max_seq-1);memmove(history,output+drop,(size_t)(history_len-drop)*sizeof(uint16_t));history_len-=drop;}
-            else memcpy(history,output,(size_t)history_len*sizeof(uint16_t));
+            const int written = snprintf(history, sizeof(history), "%s%s",
+                prompt_text, decoded);
+            if (written < 0 || (size_t)written >= sizeof(history))
+                history[0] = '\0';
         }
+
         puts("CHAT_READY");
     }
+
     puts("CHAT_CLOSED");
     return 0;
 }
