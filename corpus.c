@@ -150,7 +150,7 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
                 continue;
             size_t share = base_share + (extra ? 1u : 0u);
             if (extra) extra--;
-            if (share == 0) share = 1;
+            if (share == 0) continue;
             const size_t available =
                 files[i].usable_bytes - files[i].quota;
             const size_t take = share < available ? share : available;
