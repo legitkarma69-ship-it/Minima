@@ -102,6 +102,8 @@ int main(int argc, char** argv) {
     printf("Target vocabulary: %zu\n", vocab_size);
     printf("Actual vocabulary: %d\n", tokenizer.vocab_size);
     printf("Merge count: %d\n", tokenizer.n_merges);
+    printf("Tokenizer fingerprint: %016llx\n",
+        (unsigned long long)tokenizer_fingerprint(&tokenizer));
     printf("Training seconds: %.6f\n", train_seconds);
     printf("Training MiB/s: %.3f\n",
         train_seconds > 0.0 ? ((double)sample_len / (1024.0 * 1024.0)) / train_seconds : 0.0);
