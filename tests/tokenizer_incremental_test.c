@@ -106,6 +106,11 @@ int main(void) {
     /* Exhaust every sequence over a three-byte alphabet through length seven.
        This naturally covers overlapping pairs and frequent tie situations. */
     uint8_t sample[65536];
+    static Tokenizer edge_tokenizer;
+    CHECK(!tokenizer_train(&edge_tokenizer, &incremental_arena,
+        NULL, 0, 300));
+    CHECK(!tokenizer_train(&edge_tokenizer, &incremental_arena,
+        sample, 0, 300));
     size_t exhaustive_cases = 0;
     for (size_t length = 1; length <= 7; length++) {
         size_t combinations = 1;
