@@ -130,6 +130,13 @@ int main(void) {
         CHECK(reference_tokenizer.vocab_size == 260);
         CHECK(reference_tokenizer.n_merges == 0);
         CHECK(incremental_tokenizer.vocab_size == 260);
+        incremental_arena.used = 0;
+        incremental_arena.peak = 0;
+        static Tokenizer public_tokenizer;
+        CHECK(tokenizer_train(&public_tokenizer, &incremental_arena,
+            all_unique, sizeof(all_unique), 300));
+        CHECK(public_tokenizer.vocab_size == 260);
+        CHECK(public_tokenizer.n_merges == 0);
     }
 
     /* Explicit overlap and token-length boundary cases. */
