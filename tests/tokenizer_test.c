@@ -140,6 +140,46 @@ int main(void) {
             long_decoded, (int)sizeof(long_decoded)) == (int)sizeof(long_text));
         CHECK(memcmp(long_decoded, long_text, sizeof(long_text)) == 0);
 
+        /* Exercise the production heap path at its exact 64 KiB threshold,
+           including the rank index reconstructed by tokenizer_load. */
+        {
+            const size_t heap_text_len = 64u * 1024u;
+            uint8_t* heap_text = (uint8_t*)malloc(heap_text_len);
+            uint16_t* heap_reference =
+                (uint16_t*)malloc(heap_text_len * sizeof(uint16_t));
+            uint16_t* heap_trained =
+                (uint16_t*)malloc(heap_text_len * sizeof(uint16_t));
+            uint16_t* heap_loaded =
+                (uint16_t*)malloc(heap_text_len * sizeof(uint16_t));
+            char* heap_decoded = (char*)malloc(heap_text_len + 1);
+            CHECK(heap_text && heap_reference && heap_trained &&
+                heap_loaded && heap_decoded);
+            for (size_t i = 0; i < heap_text_len; i++)
+                heap_text[i] = repeated[i % (sizeof(repeated) - 1)];
+
+            const int heap_reference_n = tokenizer_encode_reference(&trained,
+                heap_text, heap_text_len, heap_reference, (int)heap_text_len);
+            const int heap_trained_n = tokenizer_encode(&trained, heap_text,
+                heap_text_len, heap_trained, (int)heap_text_len);
+            const int heap_loaded_n = tokenizer_encode(&loaded, heap_text,
+                heap_text_len, heap_loaded, (int)heap_text_len);
+            CHECK(heap_reference_n >= 0);
+            CHECK(heap_reference_n == heap_trained_n);
+            CHECK(heap_reference_n == heap_loaded_n);
+            CHECK(memcmp(heap_reference, heap_trained,
+                (size_t)heap_reference_n * sizeof(uint16_t)) == 0);
+            CHECK(memcmp(heap_reference, heap_loaded,
+                (size_t)heap_reference_n * sizeof(uint16_t)) == 0);
+            CHECK(tokenizer_decode(&loaded, heap_loaded, heap_loaded_n,
+                heap_decoded, (int)(heap_text_len + 1)) == (int)heap_text_len);
+            CHECK(memcmp(heap_decoded, heap_text, heap_text_len) == 0);
+            free(heap_text);
+            free(heap_reference);
+            free(heap_trained);
+            free(heap_loaded);
+            free(heap_decoded);
+        }
+
         /* Corrupt a byte-token payload without changing its length. */
         {
             unsigned char* bytes = NULL; size_t size = 0;
