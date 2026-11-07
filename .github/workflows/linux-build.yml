@@ -53,6 +53,13 @@ jobs:
           grep -q 'Gradient checks passed: 10 / 10' <<< "$output"
           test -s minima.model
 
+      - name: Test disk-backed token buffer
+        run: |
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/mapped_buffer_test.c mapped_buffer.c \
+            -o mapped_buffer_test
+          ./mapped_buffer_test
+
       - name: Test source-balanced streaming corpus sampler
         run: |
           gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
