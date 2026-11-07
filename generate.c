@@ -275,7 +275,7 @@ static void print_token_escaped(const Tokenizer* tok, int id) {
 }
 
 // Inspect the model's next-token distribution after a prompt. Probabilities
-// are normalized over the complete vocabulary, not only the displayed top N.
+// are normalized over sampleable tokens, not only the displayed top N.
 bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n) {
     if (!model || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
@@ -357,7 +357,7 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
         if (i == 9) top10_mass = cumulative_mass;
     }
 
-    printf("  Next-token distribution (top %d, full-vocabulary probabilities):\n",
+    printf("  Next-token distribution (top %d, sampleable-vocabulary probabilities):\n",
         found);
     printf("    entropy=%.4f bits, top-1=%.2f%%, top-5=%.2f%%, top-10=%.2f%%\n",
         entropy_bits, top1_mass * 100.0, top5_mass * 100.0,
