@@ -89,8 +89,14 @@ int main(void) {
         static const uint8_t repeated[] =
             "abababababababababababababababababababababababababababababababab";
         Tokenizer trained, loaded;
-        CHECK(tokenizer_train(&trained, &train_arena, repeated,
-            sizeof(repeated) - 1, 270));
+        fprintf(stderr, "Tokenizer test: starting repeated-pair training (arena used=%zu, remaining=%zu).\\n", train_arena.used, arena_remaining(&train_arena));
+        fflush(stderr);
+        const bool repeated_ok = tokenizer_train(&trained, &train_arena, repeated,
+            sizeof(repeated) - 1, 270);
+        fprintf(stderr, "Tokenizer test: repeated-pair training returned %d (vocab=%d, merges=%d, arena used=%zu).\\n",
+            repeated_ok ? 1 : 0, trained.vocab_size, trained.n_merges, train_arena.used);
+        fflush(stderr);
+        CHECK(repeated_ok);
         CHECK(trained.n_merges > 0);
         CHECK(tokenizer_save(&trained, "tokenizer_test.bpe"));
         CHECK(tokenizer_load(&loaded, &load_arena, "tokenizer_test.bpe"));
