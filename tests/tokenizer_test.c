@@ -53,7 +53,7 @@ int main(void) {
     /* Every possible byte must round-trip, including NUL and high-bit bytes. */
     uint8_t all_bytes[256];
     for (int i = 0; i < 256; i++) all_bytes[i] = (uint8_t)i;
-    Tokenizer byte_tok;
+    static Tokenizer byte_tok;
     CHECK(tokenizer_train(&byte_tok, &train_arena, all_bytes,
         sizeof(all_bytes), 260));
     uint16_t byte_ids[256];
@@ -88,7 +88,7 @@ int main(void) {
     {
         static const uint8_t repeated[] =
             "abababababababababababababababababababababababababababababababab";
-        Tokenizer trained, loaded;
+        static Tokenizer trained, loaded;
         fprintf(stderr, "Tokenizer test: starting repeated-pair training (arena used=%zu, remaining=%zu).\\n", train_arena.used, arena_remaining(&train_arena));
         fflush(stderr);
         const bool repeated_ok = tokenizer_train(&trained, &train_arena, repeated,
