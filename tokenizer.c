@@ -503,10 +503,11 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
         sample_len * sizeof(BpeNode));
     if (!nodes) goto fail;
 
-    size_t max_pair_states = sample_len - 1;
-    const size_t merge_limit = (size_t)(target_vocab - 260);
-    if (merge_limit > (SIZE_MAX - max_pair_states) / 2) goto fail;
-    max_pair_states += merge_limit * 2;
+    /* Initial edges contribute at most n-1 pair keys. Every successful
+       merge removes one active node and can add at most two new edges, so
+       across the entire run no more than 3*(n-1) distinct keys can appear. */
+    if (sample_len - 1 > (SIZE_MAX / 3)) goto fail;
+    size_t max_pair_states = (sample_len - 1) * 3;
     if (max_pair_states == 0) max_pair_states = 1;
     if (max_pair_states > UINT32_MAX ||
         max_pair_states > SIZE_MAX / 2 ||
