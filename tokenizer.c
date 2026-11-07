@@ -228,7 +228,7 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
    incremental trainer passes equivalence and benchmark acceptance gates. */
 bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab) {
-    return tokenizer_train_reference(tok, arena, sample, sample_len,
+    return tokenizer_train_incremental(tok, arena, sample, sample_len,
         target_vocab);
 }
 
