@@ -20,8 +20,7 @@ static uint32_t next_value(uint32_t* state) {
     return x;
 }
 
-static const float* gradient_tensors(const Gradients* g,
-    const Model* model, size_t counts[10]) {
+static void gradient_counts(const Model* model, size_t counts[10]) {
     const size_t dim = (size_t)model->dim;
     const size_t layers = (size_t)model->n_layers;
     const size_t ffn = (size_t)model->ffn_dim;
@@ -35,12 +34,6 @@ static const float* gradient_tensors(const Gradients* g,
     counts[7] = layers * dim;
     counts[8] = layers * dim;
     counts[9] = dim;
-
-    /* The tensors are separately 64-byte-aligned arena allocations. Pack
-       them explicitly rather than assuming there is no padding between them. */
-    static const size_t tensor_count = 10;
-    (void)tensor_count;
-    return g->tok_emb;
 }
 
 static bool snapshot_gradients(const Gradients* g, const Model* model,
@@ -51,7 +44,7 @@ static bool snapshot_gradients(const Gradients* g, const Model* model,
         g->ffn_up, g->ffn_gate, g->ffn_down,
         g->rms1_scale, g->rms2_scale, g->rms_final_scale
     };
-    (void)gradient_tensors(g, model, counts);
+    gradient_counts(model, counts);
     size_t offset = 0;
     for (size_t i = 0; i < 10; i++) {
         memcpy(snapshot + offset, tensors[i], counts[i] * sizeof(float));
