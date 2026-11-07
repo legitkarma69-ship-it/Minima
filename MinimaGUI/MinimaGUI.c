@@ -13,6 +13,7 @@
 #include "gui_chat_state.h"
 #include "graph.h"
 #include "settings.h"
+#include "engine_io.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
@@ -318,76 +319,6 @@ static void set_running(BOOL running) {
     update_fresh_only_controls();
 }
 
-static void post_chat_ready(void* context) {
-    PostMessageW((HWND)context, WM_CHAT_READY, 0, 0);
-}
-
-static DWORD WINAPI reader_thread(void* parameter) {
-    HANDLE pipe = (HANDLE)parameter;
-    char buffer[2048];
-    DWORD got;
-    char* carry = (char*)calloc(1, 65536);
-    size_t used = 0;
-    if (!carry) {
-        CloseHandle(pipe);
-        if(g_process)TerminateProcess(g_process,1);
-        PostMessageW(g_window,WM_ENGINE_EXIT,1,0);
-        return 1;
-    }
-
-    while (ReadFile(pipe, buffer, sizeof(buffer), &got, NULL) && got) {
-        for (DWORD i = 0; i < got; ++i) {
-            if (used + 2 >= 65536) used = 0;
-            carry[used++] = buffer[i];
-            if (buffer[i] == '\n' || used >= 60000) {
-                carry[used] = 0;
-                const int protocol_marker=minima_protocol_dispatch(carry, used, post_chat_ready, g_window);
-                if(protocol_marker==MINIMA_PROTOCOL_CHAT_READY){
-                    used=0;continue;
-                }
-                if(protocol_marker==MINIMA_PROTOCOL_CHAT_CLOSED){used=0;continue;}
-                UINT code_page=CP_UTF8;
-                int needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);
-                if(needed<=0){code_page=CP_ACP;needed=MultiByteToWideChar(code_page,0,carry,(int)used,NULL,0);}
-                if (needed > 0) {
-                    wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
-                    if (wide) {
-                        MultiByteToWideChar(code_page, 0, carry, (int)used, wide, needed);
-                        PostMessageW(g_window, WM_APPEND_LOG, 0, (LPARAM)wide);
-                    }
-                }
-                used = 0;
-            }
-        }
-    }
-    if (used) {
-        carry[used] = 0;
-        UINT code_page = CP_UTF8;
-        int needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
-        if (needed <= 0) {
-            code_page = CP_ACP;
-            needed = MultiByteToWideChar(code_page, 0, carry, (int)used, NULL, 0);
-        }
-        if (needed > 0) {
-            wchar_t* wide = (wchar_t*)calloc((size_t)needed + 1, sizeof(wchar_t));
-            if (wide) {
-                MultiByteToWideChar(code_page, 0, carry, (int)used, wide, needed);
-                PostMessageW(g_window, WM_APPEND_LOG, 0, (LPARAM)wide);
-            }
-        }
-    }
-    free(carry);
-    CloseHandle(pipe);
-
-    if (g_process) {
-        WaitForSingleObject(g_process, INFINITE);
-        DWORD code = 1;
-        GetExitCodeProcess(g_process, &code);
-        PostMessageW(g_window, WM_ENGINE_EXIT, (WPARAM)code, 0);
-    }
-    return 0;
-}
-
 static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* arg) {
     size_t used = wcslen(command);
     size_t len = wcslen(arg);
@@ -672,7 +603,8 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":
         (tokenizer_only?L"\r\n--- Rebuilding tokenizer from selected corpus ---\r\n":L"\r\n--- Starting Minima training engine ---\r\n"));
-    g_thread = CreateThread(NULL, 0, reader_thread, read_pipe, 0, NULL);
+    g_thread = minima_engine_start_reader(read_pipe, g_window, g_process,
+        WM_APPEND_LOG, WM_ENGINE_EXIT, WM_CHAT_READY);
     if (!g_thread) {
         TerminateProcess(g_process, 1);
         if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
