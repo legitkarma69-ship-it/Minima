@@ -260,10 +260,10 @@ int main(int argc, char** argv) {
 #ifdef _OPENMP
     omp_set_dynamic(0);
     if (options.threads > 0) omp_set_num_threads(options.threads);
-    printf("CPU parallelism: OpenMP enabled, %d worker threads\\n", omp_get_max_threads());
+    printf("CPU parallelism: OpenMP enabled, %d worker threads\n", omp_get_max_threads());
 #else
     if (options.threads > 0)
-        printf("Warning: this build has no OpenMP support; --threads is ignored.\\n");
+        printf("Warning: this build has no OpenMP support; --threads is ignored.\n");
 #endif
     if(options.sequence_length>options.model.max_seq)
         die("sequence length cannot exceed model context length");
