@@ -53,6 +53,13 @@ jobs:
           grep -q 'Gradient checks passed: 10 / 10' <<< "$output"
           test -s minima.model
 
+      - name: Test source-balanced streaming corpus sampler
+        run: |
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/corpus_sampling_test.c corpus.c arena.c util.c \
+            -lm -o corpus_sampling_test
+          ./corpus_sampling_test
+
       - name: Run focused tokenizer tests
         run: |
           gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
