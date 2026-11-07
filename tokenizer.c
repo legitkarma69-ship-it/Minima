@@ -675,6 +675,8 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
 
     printf("BPE incremental finished. vocab = %d  merges = %d\n",
         tok->vocab_size, tok->n_merges);
+    printf("BPE tie fallback scans = %zu  bytes scanned = %llu\n",
+        tie_fallback_count, (unsigned long long)tie_scan_bytes);
     return true;
 
 fail:
