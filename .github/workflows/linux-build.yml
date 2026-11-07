@@ -21,7 +21,7 @@ jobs:
 
       - name: Build engine CLI
         run: |
-          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic \
+          gcc -fopenmp -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic \
             arena.c backward.c chat.c checkpoint.c corpus.c diagnostics.c \
             forward.c generate.c gradcheck.c main.c model.c optim.c \
             tokenizer.c train.c train_validation.c util.c \
