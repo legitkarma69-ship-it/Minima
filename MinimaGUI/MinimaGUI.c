@@ -151,6 +151,8 @@ static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
 
 static BOOL is_advanced_page_control(HWND child) {
     if (child == g_group_advanced) return TRUE;
+    if (!g_advanced_expanded) return FALSE;
+    if (child == g_chat_test) return TRUE;
     for (int i = 0; i < g_advanced_control_count; ++i)
         if (g_advanced_controls[i] == child) return TRUE;
     return FALSE;
