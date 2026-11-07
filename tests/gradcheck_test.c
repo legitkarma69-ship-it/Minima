@@ -122,16 +122,20 @@ static int run_case(uint64_t seed) {
                     tokens, BATCH, SEQUENCE);
                 const bool saved = snapshot_gradients(
                     &gradients, &model, snapshot);
-                gradients_zero(&gradients, &model);
-                model_backward(&model, &gradients, &act, dlogits,
-                    tokens, BATCH, SEQUENCE);
-                reuse_passed = saved &&
-                    gradients_match_snapshot(&gradients, &model, snapshot);
+                float* repeated_logits = model_forward(
+                    &model, &act, tokens, BATCH, SEQUENCE);
+                if (repeated_logits) {
+                    gradients_zero(&gradients, &model);
+                    model_backward(&model, &gradients, &act, dlogits,
+                        tokens, BATCH, SEQUENCE);
+                    reuse_passed = saved &&
+                        gradients_match_snapshot(&gradients, &model, snapshot);
+                }
             }
             free(snapshot);
         }
     }
-    printf("  backward workspace reuse %s\\n",
+    printf("  backward workspace reuse %s\n",
         reuse_passed ? "PASS" : "FAIL");
 
     arena_free(&temp_arena);
