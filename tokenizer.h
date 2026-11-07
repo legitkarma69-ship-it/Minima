@@ -1,4 +1,4 @@
-﻿#ifndef TOKENIZER_H
+#ifndef TOKENIZER_H
 #define TOKENIZER_H
 
 #include "arena.h"
@@ -48,8 +48,9 @@ int  tokenizer_encode(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
     uint16_t* out, int out_cap);
 
-// Decode token ids → text. Returns bytes written (not including NUL).
-// `out` is NUL-terminated if there is room.
+// Decode token ids → text. Returns bytes written (not including NUL), or -1
+// for invalid arguments, invalid IDs, or insufficient capacity. Output is
+// all-or-nothing; out_cap includes the terminating NUL and must be positive.
 int  tokenizer_decode(const Tokenizer* tok,
     const uint16_t* ids, int n_ids,
     char* out, int out_cap);
