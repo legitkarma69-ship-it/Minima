@@ -4,6 +4,10 @@
 #include <wchar.h>
 #include "settings.h"
 
+#ifndef _countof
+#define _countof(array) (sizeof(array) / sizeof((array)[0]))
+#endif
+
 static const wchar_t* const g_edit_keys[23] = {
     L"steps", L"vocab", L"dim", L"layers", L"heads", L"ffn", L"context",
     L"batch", L"sequence", L"learning_rate", L"warmup", L"total_steps",
