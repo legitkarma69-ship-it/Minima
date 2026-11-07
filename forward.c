@@ -24,8 +24,9 @@ void matmul(float* out, const float* x, const float* w,
     int n, int d_in, int d_out) {
     // x: [n, d_in], w: [d_out, d_in], out: [n, d_out]
     /* Each output row is independent; keep the inner accumulation order fixed. */
+    int i;
     #pragma omp parallel for schedule(static) if(n >= 32)
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         for (int j = 0; j < d_out; j++) {
             float sum = 0.0f;
             const float* row = w + (size_t)j * d_in;
@@ -39,8 +40,9 @@ void matmul(float* out, const float* x, const float* w,
 
 static void matmul_add(float* out, const float* x, const float* w,
     int n, int d_in, int d_out) {
+    int i;
     #pragma omp parallel for schedule(static) if(n >= 32)
-    for (int i = 0; i < n; i++) {
+    for (i = 0; i < n; i++) {
         for (int j = 0; j < d_out; j++) {
             float sum = 0.0f;
             const float* row = w + (size_t)j * d_in;
