@@ -15,6 +15,7 @@
 #include "settings.h"
 #include "engine_io.h"
 #include "gui_layout.h"
+#include "gui_pages.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
@@ -776,28 +777,9 @@ static void create_controls(HWND hwnd) {
     if (!g_dpi) g_dpi = 96;
     rebuild_ui_font(hwnd);
 
-    g_main_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD|WS_VISIBLE|WS_TABSTOP,
-        12, 6, 920, 28, hwnd, (HMENU)IDC_MAIN_TABS, GetModuleHandleW(NULL), NULL);
-    if (g_main_tabs) {
-        TCITEMW item; ZeroMemory(&item, sizeof(item)); item.mask = TCIF_TEXT;
-        item.pszText = L"Training"; TabCtrl_InsertItem(g_main_tabs, 0, &item);
-        item.pszText = L"Advanced"; TabCtrl_InsertItem(g_main_tabs, 1, &item);
-        item.pszText = L"Chat & Generation"; TabCtrl_InsertItem(g_main_tabs, 2, &item);
-    }
-
-    g_group_corpus = CreateWindowW(L"BUTTON", L"Corpus", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 6, 920, 168, hwnd, NULL, NULL, NULL);
-    g_group_model = CreateWindowW(L"BUTTON", L"Model", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 168, 585, 38, hwnd, NULL, NULL, NULL);
-    g_group_training = CreateWindowW(L"BUTTON", L"Training", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 202, 585, 38, hwnd, NULL, NULL, NULL);
-    g_group_advanced = CreateWindowW(L"BUTTON", L"Show advanced settings", WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX,
-        8, 236, 220, 24, hwnd, (HMENU)IDC_ADVANCED_TOGGLE, NULL, NULL);
-    SendMessageW(g_group_advanced, BM_SETCHECK, BST_CHECKED, 0);
-    g_group_monitor = CreateWindowW(L"BUTTON", L"Monitor", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        590, 150, 340, 205, hwnd, NULL, NULL, NULL);
-    g_group_output = CreateWindowW(L"BUTTON", L"Output / chat", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 375, 920, 350, hwnd, NULL, NULL, NULL);
+    gui_pages_create_shell(hwnd, &g_main_tabs, &g_group_corpus,
+        &g_group_model, &g_group_training, &g_group_advanced,
+        &g_group_monitor, &g_group_output);
     HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, hwnd, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
