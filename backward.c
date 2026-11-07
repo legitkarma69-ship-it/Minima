@@ -30,16 +30,8 @@ void gradients_zero(Gradients* g, const Model* model) {
 }
 
 bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
-    if (!g || !arena || !model || !arena->base ||
-        arena->used > arena->size ||
-        model->vocab_size < 260 || model->vocab_size > 8192 ||
-        model->dim <= 0 || model->dim > 512 ||
-        model->n_layers <= 0 || model->n_layers > 16 ||
-        model->n_heads <= 0 || model->n_heads > 32 ||
-        model->dim % model->n_heads != 0 ||
-        model->head_dim != model->dim / model->n_heads ||
-        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
-        model->max_seq < 32 || model->max_seq > 512)
+    if (!g || !arena || !arena->base || arena->used > arena->size ||
+        !model_validate(model))
         return false;
 
     const size_t dim = (size_t)model->dim;
@@ -375,12 +367,8 @@ static void attention_backward(float* dqkv, const float* qkv,
 void model_backward(Model* model, Gradients* grads, Activations* act,
     const float* dlogits, const uint16_t* tokens, int batch, int seq) {
 
-    if (!model || !grads || !act || !dlogits || !tokens ||
-        batch <= 0 || seq <= 0 || seq > model->max_seq || seq > 512 ||
-        model->dim <= 0 || model->ffn_dim <= 0 ||
-        model->vocab_size <= 0 || model->n_layers <= 0 ||
-        model->n_heads <= 0 || model->head_dim <= 0 ||
-        model->n_heads * model->head_dim != model->dim ||
+    if (!model_validate(model) || !grads || !act || !dlogits || !tokens ||
+        batch <= 0 || seq <= 0 || seq > model->max_seq ||
         !act->x || !act->x_norm || !act->qkv || !act->attn_out ||
         !act->up_buf || !act->gate_buf || !act->ffn_buf ||
         !act->resid_attn || !act->resid_ffn || !act->dx ||
