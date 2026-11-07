@@ -310,7 +310,7 @@ int main(int argc, char** argv) {
     if (!arena_init(&temp, 256ull * 1024 * 1024))
         die("temp arena failed");
     if (!options.tokenizer_only && !options.chat_mode &&
-        !arena_init(&corpus_arena, 4ull * 1024 * 1024 * 1024))
+        !arena_init(&corpus_arena, 8ull * 1024 * 1024 * 1024))
         die("corpus arena failed");
 
     // ------------------------------------------------------------------
