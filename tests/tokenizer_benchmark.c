@@ -31,7 +31,7 @@ static int run_benchmark_case(const char* label, TokenizerTrainer trainer,
         (int)vocab_size);
     const double train_seconds = now_seconds() - train_start;
     if (!trained) {
-        fprintf(stderr, "%s tokenizer training failed.\\n", label);
+        fprintf(stderr, "%s tokenizer training failed.\n", label);
         return 1;
     }
 
