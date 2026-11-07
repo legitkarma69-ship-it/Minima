@@ -34,12 +34,15 @@
 #define IDC_AUTO_SETTINGS 1016
 #define IDC_ADVANCED_TOGGLE 1017
 #define IDC_CHAT_TEST    1018
+#define IDC_MAIN_TABS    1019
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
 #define IDT_GRAPH_REFRESH 1
 
 static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
+static HWND g_main_tabs;
+static int g_active_page;
 static HWND g_tab_controls[40];
 static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_total_steps, g_log_interval, g_validation_batches;
@@ -146,22 +149,57 @@ static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
     InvalidateRect(hwnd, NULL, TRUE);
 }
 
+static BOOL is_advanced_page_control(HWND child) {
+    if (child == g_group_advanced) return TRUE;
+    for (int i = 0; i < g_advanced_control_count; ++i)
+        if (g_advanced_controls[i] == child) return TRUE;
+    return FALSE;
+}
+
+static BOOL is_chat_page_control(HWND child) {
+    return child == g_group_output || child == g_output_label || child == g_log ||
+        child == g_chat_input || child == g_chat_test ||
+        child == GetDlgItem(g_window, IDC_CHAT_START) ||
+        child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
+        child == GetDlgItem(g_window, IDC_CHAT_STOP);
+}
+
+static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
+    const int page = (int)page_parameter;
+    if (child == g_main_tabs) return TRUE;
+    BOOL visible = page == 0;
+    if (page == 1) visible = is_advanced_page_control(child);
+    else if (page == 2) visible = is_chat_page_control(child);
+    ShowWindow(child, visible ? SW_SHOWNA : SW_HIDE);
+    return TRUE;
+}
+
+static void select_main_page(HWND hwnd, int page) {
+    if (page < 0 || page > 2) return;
+    g_active_page = page;
+    if (g_main_tabs) TabCtrl_SetCurSel(g_main_tabs, page);
+    EnumChildWindows(hwnd, apply_page_visibility, (LPARAM)page);
+    layout_controls(hwnd);
+    InvalidateRect(hwnd, NULL, TRUE);
+}
+
 static void layout_controls(HWND hwnd) {
     RECT client; GetClientRect(hwnd,&client);
     const int width=client.right, height=client.bottom;
     const int pad=scale_px(12), gap=scale_px(12), inner=width-2*pad;
     if(inner<=0)return;
-    const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(8);
+    const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
     const int bottom_h=scale_px(82), action_h=scale_px(38);
     const int output_top=work_top+scale_px(368);
     const int output_bottom=height-bottom_h-scale_px(8);
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
     const int advanced_y=work_top+scale_px(106);
-    if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(6),width-scale_px(16),corpus_h,TRUE);
-    if(g_corpus)MoveWindow(g_corpus,pad,scale_px(30),inner,scale_px(58),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(94),scale_px(104),scale_px(26),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(94),scale_px(136),scale_px(26),TRUE);
+    if(g_main_tabs)MoveWindow(g_main_tabs,pad,scale_px(6),inner,scale_px(28),TRUE);
+    if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(40),width-scale_px(16),corpus_h,TRUE);
+    if(g_corpus)MoveWindow(g_corpus,pad,scale_px(64),inner,scale_px(58),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(128),scale_px(104),scale_px(26),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(128),scale_px(136),scale_px(26),TRUE);
     if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
     if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
@@ -172,7 +210,7 @@ static void layout_controls(HWND hwnd) {
     for(int i=0;i<g_initial_rect_count;i++){
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
-           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_corpus||
+           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
            child==g_graph||child==g_log||child==g_chat_input||child==g_chat_test)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
@@ -1198,6 +1236,15 @@ static void create_controls(HWND hwnd) {
     if (!g_dpi) g_dpi = 96;
     rebuild_ui_font(hwnd);
 
+    g_main_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD|WS_VISIBLE|WS_TABSTOP,
+        12, 6, 920, 28, hwnd, (HMENU)IDC_MAIN_TABS, GetModuleHandleW(NULL), NULL);
+    if (g_main_tabs) {
+        TCITEMW item; ZeroMemory(&item, sizeof(item)); item.mask = TCIF_TEXT;
+        item.pszText = L"Training"; TabCtrl_InsertItem(g_main_tabs, 0, &item);
+        item.pszText = L"Advanced"; TabCtrl_InsertItem(g_main_tabs, 1, &item);
+        item.pszText = L"Chat & Generation"; TabCtrl_InsertItem(g_main_tabs, 2, &item);
+    }
+
     g_group_corpus = CreateWindowW(L"BUTTON", L"Corpus", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
         8, 6, 920, 168, hwnd, NULL, NULL, NULL);
     g_group_model = CreateWindowW(L"BUTTON", L"Model", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
@@ -1341,6 +1388,7 @@ static void create_controls(HWND hwnd) {
     g_initial_rect_count=0;
     EnumChildWindows(hwnd,capture_initial_rect,0);
     layout_controls(hwnd);
+    select_main_page(hwnd, 0);
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
@@ -1424,6 +1472,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_graph) InvalidateRect(g_graph, NULL, FALSE);
         return 0;
     }
+    case WM_NOTIFY:
+        if (((NMHDR*)lp)->hwndFrom == g_main_tabs &&
+            ((NMHDR*)lp)->code == TCN_SELCHANGE) {
+            select_main_page(hwnd, TabCtrl_GetCurSel(g_main_tabs));
+            return 0;
+        }
+        break;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case IDC_ADD: g_use_saved_tokenizer=FALSE; WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path); add_corpus_files(); return 0;
