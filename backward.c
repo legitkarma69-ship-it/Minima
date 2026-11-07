@@ -263,11 +263,11 @@ static void matmul_backward(float* dx, float* dw,
     int j;
     #pragma omp parallel for schedule(static) if(d_out >= 32)
     for (j = 0; j < d_out; j++) {
-        int i;
+        int row;
         for (int k = 0; k < d_in; k++) {
             float sum = 0.0f;
-            for (i = 0; i < n; i++)
-                sum += dout[(size_t)i * d_out + j] * x[(size_t)i * d_in + k];
+            for (row = 0; row < n; row++)
+                sum += dout[(size_t)row * d_out + j] * x[(size_t)row * d_in + k];
             dw[(size_t)j * d_in + k] += sum;
         }
     }
