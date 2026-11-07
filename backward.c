@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <stddef.h>
+#include <limits.h>
 
 // ------------------------------------------------------------------
 // Gradient storage
@@ -368,7 +369,8 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
     const float* dlogits, const uint16_t* tokens, int batch, int seq) {
 
     if (!model_validate(model) || !grads || !act || !dlogits || !tokens ||
-        batch <= 0 || seq <= 0 || seq > model->max_seq ||
+        batch <= 0 || seq <= 0 || batch > INT_MAX / seq ||
+        seq > model->max_seq ||
         !act->x || !act->x_norm || !act->qkv || !act->attn_out ||
         !act->up_buf || !act->gate_buf || !act->ffn_buf ||
         !act->resid_attn || !act->resid_ffn || !act->dx ||
