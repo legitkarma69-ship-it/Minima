@@ -116,6 +116,28 @@ int main(void) {
         CHECK(tokenizer_decode(&loaded, after, after_n, text_before,
             (int)sizeof(repeated) - 1) == -1);
 
+        /* Loaded tokenizers must rebuild the derived rank index and use the
+           long-input heap encoder without changing the reference output. */
+        uint8_t long_text[512];
+        for (size_t i = 0; i < sizeof(long_text); i++)
+            long_text[i] = repeated[i % (sizeof(repeated) - 1)];
+        uint16_t long_reference[512], long_trained[512], long_loaded[512];
+        const int long_reference_n = tokenizer_encode_reference(&trained,
+            long_text, sizeof(long_text), long_reference, 512);
+        const int long_trained_n = tokenizer_encode(&trained, long_text,
+            sizeof(long_text), long_trained, 512);
+        const int long_loaded_n = tokenizer_encode(&loaded, long_text,
+            sizeof(long_text), long_loaded, 512);
+        CHECK(long_reference_n >= 0);
+        CHECK(long_reference_n == long_trained_n);
+        CHECK(long_reference_n == long_loaded_n);
+        CHECK(memcmp(long_reference, long_trained,
+            (size_t)long_reference_n * sizeof(uint16_t)) == 0);
+        CHECK(memcmp(long_reference, long_loaded,
+            (size_t)long_reference_n * sizeof(uint16_t)) == 0);
+        CHECK(tokenizer_decode(&loaded, long_loaded, long_loaded_n,
+            text_after, (int)sizeof(text_after)) == -1);
+
         /* Corrupt a byte-token payload without changing its length. */
         {
             unsigned char* bytes = NULL; size_t size = 0;
