@@ -44,6 +44,78 @@ static size_t pair_hash(uint16_t left, uint16_t right, size_t table_size) {
     return (size_t)k & (table_size - 1);
 }
 
+
+typedef struct {
+    uint32_t key;
+    uint16_t rank;
+    uint16_t reserved;
+} MergeRankSlot;
+
+static bool tokenizer_build_merge_rank_index(Tokenizer* tok, Arena* arena) {
+    if (!tok || !arena || tok->n_merges < 0 ||
+        tok->n_merges > TOK_MAX_MERGES)
+        return false;
+    tok->merge_rank_index = NULL;
+    tok->merge_rank_capacity = 0;
+    if (tok->n_merges == 0) return true;
+
+    size_t capacity = 8;
+    const size_t required = (size_t)tok->n_merges * 2;
+    while (capacity < required) {
+        if (capacity > SIZE_MAX / 2) return false;
+        capacity *= 2;
+    }
+    if (capacity > UINT32_MAX ||
+        capacity > SIZE_MAX / sizeof(MergeRankSlot))
+        return false;
+
+    MergeRankSlot* table = (MergeRankSlot*)arena_alloc_zero(arena,
+        capacity * sizeof(MergeRankSlot));
+    if (!table) return false;
+
+    for (int rank = 0; rank < tok->n_merges; rank++) {
+        const uint16_t left = tok->merges[rank].left;
+        const uint16_t right = tok->merges[rank].right;
+        const uint32_t key = ((uint32_t)left << 16) | right;
+        const size_t start = pair_hash(left, right, capacity);
+        bool inserted = false;
+        for (size_t probe = 0; probe < capacity; probe++) {
+            const size_t slot = (start + probe) & (capacity - 1);
+            if (table[slot].key == 0) {
+                table[slot].key = key;
+                table[slot].rank = (uint16_t)rank;
+                inserted = true;
+                break;
+            }
+            if (table[slot].key == key)
+                return false;
+        }
+        if (!inserted) return false;
+    }
+
+    tok->merge_rank_index = table;
+    tok->merge_rank_capacity = (uint32_t)capacity;
+    return true;
+}
+
+static uint16_t tokenizer_find_merge_rank(const Tokenizer* tok,
+    uint16_t left, uint16_t right) {
+    if (!tok || !tok->merge_rank_index || tok->merge_rank_capacity == 0)
+        return UINT16_MAX;
+    const size_t capacity = tok->merge_rank_capacity;
+    const MergeRankSlot* table =
+        (const MergeRankSlot*)tok->merge_rank_index;
+    const uint32_t key = ((uint32_t)left << 16) | right;
+    const size_t start = pair_hash(left, right, capacity);
+    for (size_t probe = 0; probe < capacity; probe++) {
+        const size_t slot = (start + probe) & (capacity - 1);
+        if (table[slot].key == 0) return UINT16_MAX;
+        if (table[slot].key == key) return table[slot].rank;
+    }
+    return UINT16_MAX;
+}
+
+
 // ------------------------------------------------------------------
 // Training
 // ------------------------------------------------------------------
@@ -218,6 +290,8 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
                 m + 1, merges_needed, n);
     }
 
+    if (!tokenizer_build_merge_rank_index(tok, arena))
+        return false;
     printf("BPE finished. vocab = %d  merges = %d\n",
         tok->vocab_size, tok->n_merges);
     return true;
@@ -723,6 +797,7 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
                 merge_index + 1, merges_needed, active_count);
     }
 
+    if (!tokenizer_build_merge_rank_index(tok, arena)) goto fail;
     return true;
 
 fail:
@@ -995,6 +1070,9 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
                 loaded.token_str[right], (size_t)right_len) != 0)
             goto fail;
     }
+
+    if (!tokenizer_build_merge_rank_index(&loaded, arena))
+        goto fail;
 
     if (fgetc(f) != EOF || ferror(f))
         goto fail;
