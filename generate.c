@@ -275,7 +275,7 @@ static void print_token_escaped(const Tokenizer* tok, int id) {
 }
 
 // Inspect the model's next-token distribution after a prompt. Probabilities
-// are normalized over the complete vocabulary, not only the displayed top N.
+// are normalized over sampleable tokens, not only the displayed top N.
 bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n) {
     if (!model || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
@@ -305,19 +305,23 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
 
     float max_logit = -INFINITY;
     for (int i = 0; i < model->vocab_size; i++) {
+        if (i < TOK_SPECIAL_COUNT) {
+            logits[i] = -INFINITY;
+            continue;
+        }
         if (!isfinite(logits[i])) return false;
         if (logits[i] > max_logit) max_logit = logits[i];
     }
 
     double denom = 0.0;
-    for (int i = 0; i < model->vocab_size; i++)
+    for (int i = TOK_SPECIAL_COUNT; i < model->vocab_size; i++)
         denom += exp((double)logits[i] - (double)max_logit);
     if (!(denom > 0.0) || !isfinite(denom)) return false;
 
     int best_ids[20];
     float best_logits[20];
     int found = 0;
-    for (int id = 0; id < model->vocab_size; id++) {
+    for (int id = TOK_SPECIAL_COUNT; id < model->vocab_size; id++) {
         int at = found;
         if (at > top_n) at = top_n;
         while (at > 0 && logits[id] > best_logits[at - 1]) {
@@ -335,7 +339,7 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     }
 
     double entropy_bits = 0.0;
-    for (int i = 0; i < model->vocab_size; ++i) {
+    for (int i = TOK_SPECIAL_COUNT; i < model->vocab_size; ++i) {
         const double probability =
             exp((double)logits[i] - (double)max_logit) / denom;
         if (probability > 0.0)
@@ -353,7 +357,7 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
         if (i == 9) top10_mass = cumulative_mass;
     }
 
-    printf("  Next-token distribution (top %d, full-vocabulary probabilities):\n",
+    printf("  Next-token distribution (top %d, sampleable-vocabulary probabilities):\n",
         found);
     printf("    entropy=%.4f bits, top-1=%.2f%%, top-5=%.2f%%, top-10=%.2f%%\n",
         entropy_bits, top1_mass * 100.0, top5_mass * 100.0,
@@ -444,6 +448,8 @@ int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
     float x[512],logits[8192];
     for(int i=0;i<prompt_len;i++){out_ids[i]=prompt_ids[i];forward_one(model,cache,prompt_ids[i],x,logits);}
     for(int i=0;i<n_new;i++){
+        for (int special = 0; special < TOK_SPECIAL_COUNT; special++)
+            logits[special] = -INFINITY;
         int next=sample_top_k_top_p(logits,model->vocab_size,temperature,top_k,
             top_p,repetition_penalty,out_ids,prompt_len+i,rng);
         if(next<0||next>=tok->vocab_size)return 0;

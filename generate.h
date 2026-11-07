@@ -32,6 +32,9 @@ bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
 bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n);
 
+// The current raw-byte training pipeline does not insert BOS/EOS/PAD/UNK.
+// Generation therefore suppresses all four reserved IDs rather than sampling
+// untrained special-token embeddings; EOS is not an active stopping marker.
 // Generate `n_new` tokens starting from the prompt.
 // Writes the generated token ids into `out_ids` (including the prompt).
 // Returns total number of tokens written.
