@@ -62,7 +62,7 @@ static bool gradients_match_snapshot(const Gradients* g, const Model* model,
         g->ffn_up, g->ffn_gate, g->ffn_down,
         g->rms1_scale, g->rms2_scale, g->rms_final_scale
     };
-    (void)gradient_tensors(g, model, counts);
+    gradient_counts(model, counts);
     size_t offset = 0;
     for (size_t i = 0; i < 10; i++) {
         const size_t bytes = counts[i] * sizeof(float);
