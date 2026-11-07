@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -697,6 +698,7 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
     size_t active_count = sample_len;
 
     const int merges_needed = target_vocab - tok->vocab_size;
+    const clock_t training_started = clock();
     for (int merge_index = 0; merge_index < merges_needed; merge_index++) {
         if (heap_count == 0) break;
         uint32_t best_slot = heap[0];
@@ -792,12 +794,19 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
                 goto fail;
         }
 
-        if ((merge_index + 1) % 500 == 0)
-            printf("merge %d / %d   tokens left in sample: %zu\n",
-                merge_index + 1, merges_needed, active_count);
+        if ((merge_index + 1) % 50 == 0 ||
+            merge_index + 1 == merges_needed) {
+            const double elapsed =
+                (double)(clock() - training_started) / CLOCKS_PER_SEC;
+            printf("Tokenizer progress: merge %d / %d, active bytes: %zu, elapsed: %.1fs\n",
+                merge_index + 1, merges_needed, active_count, elapsed);
+        }
     }
 
     if (!tokenizer_build_merge_rank_index(tok, arena)) goto fail;
+    printf("BPE finished. vocab = %d  merges = %d (%.1fs)\n",
+        tok->vocab_size, tok->n_merges,
+        (double)(clock() - training_started) / CLOCKS_PER_SEC);
     return true;
 
 fail:
