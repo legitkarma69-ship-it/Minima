@@ -63,45 +63,43 @@ static void attention(float* out, const float* qkv,
 
     for (int b = 0; b < batch; b++) {
         for (int h = 0; h < n_heads; h++) {
-            // qkv token layout: [Q | K | V], each section has dim values.
             const float* q_base = qkv + (size_t)b * seq * 3 * dim + h * head_dim;
             const float* k_base = q_base + dim;
             const float* v_base = k_base + dim;
 
             for (int qi = 0; qi < seq; qi++) {
-                float scores[512];
-                float max_score = -1.0e30f;
-
-                for (int kj = 0; kj <= qi; kj++) {
-                    float dot = 0.0f;
-                    const float* q = q_base + (size_t)qi * 3 * dim;
-                    const float* k = k_base + (size_t)kj * 3 * dim;
-                    for (int d = 0; d < head_dim; d++)
-                        dot += q[d] * k[d];
-                    scores[kj] = dot * scale;
-                    if (scores[kj] > max_score) max_score = scores[kj];
-                }
-
-                float sum = 0.0f;
-                for (int kj = 0; kj <= qi; kj++) {
-                    scores[kj] = expf(scores[kj] - max_score);
-                    sum += scores[kj];
-                }
-                const float inv_sum = 1.0f / sum;
-                for (int kj = 0; kj <= qi; kj++)
-                    scores[kj] *= inv_sum;
-
+                const float* q = q_base + (size_t)qi * 3 * dim;
                 float* out_h = out + (size_t)b * seq * dim +
                     (size_t)qi * dim + h * head_dim;
+                float max_score = -1.0e30f;
+                float denominator = 0.0f;
+
+                /* Online softmax keeps only scalar normalization state. This
+                   avoids a sequence-sized stack buffer and remains stable for
+                   arbitrarily long supported contexts. */
                 for (int d = 0; d < head_dim; d++)
                     out_h[d] = 0.0f;
 
                 for (int kj = 0; kj <= qi; kj++) {
+                    const float* k = k_base + (size_t)kj * 3 * dim;
                     const float* v = v_base + (size_t)kj * 3 * dim;
-                    const float weight = scores[kj];
+                    float dot = 0.0f;
                     for (int d = 0; d < head_dim; d++)
-                        out_h[d] += weight * v[d];
+                        dot += q[d] * k[d];
+                    const float score = dot * scale;
+                    const float next_max = score > max_score ? score : max_score;
+                    const float old_weight = expf(max_score - next_max);
+                    const float new_weight = expf(score - next_max);
+
+                    denominator = denominator * old_weight + new_weight;
+                    for (int d = 0; d < head_dim; d++)
+                        out_h[d] = out_h[d] * old_weight + new_weight * v[d];
+                    max_score = next_max;
                 }
+
+                const float inv_denominator = 1.0f / denominator;
+                for (int d = 0; d < head_dim; d++)
+                    out_h[d] *= inv_denominator;
             }
         }
     }
