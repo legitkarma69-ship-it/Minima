@@ -5,6 +5,7 @@
 #define IDC_CORPUS 1001
 #define IDC_ADD 1002
 #define IDC_REMOVE 1003
+#define IDC_RESUME 1005
 #define IDC_START 1006
 #define IDC_STOP 1007
 #define IDC_STATUS 1009
