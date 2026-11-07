@@ -655,8 +655,8 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
         }
 
         if ((merge_index + 1) % 500 == 0)
-            printf("merge %d / %d   tokens left in sample: incremental\n",
-                merge_index + 1, merges_needed);
+            printf("merge %d / %d   tokens left in sample: %zu\n",
+                merge_index + 1, merges_needed, active_count);
     }
 
     printf("BPE incremental finished. vocab = %d  merges = %d\n",
