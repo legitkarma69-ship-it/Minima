@@ -296,8 +296,6 @@ static void attention_backward(float* dqkv, const float* qkv,
     int n_heads, int head_dim) {
 
     const float scale = 1.0f / sqrtf((float)head_dim);
-    float scores[512];
-    float dscores[512];
 
     for (int b = 0; b < batch; b++) {
         for (int h = 0; h < n_heads; h++) {
@@ -310,59 +308,73 @@ static void attention_backward(float* dqkv, const float* qkv,
             float* dv_base = dk_base + dim;
 
             for (int qi = 0; qi < seq; qi++) {
-                float max_score = -1.0e30f;
-                for (int kj = 0; kj <= qi; kj++) {
-                    float dot = 0.0f;
-                    const float* q = q_base + (size_t)qi * 3 * dim;
-                    const float* k = k_base + (size_t)kj * 3 * dim;
-                    for (int d = 0; d < head_dim; d++)
-                        dot += q[d] * k[d];
-                    scores[kj] = dot * scale;
-                    if (scores[kj] > max_score) max_score = scores[kj];
-                }
-
-                float sum = 0.0f;
-                for (int kj = 0; kj <= qi; kj++) {
-                    scores[kj] = expf(scores[kj] - max_score);
-                    sum += scores[kj];
-                }
-                const float inv_sum = 1.0f / sum;
-                for (int kj = 0; kj <= qi; kj++)
-                    scores[kj] *= inv_sum;
-
+                const float* q = q_base + (size_t)qi * 3 * dim;
                 const float* do_h = dout_attn +
                     (size_t)b * seq * dim + (size_t)qi * dim + h * head_dim;
+                float max_score = -1.0e30f;
 
-                // Value gradients.
+                /* First pass: find the stable softmax maximum. */
                 for (int kj = 0; kj <= qi; kj++) {
-                    float* dv = dv_base + (size_t)kj * 3 * dim;
+                    const float* k = k_base + (size_t)kj * 3 * dim;
+                    float dot = 0.0f;
                     for (int d = 0; d < head_dim; d++)
-                        dv[d] += scores[kj] * do_h[d];
+                        dot += q[d] * k[d];
+                    const float score = dot * scale;
+                    if (score > max_score) max_score = score;
                 }
 
-                // Derivative with respect to attention probabilities.
+                /* Second pass: compute the denominator. */
+                float denominator = 0.0f;
                 for (int kj = 0; kj <= qi; kj++) {
+                    const float* k = k_base + (size_t)kj * 3 * dim;
+                    float dot = 0.0f;
+                    for (int d = 0; d < head_dim; d++)
+                        dot += q[d] * k[d];
+                    denominator += expf(dot * scale - max_score);
+                }
+                const float inv_denominator = 1.0f / denominator;
+
+                /* Third pass: value gradients and the softmax-Jacobian
+                   contraction. No per-sequence score arrays are needed. */
+                float weighted_sum = 0.0f;
+                for (int kj = 0; kj <= qi; kj++) {
+                    const float* k = k_base + (size_t)kj * 3 * dim;
                     const float* v = v_base + (size_t)kj * 3 * dim;
                     float dot = 0.0f;
                     for (int d = 0; d < head_dim; d++)
-                        dot += do_h[d] * v[d];
-                    dscores[kj] = dot;
+                        dot += q[d] * k[d];
+                    const float probability =
+                        expf(dot * scale - max_score) * inv_denominator;
+
+                    float value_dot = 0.0f;
+                    for (int d = 0; d < head_dim; d++)
+                        value_dot += do_h[d] * v[d];
+                    weighted_sum += probability * value_dot;
+
+                    float* dv = dv_base + (size_t)kj * 3 * dim;
+                    for (int d = 0; d < head_dim; d++)
+                        dv[d] += probability * do_h[d];
                 }
 
-                float weighted_sum = 0.0f;
-                for (int kj = 0; kj <= qi; kj++)
-                    weighted_sum += dscores[kj] * scores[kj];
-
-                // Softmax Jacobian followed by QK^T derivative.
+                /* Final pass: Q/K gradients. Recompute probabilities rather
+                   than retaining a sequence-sized temporary on the stack. */
                 for (int kj = 0; kj <= qi; kj++) {
-                    const float ds = scores[kj] *
-                        (dscores[kj] - weighted_sum) * scale;
+                    const float* k = k_base + (size_t)kj * 3 * dim;
+                    const float* v = v_base + (size_t)kj * 3 * dim;
+                    float dot = 0.0f;
+                    for (int d = 0; d < head_dim; d++)
+                        dot += q[d] * k[d];
+                    const float probability =
+                        expf(dot * scale - max_score) * inv_denominator;
+
+                    float value_dot = 0.0f;
+                    for (int d = 0; d < head_dim; d++)
+                        value_dot += do_h[d] * v[d];
+                    const float ds = probability *
+                        (value_dot - weighted_sum) * scale;
 
                     float* dq = dq_base + (size_t)qi * 3 * dim;
                     float* dk = dk_base + (size_t)kj * 3 * dim;
-                    const float* q = q_base + (size_t)qi * 3 * dim;
-                    const float* k = k_base + (size_t)kj * 3 * dim;
-
                     for (int d = 0; d < head_dim; d++) {
                         dq[d] += ds * k[d];
                         dk[d] += ds * q[d];
