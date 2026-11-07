@@ -158,6 +158,18 @@ int main(void) {
     Model bad_model = model;
     bad_model.ffn_gate = NULL;
     CHECK_INVALID(&bad_model, &opt, &grads, &temp, token_ids, 64, 32, &rng, options);
+    bad_model = model;
+    bad_model.max_seq = MODEL_MAX_SEQ_LIMIT + 1;
+    CHECK_INVALID(&bad_model, &opt, &grads, &temp, token_ids, 64, 32, &rng, options);
+    bad_model = model;
+    bad_model.n_heads = 3;
+    CHECK_INVALID(&bad_model, &opt, &grads, &temp, token_ids, 64, 32, &rng, options);
+    bad_model = model;
+    bad_model.head_dim++;
+    CHECK_INVALID(&bad_model, &opt, &grads, &temp, token_ids, 64, 32, &rng, options);
+    bad_model = model;
+    bad_model.weight_bytes -= sizeof(float);
+    CHECK_INVALID(&bad_model, &opt, &grads, &temp, token_ids, 64, 32, &rng, options);
 
     bad = options;
     opt.step = 95;
