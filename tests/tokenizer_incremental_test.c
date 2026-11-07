@@ -11,8 +11,8 @@ static Arena reference_arena;
 static Arena incremental_arena;
 static Tokenizer reference_tokenizer;
 static Tokenizer incremental_tokenizer;
-static uint16_t reference_ids[4096];
-static uint16_t incremental_ids[4096];
+static uint16_t reference_ids[65536];
+static uint16_t incremental_ids[65536];
 
 static int compare_trainers(const uint8_t* sample, size_t sample_len,
     int target_vocab) {
@@ -105,7 +105,7 @@ int main(void) {
 
     /* Exhaust every sequence over a three-byte alphabet through length seven.
        This naturally covers overlapping pairs and frequent tie situations. */
-    uint8_t sample[4096];
+    uint8_t sample[65536];
     size_t exhaustive_cases = 0;
     for (size_t length = 1; length <= 7; length++) {
         size_t combinations = 1;
@@ -136,6 +136,8 @@ int main(void) {
                 strlen(patterns[i]), 300));
         memset(sample, 'A', sizeof(sample));
         CHECK(compare_trainers(sample, sizeof(sample), 300));
+        /* Exactly 64 KiB crosses the production encoder's heap-path threshold. */
+        CHECK(compare_trainers(sample, 64u * 1024u, 300));
     }
 
     /* Deterministic randomized inputs with varied alphabets and lengths. */
