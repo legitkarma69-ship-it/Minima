@@ -971,8 +971,9 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
 
     uint32_t heap_count = 0;
     for (uint32_t i = 0; i < node_count; i++) {
-        const uint16_t rank = tokenizer_find_merge_rank(tok,
-            nodes[i].id, i + 1 < node_count ? nodes[i + 1].id : 0);
+        const uint16_t rank = i + 1 < node_count
+            ? tokenizer_find_merge_rank(tok, nodes[i].id, nodes[i + 1].id)
+            : ENCODE_NO_RANK;
         nodes[i].rank = rank;
         if (rank != ENCODE_NO_RANK) {
             heap[heap_count] = i;
