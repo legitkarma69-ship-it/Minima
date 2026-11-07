@@ -38,7 +38,7 @@ bool model_config_validate(const ModelConfig* config) {
         config->dim % config->n_heads == 0 &&
         config->ffn_dim > 0 && config->ffn_dim <= MODEL_MAX_FFN_DIM &&
         config->max_seq >= MODEL_MIN_SEQ &&
-        config->max_seq <= MODEL_MAX_SEQ;
+        config->max_seq <= MODEL_MAX_SEQ_LIMIT;
 }
 
 bool model_validate(const Model* model) {
