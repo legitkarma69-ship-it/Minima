@@ -27,6 +27,31 @@ jobs:
             tokenizer.c train.c train_validation.c util.c \
             -lm -o minima
 
+      - name: Prepare deterministic tiny training corpus
+        run: |
+          for i in $(seq 1 256); do
+            printf 'The quick brown fox jumps over the lazy dog. A small model learns patterns from text. Record %s.\\n' "$i"
+          done > minima_ci_corpus.txt
+
+      - name: Run tiny tokenizer and training probe
+        run: |
+          ./minima --retrain-tokenizer-only --vocab-size 300 \\
+            --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 \\
+            --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 \\
+            --max-seq 80 --tokenizer-sampling spread minima_ci_corpus.txt
+          test -s minima.bpe
+          output=$(./minima --use-existing-tokenizer --steps 1 \\
+            --total-steps 2 --warmup 1 --vocab-size 300 \\
+            --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 \\
+            --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 \\
+            --max-seq 80 --validation-batches 1 --log-interval 1 \\
+            --validation-interval 1 --checkpoint-interval 1 \\
+            --metrics minima_ci_metrics.csv minima_ci_corpus.txt 2>&1)
+          printf '%s\\n' "$output"
+          grep -q 'Gradient allocation layout: PASS' <<< "$output"
+          grep -q 'Gradient checks passed: 10 / 10' <<< "$output"
+          test -s minima.model
+
       - name: Run focused tokenizer tests
         run: |
           gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
