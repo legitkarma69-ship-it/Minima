@@ -11,7 +11,7 @@ int main(void) {
     static Tokenizer tokenizer;
     Arena model_arena, tokenizer_arena, cache_arena;
     CHECK(arena_init(&model_arena, 1024u * 1024u));
-    CHECK(arena_init(&tokenizer_arena, 1024u * 1024u));
+    CHECK(arena_init(&tokenizer_arena, 16u * 1024u * 1024u));
     CHECK(arena_init(&cache_arena, 1024u * 1024u));
 
     const ModelConfig config = { 260, 8, 1, 2, 16, 32 };
