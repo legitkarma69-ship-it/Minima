@@ -174,7 +174,7 @@ int main(void) {
     bad.batch_size = 1000000000;
     bad.validation_batches = INT_MAX;
     CHECK_INVALID(&model, &opt, &grads, &temp, token_ids,
-        1000000001, 1000000000, &rng, bad);
+        1000000001, 1000000001, &rng, bad);
 
     puts("train_run boundary validation tests passed.");
     return 0;
