@@ -77,13 +77,24 @@ jobs:
           echo "First source: ${parts[0]}"
           echo "Last source: ${parts[${#parts[@]}-1]}"
 
+          gzip -1 -c "$output" > britannica.txt.gz
+          echo "Compressed output bytes: $(stat -c '%s' britannica.txt.gz)"
+          printf 'Compressed SHA-256: %s\n' "$(sha256sum britannica.txt.gz | cut -d ' ' -f 1)" >> "$manifest"
+          cat > britannica_README.txt <<'EOF'
+          This archive contains the complete merged Encyclopaedia Britannica, 11th Edition text.
+          Decompress britannica.txt.gz to obtain britannica.txt.
+          The 195 source parts were concatenated in ascending numeric filename order.
+          Source file list, byte counts, separator handling, and checksums are in britannica_manifest.txt.
+          EOF
+
       - name: Publish merged Britannica text
         uses: actions/upload-artifact@v4
         with:
-          name: Britannica-complete-merged
+          name: Britannica-complete-merged-gzip
           path: |
-            britannica.txt
+            britannica.txt.gz
             britannica_manifest.txt
+            britannica_README.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
