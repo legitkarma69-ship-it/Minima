@@ -44,6 +44,78 @@ static size_t pair_hash(uint16_t left, uint16_t right, size_t table_size) {
     return (size_t)k & (table_size - 1);
 }
 
+
+typedef struct {
+    uint32_t key;
+    uint16_t rank;
+    uint16_t reserved;
+} MergeRankSlot;
+
+static bool tokenizer_build_merge_rank_index(Tokenizer* tok, Arena* arena) {
+    if (!tok || !arena || tok->n_merges < 0 ||
+        tok->n_merges > TOK_MAX_MERGES)
+        return false;
+    tok->merge_rank_index = NULL;
+    tok->merge_rank_capacity = 0;
+    if (tok->n_merges == 0) return true;
+
+    size_t capacity = 8;
+    const size_t required = (size_t)tok->n_merges * 2;
+    while (capacity < required) {
+        if (capacity > SIZE_MAX / 2) return false;
+        capacity *= 2;
+    }
+    if (capacity > UINT32_MAX ||
+        capacity > SIZE_MAX / sizeof(MergeRankSlot))
+        return false;
+
+    MergeRankSlot* table = (MergeRankSlot*)arena_alloc_zero(arena,
+        capacity * sizeof(MergeRankSlot));
+    if (!table) return false;
+
+    for (int rank = 0; rank < tok->n_merges; rank++) {
+        const uint16_t left = tok->merges[rank].left;
+        const uint16_t right = tok->merges[rank].right;
+        const uint32_t key = ((uint32_t)left << 16) | right;
+        const size_t start = pair_hash(left, right, capacity);
+        bool inserted = false;
+        for (size_t probe = 0; probe < capacity; probe++) {
+            const size_t slot = (start + probe) & (capacity - 1);
+            if (table[slot].key == 0) {
+                table[slot].key = key;
+                table[slot].rank = (uint16_t)rank;
+                inserted = true;
+                break;
+            }
+            if (table[slot].key == key)
+                return false;
+        }
+        if (!inserted) return false;
+    }
+
+    tok->merge_rank_index = table;
+    tok->merge_rank_capacity = (uint32_t)capacity;
+    return true;
+}
+
+static uint16_t tokenizer_find_merge_rank(const Tokenizer* tok,
+    uint16_t left, uint16_t right) {
+    if (!tok || !tok->merge_rank_index || tok->merge_rank_capacity == 0)
+        return UINT16_MAX;
+    const size_t capacity = tok->merge_rank_capacity;
+    const MergeRankSlot* table =
+        (const MergeRankSlot*)tok->merge_rank_index;
+    const uint32_t key = ((uint32_t)left << 16) | right;
+    const size_t start = pair_hash(left, right, capacity);
+    for (size_t probe = 0; probe < capacity; probe++) {
+        const size_t slot = (start + probe) & (capacity - 1);
+        if (table[slot].key == 0) return UINT16_MAX;
+        if (table[slot].key == key) return table[slot].rank;
+    }
+    return UINT16_MAX;
+}
+
+
 // ------------------------------------------------------------------
 // Training
 // ------------------------------------------------------------------
@@ -218,14 +290,16 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
                 m + 1, merges_needed, n);
     }
 
+    if (!tokenizer_build_merge_rank_index(tok, arena))
+        return false;
     printf("BPE finished. vocab = %d  merges = %d\n",
         tok->vocab_size, tok->n_merges);
     return true;
 }
 
 
-/* Keep the production entry point on the proven reference path until the
-   incremental trainer passes equivalence and benchmark acceptance gates. */
+/* Production training uses the incremental implementation; the reference
+   path remains available for regression tests and benchmark comparisons. */
 bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab) {
     return tokenizer_train_incremental(tok, arena, sample, sample_len,
@@ -723,6 +797,7 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
                 merge_index + 1, merges_needed, active_count);
     }
 
+    if (!tokenizer_build_merge_rank_index(tok, arena)) goto fail;
     return true;
 
 fail:
@@ -736,7 +811,7 @@ fail:
 // Encode
 // ------------------------------------------------------------------
 
-int tokenizer_encode(const Tokenizer* tok,
+int tokenizer_encode_reference(const Tokenizer* tok,
     const uint8_t* text, size_t text_len,
     uint16_t* out, int out_cap) {
 
@@ -744,38 +819,246 @@ int tokenizer_encode(const Tokenizer* tok,
         out_cap < 0 || text_len > (size_t)INT_MAX)
         return -1;
     if (text_len == 0) return 0;
-    /* BPE can only reduce the byte-token count. If the output cannot hold
-       the byte-level worst case, fail before writing anything. */
     if (!out || (size_t)out_cap < text_len) return -1;
 
-    // First pass: bytes → token ids. Capacity is now guaranteed.
     int n = 0;
-    for (size_t i = 0; i < text_len; i++) {
+    for (size_t i = 0; i < text_len; i++)
         out[n++] = (uint16_t)(TOK_BYTE_START + text[i]);
-    }
 
-    // Apply merges in order (classic BPE)
-    // Because the merge list is small we just rescanning is fine
-    // for training batch sizes.
     for (int m = 0; m < tok->n_merges; m++) {
-        uint16_t left = tok->merges[m].left;
-        uint16_t right = tok->merges[m].right;
-        uint16_t newid = (uint16_t)(260 + m);   // specials + bytes = 260
-
+        const uint16_t left = tok->merges[m].left;
+        const uint16_t right = tok->merges[m].right;
+        const uint16_t new_id = (uint16_t)(260 + m);
         int w = 0;
         for (int r = 0; r < n; ) {
             if (r + 1 < n && out[r] == left && out[r + 1] == right) {
-                out[w++] = newid;
+                out[w++] = new_id;
                 r += 2;
-            }
-            else {
+            } else {
                 out[w++] = out[r++];
             }
         }
         n = w;
     }
-
     return n;
+}
+
+#define ENCODE_NONE UINT32_MAX
+#define ENCODE_NO_RANK UINT16_MAX
+
+typedef struct {
+    uint16_t id;
+    uint16_t rank;
+    uint32_t prev;
+    uint32_t next;
+    uint32_t heap_pos_plus1;
+} BpeEncodeNode;
+
+static bool encode_heap_better(const BpeEncodeNode* nodes,
+    uint32_t left, uint32_t right) {
+    if (nodes[left].rank != nodes[right].rank)
+        return nodes[left].rank < nodes[right].rank;
+    return left < right;
+}
+
+static void encode_heap_swap(BpeEncodeNode* nodes, uint32_t* heap,
+    uint32_t a, uint32_t b) {
+    const uint32_t tmp = heap[a];
+    heap[a] = heap[b];
+    heap[b] = tmp;
+    nodes[heap[a]].heap_pos_plus1 = a + 1;
+    nodes[heap[b]].heap_pos_plus1 = b + 1;
+}
+
+static void encode_heap_up(BpeEncodeNode* nodes, uint32_t* heap,
+    uint32_t index) {
+    while (index > 0) {
+        const uint32_t parent = (index - 1) / 2;
+        if (!encode_heap_better(nodes, heap[index], heap[parent]))
+            break;
+        encode_heap_swap(nodes, heap, index, parent);
+        index = parent;
+    }
+}
+
+static void encode_heap_down(BpeEncodeNode* nodes, uint32_t* heap,
+    uint32_t heap_count, uint32_t index) {
+    for (;;) {
+        const uint32_t left = index * 2 + 1;
+        const uint32_t right = left + 1;
+        uint32_t best = index;
+        if (left < heap_count &&
+            encode_heap_better(nodes, heap[left], heap[best]))
+            best = left;
+        if (right < heap_count &&
+            encode_heap_better(nodes, heap[right], heap[best]))
+            best = right;
+        if (best == index) break;
+        encode_heap_swap(nodes, heap, index, best);
+        index = best;
+    }
+}
+
+static void encode_heap_remove(BpeEncodeNode* nodes, uint32_t* heap,
+    uint32_t* heap_count, uint32_t node_index) {
+    const uint32_t position_plus1 = nodes[node_index].heap_pos_plus1;
+    if (!position_plus1) return;
+    const uint32_t position = position_plus1 - 1;
+    const uint32_t last_index = --(*heap_count);
+    nodes[node_index].heap_pos_plus1 = 0;
+    if (position == last_index) return;
+    heap[position] = heap[last_index];
+    nodes[heap[position]].heap_pos_plus1 = position + 1;
+    if (position > 0 &&
+        encode_heap_better(nodes, heap[position], heap[(position - 1) / 2]))
+        encode_heap_up(nodes, heap, position);
+    else
+        encode_heap_down(nodes, heap, *heap_count, position);
+}
+
+static void encode_heap_refresh(const Tokenizer* tok, BpeEncodeNode* nodes,
+    uint32_t* heap, uint32_t* heap_count, uint32_t node_index) {
+    const uint32_t next = nodes[node_index].next;
+    const uint16_t rank = next == ENCODE_NONE ? ENCODE_NO_RANK :
+        tokenizer_find_merge_rank(tok, nodes[node_index].id, nodes[next].id);
+    nodes[node_index].rank = rank;
+
+    if (rank == ENCODE_NO_RANK) {
+        encode_heap_remove(nodes, heap, heap_count, node_index);
+        return;
+    }
+    if (!nodes[node_index].heap_pos_plus1) {
+        const uint32_t position = (*heap_count)++;
+        heap[position] = node_index;
+        nodes[node_index].heap_pos_plus1 = position + 1;
+        encode_heap_up(nodes, heap, position);
+        return;
+    }
+    const uint32_t position = nodes[node_index].heap_pos_plus1 - 1;
+    if (position > 0 &&
+        encode_heap_better(nodes, heap[position], heap[(position - 1) / 2]))
+        encode_heap_up(nodes, heap, position);
+    else
+        encode_heap_down(nodes, heap, *heap_count, position);
+}
+
+/* Long-input encoder: one indexed heap entry per active left node. Candidate
+   priority is (merge rank, original start position), matching the reference
+   multipass encoder's rank order and left-to-right non-overlap behavior. */
+static int tokenizer_encode_heap(const Tokenizer* tok,
+    const uint8_t* text, size_t text_len, uint16_t* out) {
+    if (text_len > SIZE_MAX / sizeof(BpeEncodeNode) ||
+        text_len > SIZE_MAX / sizeof(uint32_t))
+        return -2;
+
+    BpeEncodeNode* nodes = (BpeEncodeNode*)malloc(
+        text_len * sizeof(BpeEncodeNode));
+    uint32_t* heap = (uint32_t*)malloc(text_len * sizeof(uint32_t));
+    if (!nodes || !heap) {
+        free(nodes);
+        free(heap);
+        return -2;
+    }
+
+    const uint32_t node_count = (uint32_t)text_len;
+    for (uint32_t i = 0; i < node_count; i++) {
+        nodes[i].id = (uint16_t)(TOK_BYTE_START + text[i]);
+        nodes[i].rank = ENCODE_NO_RANK;
+        nodes[i].prev = i == 0 ? ENCODE_NONE : i - 1;
+        nodes[i].next = i + 1 == node_count ? ENCODE_NONE : i + 1;
+        nodes[i].heap_pos_plus1 = 0;
+    }
+
+    uint32_t heap_count = 0;
+    for (uint32_t i = 0; i < node_count; i++) {
+        const uint16_t rank = i + 1 < node_count
+            ? tokenizer_find_merge_rank(tok, nodes[i].id, nodes[i + 1].id)
+            : ENCODE_NO_RANK;
+        nodes[i].rank = rank;
+        if (rank != ENCODE_NO_RANK) {
+            heap[heap_count] = i;
+            nodes[i].heap_pos_plus1 = ++heap_count;
+        }
+    }
+    /* Bottom-up heap construction is linear, unlike repeated insertion. */
+    for (uint32_t i = heap_count / 2; i > 0; i--)
+        encode_heap_down(nodes, heap, heap_count, i - 1);
+
+    while (heap_count > 0) {
+        const uint32_t left_index = heap[0];
+        encode_heap_remove(nodes, heap, &heap_count, left_index);
+
+        const uint32_t right_index = nodes[left_index].next;
+        if (right_index == ENCODE_NONE ||
+            nodes[left_index].id == UINT16_MAX ||
+            nodes[right_index].id == UINT16_MAX) {
+            free(nodes);
+            free(heap);
+            return -1;
+        }
+
+        const uint16_t rank = tokenizer_find_merge_rank(tok,
+            nodes[left_index].id, nodes[right_index].id);
+        if (rank == ENCODE_NO_RANK || rank != nodes[left_index].rank) {
+            free(nodes);
+            free(heap);
+            return -1;
+        }
+
+        const uint16_t new_id = (uint16_t)(260 + rank);
+        const uint32_t prev_index = nodes[left_index].prev;
+        const uint32_t next_index = nodes[right_index].next;
+
+        encode_heap_remove(nodes, heap, &heap_count, right_index);
+
+        nodes[left_index].id = new_id;
+        nodes[left_index].next = next_index;
+        if (next_index != ENCODE_NONE)
+            nodes[next_index].prev = left_index;
+
+        nodes[right_index].id = UINT16_MAX;
+        nodes[right_index].prev = ENCODE_NONE;
+        nodes[right_index].next = ENCODE_NONE;
+        nodes[right_index].heap_pos_plus1 = 0;
+
+        if (prev_index != ENCODE_NONE)
+            encode_heap_refresh(tok, nodes, heap, &heap_count, prev_index);
+        encode_heap_refresh(tok, nodes, heap, &heap_count, left_index);
+    }
+
+    int output_count = 0;
+    for (uint32_t i = 0; i != ENCODE_NONE; i = nodes[i].next) {
+        if (output_count >= (int)text_len) {
+            free(nodes);
+            free(heap);
+            return -1;
+        }
+        out[output_count++] = nodes[i].id;
+    }
+
+    free(nodes);
+    free(heap);
+    return output_count;
+}
+
+int tokenizer_encode(const Tokenizer* tok,
+    const uint8_t* text, size_t text_len,
+    uint16_t* out, int out_cap) {
+    if (!tok || (!text && text_len) || (!out && text_len) ||
+        out_cap < 0 || text_len > (size_t)INT_MAX)
+        return -1;
+    if (text_len == 0) return 0;
+    if (!out || (size_t)out_cap < text_len) return -1;
+
+    /* Keep sub-64-KiB inputs on the lower-overhead multipass path. */
+    if (text_len < 64u * 1024u || tok->n_merges <= 0 ||
+        !tok->merge_rank_index || tok->merge_rank_capacity == 0)
+        return tokenizer_encode_reference(tok, text, text_len, out, out_cap);
+
+    const int result = tokenizer_encode_heap(tok, text, text_len, out);
+    return result == -2
+        ? tokenizer_encode_reference(tok, text, text_len, out, out_cap)
+        : result;
 }
 
 // ------------------------------------------------------------------
@@ -995,6 +1278,9 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
                 loaded.token_str[right], (size_t)right_len) != 0)
             goto fail;
     }
+
+    if (!tokenizer_build_merge_rank_index(&loaded, arena))
+        goto fail;
 
     if (fgetc(f) != EOF || ferror(f))
         goto fail;
