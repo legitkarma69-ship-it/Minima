@@ -292,12 +292,10 @@ static float silu_derivative(float x) {
 // ------------------------------------------------------------------
 
 static void attention_backward(float* dqkv, const float* qkv,
-    const float* dout_attn, int batch, int seq, int dim,
+    const float* dout_attn, float* scores, int batch, int seq, int dim,
     int n_heads, int head_dim) {
 
     const float scale = 1.0f / sqrtf((float)head_dim);
-    float scores[512];
-    float dscores[512];
 
     for (int b = 0; b < batch; b++) {
         for (int h = 0; h < n_heads; h++) {
@@ -333,36 +331,33 @@ static void attention_backward(float* dqkv, const float* qkv,
                 const float* do_h = dout_attn +
                     (size_t)b * seq * dim + (size_t)qi * dim + h * head_dim;
 
-                // Value gradients.
+                /* Recompute the probability derivative from V to avoid a
+                   second sequence-sized scratch array. */
+                float weighted_sum = 0.0f;
                 for (int kj = 0; kj <= qi; kj++) {
+                    const float* v = v_base + (size_t)kj * 3 * dim;
+                    float value_dot = 0.0f;
+                    for (int d = 0; d < head_dim; d++)
+                        value_dot += do_h[d] * v[d];
+                    weighted_sum += scores[kj] * value_dot;
+
                     float* dv = dv_base + (size_t)kj * 3 * dim;
                     for (int d = 0; d < head_dim; d++)
                         dv[d] += scores[kj] * do_h[d];
                 }
 
-                // Derivative with respect to attention probabilities.
                 for (int kj = 0; kj <= qi; kj++) {
                     const float* v = v_base + (size_t)kj * 3 * dim;
-                    float dot = 0.0f;
+                    float value_dot = 0.0f;
                     for (int d = 0; d < head_dim; d++)
-                        dot += do_h[d] * v[d];
-                    dscores[kj] = dot;
-                }
-
-                float weighted_sum = 0.0f;
-                for (int kj = 0; kj <= qi; kj++)
-                    weighted_sum += dscores[kj] * scores[kj];
-
-                // Softmax Jacobian followed by QK^T derivative.
-                for (int kj = 0; kj <= qi; kj++) {
+                        value_dot += do_h[d] * v[d];
                     const float ds = scores[kj] *
-                        (dscores[kj] - weighted_sum) * scale;
+                        (value_dot - weighted_sum) * scale;
 
                     float* dq = dq_base + (size_t)qi * 3 * dim;
                     float* dk = dk_base + (size_t)kj * 3 * dim;
                     const float* q = q_base + (size_t)qi * 3 * dim;
                     const float* k = k_base + (size_t)kj * 3 * dim;
-
                     for (int d = 0; d < head_dim; d++) {
                         dq[d] += ds * k[d];
                         dk[d] += ds * q[d];
@@ -390,7 +385,8 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
         !act->up_buf || !act->gate_buf || !act->ffn_buf ||
         !act->resid_attn || !act->resid_ffn || !act->dx ||
         !act->dx_tmp || !act->dx_norm || !act->dattn ||
-        !act->dqkv || !act->dffn || !act->dup || !act->dgate)
+        !act->dqkv || !act->dffn || !act->dup || !act->dgate ||
+        !act->attention_scores)
         return;
 
     const int dim = model->dim;
@@ -516,7 +512,7 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
         // Attention backward uses the preserved forward QKV cache.
         memset(act->dqkv, 0, n * 3 * (size_t)dim * sizeof(float));
         attention_backward(act->dqkv, qkv, act->dattn,
-            batch, seq, dim, n_heads, head_dim);
+            act->attention_scores, batch, seq, dim, n_heads, head_dim);
 
         // QKV projection backward.
         memset(dx_norm, 0, dim_bytes);
