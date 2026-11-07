@@ -1,5 +1,6 @@
 #include "train.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -161,6 +162,19 @@ int main(void) {
     bad = options;
     opt.step = 95;
     CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
+    opt.step = 0;
+
+    bad = options;
+    bad.batch_size = INT_MAX;
+    bad.sequence_length = 2;
+    CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
+
+    bad = options;
+    bad.sequence_length = 1;
+    bad.batch_size = 1000000000;
+    bad.validation_batches = INT_MAX;
+    CHECK_INVALID(&model, &opt, &grads, &temp, token_ids,
+        1000000001, 1000000000, &rng, bad);
 
     puts("train_run boundary validation tests passed.");
     return 0;
