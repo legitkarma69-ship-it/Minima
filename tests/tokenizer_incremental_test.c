@@ -62,12 +62,23 @@ static int compare_trainers(const uint8_t* sample, size_t sample_len,
         return 0;
     }
 
-    const int reference_count = tokenizer_encode(&reference_tokenizer,
-        sample, sample_len, reference_ids, (int)(sizeof(reference_ids) /
-            sizeof(reference_ids[0])));
+    const int reference_count = tokenizer_encode_reference(
+        &reference_tokenizer, sample, sample_len, reference_ids,
+        (int)(sizeof(reference_ids) / sizeof(reference_ids[0])));
+    const int hybrid_reference_count = tokenizer_encode(&reference_tokenizer,
+        sample, sample_len, incremental_ids,
+        (int)(sizeof(incremental_ids) / sizeof(incremental_ids[0])));
+    if (reference_count != hybrid_reference_count || reference_count < 0 ||
+        memcmp(reference_ids, incremental_ids,
+            (size_t)reference_count * sizeof(uint16_t)) != 0) {
+        fprintf(stderr, "Hybrid encoder mismatch against reference (bytes=%zu).\n",
+            sample_len);
+        return 0;
+    }
+
     const int incremental_count = tokenizer_encode(&incremental_tokenizer,
-        sample, sample_len, incremental_ids, (int)(sizeof(incremental_ids) /
-            sizeof(incremental_ids[0])));
+        sample, sample_len, incremental_ids,
+        (int)(sizeof(incremental_ids) / sizeof(incremental_ids[0])));
     if (reference_count != incremental_count ||
         reference_count < 0 ||
         memcmp(reference_ids, incremental_ids,
