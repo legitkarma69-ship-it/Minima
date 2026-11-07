@@ -781,100 +781,43 @@ static void create_controls(HWND hwnd) {
         &g_group_model, &g_group_training, &g_group_advanced,
         &g_group_monitor, &g_group_output);
     HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, hwnd, NULL, NULL, NULL);
-    g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
-        12, 34, 520, 105, hwnd, (HMENU)IDC_CORPUS, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, hwnd, (HMENU)IDC_ADD, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, hwnd, (HMENU)IDC_REMOVE, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Basic defaults", WS_CHILD | WS_VISIBLE, 260, 146, 132, 26, hwnd, (HMENU)IDC_BASIC_DEFAULTS, NULL, NULL);
+    GuiPageControls page_controls = {
+        &g_corpus,
+        &g_steps,
+        &g_resume,
+        &g_vocab,
+        &g_dim,
+        &g_layers,
+        &g_heads,
+        &g_ffn,
+        &g_max_seq,
+        &g_batch_size,
+        &g_sequence_length,
+        &g_lr,
+        &g_warmup,
+        &g_log_interval,
+        &g_validation_interval,
+        &g_validation_batches,
+        &g_checkpoint_interval,
+        &g_seed,
+        &g_tokenizer_bytes,
+        &g_temperature,
+        &g_top_k,
+        &g_top_p,
+        &g_repetition,
+        &g_max_tokens,
+        &g_lr_schedule,
+        &g_tokenizer_sampling,
+        &g_total_steps,
+        &g_status,
+        &g_graph,
+        &g_output_label,
+        &g_log,
+        &g_chat_input,
+        &g_chat_test,
+    };
+    gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
 
-    CreateWindowW(L"STATIC",L"Model: vocab",WS_CHILD|WS_VISIBLE,12,176,78,18,hwnd,NULL,NULL,NULL);
-    g_vocab=CreateWindowW(L"EDIT",L"2048",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,92,173,55,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"dim",WS_CHILD|WS_VISIBLE,155,176,28,18,hwnd,NULL,NULL,NULL);
-    g_dim=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,184,173,42,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"layers",WS_CHILD|WS_VISIBLE,235,176,42,18,hwnd,NULL,NULL,NULL);
-    g_layers=CreateWindowW(L"EDIT",L"2",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,278,173,35,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"heads",WS_CHILD|WS_VISIBLE,320,176,40,18,hwnd,NULL,NULL,NULL);
-    g_heads=CreateWindowW(L"EDIT",L"2",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,362,173,35,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"FFN",WS_CHILD|WS_VISIBLE,404,176,30,18,hwnd,NULL,NULL,NULL);
-    g_ffn=CreateWindowW(L"EDIT",L"128",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,435,173,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"context",WS_CHILD|WS_VISIBLE,490,176,48,18,hwnd,NULL,NULL,NULL);
-    g_max_seq=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,540,173,42,23,hwnd,NULL,NULL,NULL);
-
-    CreateWindowW(L"STATIC",L"Steps",WS_CHILD|WS_VISIBLE,12,210,42,18,hwnd,NULL,NULL,NULL);
-    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,hwnd,(HMENU)IDC_STEPS,NULL,NULL);
-    g_resume=CreateWindowW(L"BUTTON",L"Resume",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,118,208,75,23,hwnd,(HMENU)IDC_RESUME,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Batch",WS_CHILD|WS_VISIBLE,198,210,38,18,hwnd,NULL,NULL,NULL);
-    g_batch_size=CreateWindowW(L"EDIT",L"4",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,237,207,35,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Seq",WS_CHILD|WS_VISIBLE,278,210,30,18,hwnd,NULL,NULL,NULL);
-    g_sequence_length=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,309,207,40,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"LR",WS_CHILD|WS_VISIBLE,355,210,22,18,hwnd,NULL,NULL,NULL);
-    g_lr=CreateWindowW(L"EDIT",L"0.0003",WS_CHILD|WS_VISIBLE|WS_BORDER,379,207,65,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,450,210,52,18,hwnd,NULL,NULL,NULL);
-    g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,hwnd,NULL,NULL,NULL);
-
-    register_advanced_control(CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,hwnd,NULL,NULL,NULL));
-    g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_log_interval);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Validate every",WS_CHILD|WS_VISIBLE,132,264,90,18,hwnd,NULL,NULL,NULL));
-    g_validation_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,261,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_validation_interval);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Val batches",WS_CHILD|WS_VISIBLE,276,264,68,18,hwnd,NULL,NULL,NULL));
-    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,261,40,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_validation_batches);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,264,65,18,hwnd,NULL,NULL,NULL));
-    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,261,42,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_checkpoint_interval);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Seed (fresh)",WS_CHILD|WS_VISIBLE,507,264,55,18,hwnd,NULL,NULL,NULL));
-    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,261,55,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_seed);
-
-    register_advanced_control(CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,298,92,18,hwnd,NULL,NULL,NULL));
-    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_tokenizer_bytes);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,hwnd,NULL,NULL,NULL));
-    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_temperature);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,hwnd,NULL,NULL,NULL));
-    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,324,295,40,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_top_k);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,370,298,38,18,hwnd,NULL,NULL,NULL));
-    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,409,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_top_p);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,460,298,45,18,hwnd,NULL,NULL,NULL));
-    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_repetition);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,329,75,18,hwnd,NULL,NULL,NULL));
-    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,326,48,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_max_tokens);
-    register_advanced_control(CreateWindowW(L"STATIC",L"LR schedule",WS_CHILD|WS_VISIBLE,155,329,68,18,hwnd,NULL,NULL,NULL));
-    g_lr_schedule=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,225,326,95,100,hwnd,NULL,NULL,NULL); register_advanced_control(g_lr_schedule);
-    SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"cosine");SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"constant");SendMessageW(g_lr_schedule,CB_SETCURSEL,0,0);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,329,95,18,hwnd,NULL,NULL,NULL));
-    g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,326,95,100,hwnd,NULL,NULL,NULL); register_advanced_control(g_tokenizer_sampling);
-    SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"spread");SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"prefix");SendMessageW(g_tokenizer_sampling,CB_SETCURSEL,0,0);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,hwnd,NULL,NULL,NULL));
-    g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_total_steps);
-
-    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,hwnd,(HMENU)IDC_SAVE_NOW,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Rebuild tokenizer",WS_CHILD|WS_VISIBLE,470,340,135,30,hwnd,(HMENU)IDC_REBUILD_TOKENIZER,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Auto settings",WS_CHILD|WS_VISIBLE,612,340,115,30,hwnd,(HMENU)IDC_AUTO_SETTINGS,NULL,NULL);
-    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL);
-
-    g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,hwnd,NULL,NULL,NULL);
-    g_output_label=CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
-    g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
-        WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
-        12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
-    SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
-    g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"COMBOBOX",L"",
-        WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_VSCROLL,
-        12,665,600,180,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
-    SendMessageW(g_chat_input,CB_LIMITTEXT,1024,0);
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The quick brown fox");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Once upon a time");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"In the beginning");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The meaning of life");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"It was a dark");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Hello there, how do you do?");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
-    EnableWindow(g_chat_input,FALSE);
-    g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,hwnd,(HMENU)IDC_CHAT_TEST,NULL,NULL);
-    register_advanced_control(g_chat_test);
-    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
