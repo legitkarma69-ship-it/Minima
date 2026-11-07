@@ -31,6 +31,6 @@
     <Link><SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalDependencies>Comctl32.lib;Comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
     <Manifest><GenerateManifest>true</GenerateManifest><EmbedManifest>true</EmbedManifest><AdditionalManifestFiles>$(ProjectDir)MinimaGUI.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
   </ItemDefinitionGroup>
-  <ItemGroup><ClCompile Include="MinimaGUI.c" /><ClInclude Include="gui_protocol.h" /><ClInclude Include="gui_chat_state.h" /></ItemGroup>
+  <ItemGroup><ClCompile Include="MinimaGUI.c" /><ClCompile Include="graph.c" /><ClCompile Include="settings.c" /><ClInclude Include="gui_protocol.h" /><ClInclude Include="gui_chat_state.h" /><ClInclude Include="graph.h" /><ClInclude Include="settings.h" /></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
