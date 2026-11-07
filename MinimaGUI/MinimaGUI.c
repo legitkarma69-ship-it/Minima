@@ -14,44 +14,31 @@
 #include "graph.h"
 #include "settings.h"
 #include "engine_io.h"
+#include "gui_layout.h"
+#include "gui_pages.h"
+#include "gui_actions.h"
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
-#define IDC_CORPUS       1001
-#define IDC_ADD          1002
-#define IDC_REMOVE       1003
-#define IDC_STEPS        1004
-#define IDC_RESUME       1005
-#define IDC_START        1006
-#define IDC_STOP         1007
-#define IDC_LOG          1008
-#define IDC_STATUS       1009
-#define IDC_CHAT_START   1010
-#define IDC_CHAT_INPUT   1011
-#define IDC_CHAT_SEND    1012
-#define IDC_CHAT_STOP    1013
-#define IDC_SAVE_NOW     1014
-#define IDC_REBUILD_TOKENIZER 1015
-#define IDC_AUTO_SETTINGS 1016
-#define IDC_ADVANCED_TOGGLE 1017
-#define IDC_CHAT_TEST    1018
-#define IDC_MAIN_TABS    1019
 #define WM_APPEND_LOG    (WM_APP + 1)
 #define WM_ENGINE_EXIT   (WM_APP + 2)
 #define WM_CHAT_READY    (WM_APP + 3)
 #define IDT_GRAPH_REFRESH 1
 
-static HWND g_window, g_corpus, g_steps, g_resume, g_log, g_status;
-static HWND g_main_tabs;
+HWND g_window, g_corpus, g_log;
+static HWND g_steps, g_resume, g_status;
+HWND g_main_tabs;
 static MinimaSettingsContext g_settings_context;
-static int g_active_page;
+int g_active_page;
 static HWND g_tab_controls[40];
 static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_total_steps, g_log_interval, g_validation_batches;
-static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_graph, g_validation_interval;
-static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens, g_chat_input, g_chat_test;
+static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_validation_interval;
+HWND g_graph;
+static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens;
+HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_batch_size, g_sequence_length;
 static wchar_t g_metrics_path[MAX_PATH];
@@ -66,16 +53,15 @@ static BOOL g_fresh_used_saved_tokenizer;
 static wchar_t g_prebuilt_vocab[64],g_prebuilt_tokenizer_bytes[64],g_prebuilt_sampling[64];
 static wchar_t g_engine_path[MAX_PATH];
 static HWND g_tooltip;
-static HWND g_group_corpus, g_group_model, g_group_training, g_output_label;
-static HWND g_group_advanced, g_group_monitor, g_group_output;
-static BOOL g_advanced_expanded = FALSE;
-static UINT g_dpi = 96;
+HWND g_group_corpus, g_group_model, g_group_training, g_output_label;
+HWND g_group_advanced, g_group_monitor, g_group_output;
+BOOL g_advanced_expanded = FALSE;
+UINT g_dpi = 96;
 static HFONT g_ui_font;
-static HWND g_advanced_controls[32];
-static int g_advanced_control_count;
-typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
-static GuiInitialRect g_initial_rects[160];
-static int g_initial_rect_count;
+HWND g_advanced_controls[32];
+int g_advanced_control_count;
+GuiInitialRect g_initial_rects[160];
+int g_initial_rect_count;
 static BOOL CALLBACK capture_initial_rect(HWND child, LPARAM unused) {
     (void)unused;
     if (g_initial_rect_count >= (int)_countof(g_initial_rects)) return FALSE;
@@ -112,27 +98,6 @@ static void rebuild_ui_font(HWND hwnd) {
         DeleteObject(old_font);
 }
 
-typedef struct {
-    HWND parent;
-    UINT old_dpi;
-    UINT new_dpi;
-} DpiScaleContext;
-
-static BOOL CALLBACK scale_child_for_dpi(HWND child, LPARAM parameter) {
-    DpiScaleContext* context = (DpiScaleContext*)parameter;
-    RECT rect;
-    if (!GetWindowRect(child, &rect)) return TRUE;
-    MapWindowPoints(NULL, context->parent, (POINT*)&rect, 2);
-    const int x = MulDiv(rect.left, (int)context->new_dpi, (int)context->old_dpi);
-    const int y = MulDiv(rect.top, (int)context->new_dpi, (int)context->old_dpi);
-    const int width = MulDiv(rect.right - rect.left, (int)context->new_dpi, (int)context->old_dpi);
-    const int height = MulDiv(rect.bottom - rect.top, (int)context->new_dpi, (int)context->old_dpi);
-    MoveWindow(child, x, y, width, height, FALSE);
-    return TRUE;
-}
-
-static void layout_controls(HWND hwnd);
-
 static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
     g_advanced_expanded = expanded ? TRUE : FALSE;
     SendMessageW(g_group_advanced, BM_SETCHECK,
@@ -142,113 +107,8 @@ static void set_advanced_expanded(HWND hwnd, BOOL expanded) {
     if (g_settings_path[0])
         WritePrivateProfileStringW(L"UI", L"advanced_expanded",
             g_advanced_expanded ? L"1" : L"0", g_settings_path);
-    layout_controls(hwnd);
+    gui_layout_layout_controls(hwnd);
     InvalidateRect(hwnd, NULL, TRUE);
-}
-
-static BOOL is_advanced_page_control(HWND child) {
-    if (child == g_group_advanced) return TRUE;
-    if (child == g_chat_test) return TRUE;
-    for (int i = 0; i < g_advanced_control_count; ++i)
-        if (g_advanced_controls[i] == child) return TRUE;
-    return FALSE;
-}
-
-static BOOL is_chat_page_control(HWND child) {
-    return child == g_group_output || child == g_output_label || child == g_log ||
-        child == g_chat_input ||
-        child == GetDlgItem(g_window, IDC_CHAT_START) ||
-        child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
-        child == GetDlgItem(g_window, IDC_CHAT_STOP);
-}
-
-static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
-    const int page = (int)page_parameter;
-    if (child == g_main_tabs) return TRUE;
-    BOOL visible;
-    if (page == 0)
-        visible = !is_advanced_page_control(child) && !is_chat_page_control(child);
-    else if (page == 1)
-        visible = is_advanced_page_control(child) &&
-            (child == g_group_advanced || g_advanced_expanded);
-    else
-        visible = is_chat_page_control(child);
-    ShowWindow(child, visible ? SW_SHOWNA : SW_HIDE);
-    return TRUE;
-}
-
-static void select_main_page(HWND hwnd, int page) {
-    if (page < 0 || page > 2) return;
-    g_active_page = page;
-    if (g_main_tabs) TabCtrl_SetCurSel(g_main_tabs, page);
-    EnumChildWindows(hwnd, apply_page_visibility, (LPARAM)page);
-    layout_controls(hwnd);
-    InvalidateRect(hwnd, NULL, TRUE);
-}
-
-static void layout_controls(HWND hwnd) {
-    RECT client; GetClientRect(hwnd,&client);
-    const int width=client.right, height=client.bottom;
-    const int pad=scale_px(12), gap=scale_px(12), inner=width-2*pad;
-    if(inner<=0)return;
-    const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
-    const int bottom_h=scale_px(82), action_h=scale_px(38);
-    const int output_top=(g_active_page==2?scale_px(46):work_top+scale_px(368));
-    const int output_bottom=height-bottom_h-scale_px(8);
-    const int output_h=output_bottom-output_top;
-    const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
-    const int advanced_y=work_top+scale_px(106);
-    if(g_main_tabs)MoveWindow(g_main_tabs,pad,scale_px(6),inner,scale_px(28),TRUE);
-    if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(40),width-scale_px(16),corpus_h,TRUE);
-    if(g_corpus)MoveWindow(g_corpus,pad,scale_px(64),inner,scale_px(58),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(128),scale_px(104),scale_px(26),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(128),scale_px(136),scale_px(26),TRUE);
-    if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
-    if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
-    if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
-    if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(306),TRUE);
-    if(g_graph)MoveWindow(g_graph,right_x+scale_px(8),work_top+scale_px(22),right_w-scale_px(16),scale_px(272),TRUE);
-
-    const float xs=(float)(left_w-scale_px(20))/(float)scale_px(670);
-    for(int i=0;i<g_initial_rect_count;i++){
-        HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
-        if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
-           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
-           child==g_graph||child==g_log||child==g_chat_input||child==g_chat_test)continue;
-        int id=GetDlgCtrlID(child);
-        if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
-           id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
-           id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG)continue;
-        int oy=r.top;
-        if(oy>=scale_px(168)&&oy<scale_px(250)){
-            int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
-            int y=work_top+scale_px(19)+(oy-scale_px(168));
-            int w=(int)((r.right-r.left)*xs);
-            MoveWindow(child,x,y,w>scale_px(20)?w:scale_px(20),r.bottom-r.top,TRUE);
-        }else if(oy>=scale_px(258)&&oy<scale_px(355)){
-            int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
-            int y=advanced_y+scale_px(28)+(oy-scale_px(258));
-            int w=(int)((r.right-r.left)*xs);
-            MoveWindow(child,x,y,w>scale_px(20)?w:scale_px(20),r.bottom-r.top,TRUE);
-        }
-    }
-    const int actions_y=work_top+scale_px(320);
-    MoveWindow(GetDlgItem(hwnd,IDC_START),pad,actions_y,scale_px(116),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_STOP),pad+scale_px(122),actions_y,scale_px(100),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad+scale_px(228),actions_y,scale_px(96),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_SAVE_NOW),pad+scale_px(330),actions_y,scale_px(112),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),pad+scale_px(448),actions_y,scale_px(132),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(586),actions_y,scale_px(112),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
-    if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
-    if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
-    if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
-    const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(112):pad,chat_y,inner-scale_px(340)-scale_px(112),scale_px(180),TRUE);
-    if(g_active_page==2)MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
-    if(g_chat_test)MoveWindow(g_chat_test,right_x,advanced_y+scale_px(28),scale_px(120),scale_px(28),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
 }
 
 static void add_tooltip(HWND target, const wchar_t* text) {
@@ -304,6 +164,7 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_START),!running);
     EnableWindow(GetDlgItem(g_window,IDC_REBUILD_TOKENIZER),!running);
     EnableWindow(GetDlgItem(g_window,IDC_AUTO_SETTINGS),!running);
+    EnableWindow(GetDlgItem(g_window,IDC_BASIC_DEFAULTS),!running);
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
@@ -913,122 +774,47 @@ static void create_controls(HWND hwnd) {
     if (!g_dpi) g_dpi = 96;
     rebuild_ui_font(hwnd);
 
-    g_main_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD|WS_VISIBLE|WS_TABSTOP,
-        12, 6, 920, 28, hwnd, (HMENU)IDC_MAIN_TABS, GetModuleHandleW(NULL), NULL);
-    if (g_main_tabs) {
-        TCITEMW item; ZeroMemory(&item, sizeof(item)); item.mask = TCIF_TEXT;
-        item.pszText = L"Training"; TabCtrl_InsertItem(g_main_tabs, 0, &item);
-        item.pszText = L"Advanced"; TabCtrl_InsertItem(g_main_tabs, 1, &item);
-        item.pszText = L"Chat & Generation"; TabCtrl_InsertItem(g_main_tabs, 2, &item);
-    }
-
-    g_group_corpus = CreateWindowW(L"BUTTON", L"Corpus", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 6, 920, 168, hwnd, NULL, NULL, NULL);
-    g_group_model = CreateWindowW(L"BUTTON", L"Model", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 168, 585, 38, hwnd, NULL, NULL, NULL);
-    g_group_training = CreateWindowW(L"BUTTON", L"Training", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 202, 585, 38, hwnd, NULL, NULL, NULL);
-    g_group_advanced = CreateWindowW(L"BUTTON", L"Show advanced settings", WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTOCHECKBOX,
-        8, 236, 220, 24, hwnd, (HMENU)IDC_ADVANCED_TOGGLE, NULL, NULL);
-    SendMessageW(g_group_advanced, BM_SETCHECK, BST_CHECKED, 0);
-    g_group_monitor = CreateWindowW(L"BUTTON", L"Monitor", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        590, 150, 340, 205, hwnd, NULL, NULL, NULL);
-    g_group_output = CreateWindowW(L"BUTTON", L"Output / chat", WS_CHILD|WS_VISIBLE|BS_GROUPBOX,
-        8, 375, 920, 350, hwnd, NULL, NULL, NULL);
+    gui_pages_create_shell(hwnd, &g_main_tabs, &g_group_corpus,
+        &g_group_model, &g_group_training, &g_group_advanced,
+        &g_group_monitor, &g_group_output);
     HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, hwnd, NULL, NULL, NULL);
-    g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
-        12, 34, 520, 105, hwnd, (HMENU)IDC_CORPUS, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, hwnd, (HMENU)IDC_ADD, NULL, NULL);
-    CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, hwnd, (HMENU)IDC_REMOVE, NULL, NULL);
+    GuiPageControls page_controls = {
+        &g_corpus,
+        &g_steps,
+        &g_resume,
+        &g_vocab,
+        &g_dim,
+        &g_layers,
+        &g_heads,
+        &g_ffn,
+        &g_max_seq,
+        &g_batch_size,
+        &g_sequence_length,
+        &g_lr,
+        &g_warmup,
+        &g_log_interval,
+        &g_validation_interval,
+        &g_validation_batches,
+        &g_checkpoint_interval,
+        &g_seed,
+        &g_tokenizer_bytes,
+        &g_temperature,
+        &g_top_k,
+        &g_top_p,
+        &g_repetition,
+        &g_max_tokens,
+        &g_lr_schedule,
+        &g_tokenizer_sampling,
+        &g_total_steps,
+        &g_status,
+        &g_graph,
+        &g_output_label,
+        &g_log,
+        &g_chat_input,
+        &g_chat_test,
+    };
+    gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
 
-    CreateWindowW(L"STATIC",L"Model: vocab",WS_CHILD|WS_VISIBLE,12,176,78,18,hwnd,NULL,NULL,NULL);
-    g_vocab=CreateWindowW(L"EDIT",L"2048",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,92,173,55,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"dim",WS_CHILD|WS_VISIBLE,155,176,28,18,hwnd,NULL,NULL,NULL);
-    g_dim=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,184,173,42,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"layers",WS_CHILD|WS_VISIBLE,235,176,42,18,hwnd,NULL,NULL,NULL);
-    g_layers=CreateWindowW(L"EDIT",L"2",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,278,173,35,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"heads",WS_CHILD|WS_VISIBLE,320,176,40,18,hwnd,NULL,NULL,NULL);
-    g_heads=CreateWindowW(L"EDIT",L"2",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,362,173,35,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"FFN",WS_CHILD|WS_VISIBLE,404,176,30,18,hwnd,NULL,NULL,NULL);
-    g_ffn=CreateWindowW(L"EDIT",L"128",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,435,173,48,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"context",WS_CHILD|WS_VISIBLE,490,176,48,18,hwnd,NULL,NULL,NULL);
-    g_max_seq=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,540,173,42,23,hwnd,NULL,NULL,NULL);
-
-    CreateWindowW(L"STATIC",L"Steps",WS_CHILD|WS_VISIBLE,12,210,42,18,hwnd,NULL,NULL,NULL);
-    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,hwnd,(HMENU)IDC_STEPS,NULL,NULL);
-    g_resume=CreateWindowW(L"BUTTON",L"Resume",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,118,208,75,23,hwnd,(HMENU)IDC_RESUME,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Batch",WS_CHILD|WS_VISIBLE,198,210,38,18,hwnd,NULL,NULL,NULL);
-    g_batch_size=CreateWindowW(L"EDIT",L"4",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,237,207,35,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Seq",WS_CHILD|WS_VISIBLE,278,210,30,18,hwnd,NULL,NULL,NULL);
-    g_sequence_length=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,309,207,40,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"LR",WS_CHILD|WS_VISIBLE,355,210,22,18,hwnd,NULL,NULL,NULL);
-    g_lr=CreateWindowW(L"EDIT",L"0.0003",WS_CHILD|WS_VISIBLE|WS_BORDER,379,207,65,23,hwnd,NULL,NULL,NULL);
-    CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,450,210,52,18,hwnd,NULL,NULL,NULL);
-    g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,hwnd,NULL,NULL,NULL);
-
-    register_advanced_control(CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,hwnd,NULL,NULL,NULL));
-    g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_log_interval);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Validate every",WS_CHILD|WS_VISIBLE,132,264,90,18,hwnd,NULL,NULL,NULL));
-    g_validation_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,261,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_validation_interval);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Val batches",WS_CHILD|WS_VISIBLE,276,264,68,18,hwnd,NULL,NULL,NULL));
-    g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,261,40,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_validation_batches);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,264,65,18,hwnd,NULL,NULL,NULL));
-    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,261,42,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_checkpoint_interval);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Seed (fresh)",WS_CHILD|WS_VISIBLE,507,264,55,18,hwnd,NULL,NULL,NULL));
-    g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,261,55,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_seed);
-
-    register_advanced_control(CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,298,92,18,hwnd,NULL,NULL,NULL));
-    g_tokenizer_bytes=CreateWindowW(L"EDIT",L"262144",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_tokenizer_bytes);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,hwnd,NULL,NULL,NULL));
-    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_temperature);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,hwnd,NULL,NULL,NULL));
-    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,324,295,40,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_top_k);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,370,298,38,18,hwnd,NULL,NULL,NULL));
-    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,409,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_top_p);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,460,298,45,18,hwnd,NULL,NULL,NULL));
-    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,295,45,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_repetition);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,329,75,18,hwnd,NULL,NULL,NULL));
-    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,326,48,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_max_tokens);
-    register_advanced_control(CreateWindowW(L"STATIC",L"LR schedule",WS_CHILD|WS_VISIBLE,155,329,68,18,hwnd,NULL,NULL,NULL));
-    g_lr_schedule=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,225,326,95,100,hwnd,NULL,NULL,NULL); register_advanced_control(g_lr_schedule);
-    SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"cosine");SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"constant");SendMessageW(g_lr_schedule,CB_SETCURSEL,0,0);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,329,95,18,hwnd,NULL,NULL,NULL));
-    g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,326,95,100,hwnd,NULL,NULL,NULL); register_advanced_control(g_tokenizer_sampling);
-    SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"spread");SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"prefix");SendMessageW(g_tokenizer_sampling,CB_SETCURSEL,0,0);
-    register_advanced_control(CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,hwnd,NULL,NULL,NULL));
-    g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,hwnd,NULL,NULL,NULL); register_advanced_control(g_total_steps);
-
-    CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,hwnd,(HMENU)IDC_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,hwnd,(HMENU)IDC_STOP,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,hwnd,(HMENU)IDC_CHAT_START,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Save checkpoint",WS_CHILD|WS_VISIBLE|WS_DISABLED,355,340,105,30,hwnd,(HMENU)IDC_SAVE_NOW,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Rebuild tokenizer",WS_CHILD|WS_VISIBLE,470,340,135,30,hwnd,(HMENU)IDC_REBUILD_TOKENIZER,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Auto settings",WS_CHILD|WS_VISIBLE,612,340,115,30,hwnd,(HMENU)IDC_AUTO_SETTINGS,NULL,NULL);
-    g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,hwnd,(HMENU)IDC_STATUS,NULL,NULL);
-
-    g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,hwnd,NULL,NULL,NULL);
-    g_output_label=CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,hwnd,NULL,NULL,NULL);
-    g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
-        WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
-        12,402,850,250,hwnd,(HMENU)IDC_LOG,NULL,NULL);
-    SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
-    g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"COMBOBOX",L"",
-        WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_VSCROLL,
-        12,665,600,180,hwnd,(HMENU)IDC_CHAT_INPUT,NULL,NULL);
-    SendMessageW(g_chat_input,CB_LIMITTEXT,1024,0);
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The quick brown fox");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Once upon a time");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"In the beginning");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"The meaning of life");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"It was a dark");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Hello there, how do you do?");
-    SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
-    EnableWindow(g_chat_input,FALSE);
-    g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,hwnd,(HMENU)IDC_CHAT_TEST,NULL,NULL);
-    register_advanced_control(g_chat_test);
-    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,hwnd,(HMENU)IDC_CHAT_SEND,NULL,NULL);
-    CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,hwnd,(HMENU)IDC_CHAT_STOP,NULL,NULL);
 
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
@@ -1056,21 +842,22 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_tokenizer_sampling, L"Spread samples across the corpus; prefix samples from the beginning.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
+        add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
         add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
         add_tooltip(g_chat_input, L"Choose a sample prompt from the dropdown or type your own prompt.");
         add_tooltip(g_chat_test, L"Run one isolated generation with the current sampling settings. It does not change the active chat defaults or model checkpoint.");
     }
 
-    DpiScaleContext initial_scale = { hwnd, 96, g_dpi };
-    EnumChildWindows(hwnd, scale_child_for_dpi, (LPARAM)&initial_scale);
+    gui_layout_scale_children(hwnd, 96, g_dpi);
     g_initial_rect_count=0;
     EnumChildWindows(hwnd,capture_initial_rect,0);
-    layout_controls(hwnd);
-    select_main_page(hwnd, 0);
+    gui_layout_layout_controls(hwnd);
+    gui_layout_select_main_page(hwnd, 0);
 
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
         g_corpus, GetDlgItem(hwnd,IDC_ADD), GetDlgItem(hwnd,IDC_REMOVE),
+        GetDlgItem(hwnd,IDC_BASIC_DEFAULTS),
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_steps,g_resume,
         g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
@@ -1090,7 +877,7 @@ static void create_controls(HWND hwnd) {
 
     initialize_settings_context(hwnd);
     minima_settings_load(&g_settings_context);
-    select_main_page(hwnd, 0);
+    gui_layout_select_main_page(hwnd, 0);
     wchar_t history_path[MAX_PATH];wcscpy_s(history_path,_countof(history_path),g_engine_path);
     wchar_t* history_slash=wcsrchr(history_path,L'\\');
     if(history_slash)wcscpy_s(history_slash+1,_countof(history_path)-(size_t)(history_slash+1-history_path),L"minima_chat.txt");
@@ -1110,6 +897,52 @@ static void create_controls(HWND hwnd) {
         fclose(history_file);
     }
 }
+
+static void action_add_corpus(HWND hwnd) {
+    (void)hwnd;
+    g_use_saved_tokenizer=FALSE;
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+    add_corpus_files();
+}
+static void action_remove_corpus(HWND hwnd) {
+    (void)hwnd;
+    g_use_saved_tokenizer=FALSE;
+    WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
+    int selected[32];
+    LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
+    for (int i = (int)n - 1; i >= 0; --i)
+        SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
+}
+static void action_resume_changed(HWND hwnd) { (void)hwnd; update_fresh_only_controls(); }
+static void action_start_training(HWND hwnd) { (void)hwnd; start_engine(FALSE,FALSE); }
+static void action_stop_training(HWND hwnd) { (void)hwnd; stop_engine(); }
+static void action_start_chat(HWND hwnd) { (void)hwnd; start_engine(TRUE,FALSE); }
+static void action_rebuild_tokenizer(HWND hwnd) { (void)hwnd; rebuild_tokenizer(); }
+static void action_auto_settings(HWND hwnd) { (void)hwnd; apply_auto_settings(); }
+static void action_basic_defaults(HWND hwnd) {
+    if (!InterlockedCompareExchange(&g_running,0,0) &&
+        MessageBoxW(hwnd,L"Restore all model, training, tokenizer, and generation settings to their basic defaults? The selected corpus files will be kept.",
+            L"Basic defaults",MB_YESNO|MB_ICONQUESTION)==IDYES) {
+        minima_settings_reset_defaults(&g_settings_context);
+        append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\\r\\n");
+    }
+}
+static void action_advanced_toggle(HWND hwnd) {
+    set_advanced_expanded(hwnd,
+        SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);
+}
+static void action_chat_send(HWND hwnd) { (void)hwnd; send_chat_message(); }
+static void action_chat_test(HWND hwnd) { (void)hwnd; test_generation_settings(); }
+static void action_chat_stop(HWND hwnd) { (void)hwnd; stop_generation(); }
+static void action_save_checkpoint(HWND hwnd) { (void)hwnd; request_checkpoint_save(); }
+
+static const GuiActionHandlers g_action_handlers = {
+    action_add_corpus, action_remove_corpus, action_resume_changed,
+    action_start_training, action_stop_training, action_start_chat,
+    action_rebuild_tokenizer, action_auto_settings, action_basic_defaults,
+    action_advanced_toggle, action_chat_send, action_chat_test,
+    action_chat_stop, action_save_checkpoint
+};
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -1132,7 +965,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_SIZE:
-        if (wp != SIZE_MINIMIZED) layout_controls(hwnd);
+        if (wp != SIZE_MINIMIZED) gui_layout_layout_controls(hwnd);
         return 0;
     case WM_DPICHANGED: {
         const UINT old_dpi = g_dpi ? g_dpi : 96;
@@ -1143,12 +976,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             suggested->right - suggested->left,
             suggested->bottom - suggested->top,
             SWP_NOZORDER | SWP_NOACTIVATE);
-        DpiScaleContext context = { hwnd, old_dpi, new_dpi };
-        EnumChildWindows(hwnd, scale_child_for_dpi, (LPARAM)&context);
+        gui_layout_scale_children(hwnd, old_dpi, new_dpi);
         g_dpi = new_dpi;
         minima_graph_set_dpi(g_dpi);
         rebuild_ui_font(hwnd);
-        layout_controls(hwnd);
+        gui_layout_layout_controls(hwnd);
         minima_graph_refresh();
         if (g_graph) InvalidateRect(g_graph, NULL, FALSE);
         return 0;
@@ -1156,37 +988,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_NOTIFY:
         if (((NMHDR*)lp)->hwndFrom == g_main_tabs &&
             ((NMHDR*)lp)->code == TCN_SELCHANGE) {
-            select_main_page(hwnd, TabCtrl_GetCurSel(g_main_tabs));
+            gui_layout_select_main_page(hwnd, TabCtrl_GetCurSel(g_main_tabs));
             return 0;
         }
         break;
     case WM_COMMAND:
-        switch (LOWORD(wp)) {
-        case IDC_ADD: g_use_saved_tokenizer=FALSE; WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path); add_corpus_files(); return 0;
-        case IDC_REMOVE: {
-            g_use_saved_tokenizer=FALSE;
-            WritePrivateProfileStringW(L"Training",L"prebuilt_tokenizer",L"0",g_settings_path);
-            int selected[32];
-            LRESULT n = SendMessageW(g_corpus, LB_GETSELITEMS, 32, (LPARAM)selected);
-            for (int i = (int)n - 1; i >= 0; --i)
-                SendMessageW(g_corpus, LB_DELETESTRING, selected[i], 0);
+        if (gui_actions_dispatch(hwnd, LOWORD(wp), &g_action_handlers))
             return 0;
-        }
-        case IDC_RESUME: update_fresh_only_controls(); return 0;
-        case IDC_START: start_engine(FALSE,FALSE); return 0;
-        case IDC_STOP: stop_engine(); return 0;
-        case IDC_CHAT_START: start_engine(TRUE,FALSE); return 0;
-        case IDC_REBUILD_TOKENIZER: rebuild_tokenizer(); return 0;
-        case IDC_AUTO_SETTINGS: apply_auto_settings(); return 0;
-        case IDC_ADVANCED_TOGGLE:
-            set_advanced_expanded(hwnd,
-                SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);
-            return 0;
-        case IDC_CHAT_SEND: send_chat_message(); return 0;
-        case IDC_CHAT_TEST: test_generation_settings(); return 0;
-        case IDC_CHAT_STOP: stop_generation(); return 0;
-        case IDC_SAVE_NOW: request_checkpoint_save(); return 0;
-        }
         break;
     case WM_CHAT_READY:
         minima_gui_set_chat_send_ready(GetDlgItem(hwnd,IDC_CHAT_SEND),

@@ -1,0 +1,100 @@
+name: Merge complete Britannica corpus
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/britannica-merge.yml"
+      - "data/EN CY COM/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the complete source corpus
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Merge all 195 text parts in numeric filename order
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="data/EN CY COM"
+          output="britannica.txt"
+          manifest="britannica_manifest.txt"
+
+          mapfile -d '' parts < <(
+            find "$source_dir" -maxdepth 1 -type f -name '*.txt' -print0 | sort -z -V
+          )
+
+          if [[ "${#parts[@]}" -ne 195 ]]; then
+            echo "Expected exactly 195 Britannica text parts, found ${#parts[@]}." >&2
+            exit 1
+          fi
+
+          : > "$output"
+          : > "$manifest"
+          printf 'Source files: %s\n' "${#parts[@]}" >> "$manifest"
+          printf 'Ordering: numeric filename order (ascending)\n\n' >> "$manifest"
+
+          total_source_bytes=0
+          added_separator_newlines=0
+          for part in "${parts[@]}"; do
+            bytes=$(stat -c '%s' "$part")
+            total_source_bytes=$((total_source_bytes + bytes))
+            printf '%s\t%s bytes\n' "$part" "$bytes" >> "$manifest"
+
+            cat "$part" >> "$output"
+            if [[ -s "$part" ]] && [[ "$(tail -c 1 "$part" | wc -l)" -eq 0 ]]; then
+              printf '\n' >> "$output"
+              added_separator_newlines=$((added_separator_newlines + 1))
+            fi
+          done
+
+          output_bytes=$(stat -c '%s' "$output")
+          expected_bytes=$((total_source_bytes + added_separator_newlines))
+          if [[ "$output_bytes" -ne "$expected_bytes" ]] || [[ ! -s "$output" ]]; then
+            echo "Merged output size validation failed." >&2
+            exit 1
+          fi
+
+          printf '\nTotal source bytes: %s\n' "$total_source_bytes" >> "$manifest"
+          printf 'Separator newlines added: %s\n' "$added_separator_newlines" >> "$manifest"
+          printf 'Merged output bytes: %s\n' "$output_bytes" >> "$manifest"
+          printf 'Merged SHA-256: %s\n' "$(sha256sum "$output" | cut -d ' ' -f 1)" >> "$manifest"
+
+          echo "Merged ${#parts[@]} files into $output"
+          echo "Source bytes: $total_source_bytes"
+          echo "Separator newlines added: $added_separator_newlines"
+          echo "Output bytes: $output_bytes"
+          echo "SHA-256: $(sha256sum "$output" | cut -d ' ' -f 1)"
+          echo "First source: ${parts[0]}"
+          echo "Last source: ${parts[${#parts[@]}-1]}"
+
+          gzip -1 -c "$output" > britannica.txt.gz
+          echo "Compressed output bytes: $(stat -c '%s' britannica.txt.gz)"
+          printf 'Compressed SHA-256: %s\n' "$(sha256sum britannica.txt.gz | cut -d ' ' -f 1)" >> "$manifest"
+          cat > britannica_README.txt <<'EOF'
+          This archive contains the complete merged Encyclopaedia Britannica, 11th Edition text.
+          Decompress britannica.txt.gz to obtain britannica.txt.
+          The 195 source parts were concatenated in ascending numeric filename order.
+          Source file list, byte counts, separator handling, and checksums are in britannica_manifest.txt.
+          EOF
+
+      - name: Publish merged Britannica text
+        uses: actions/upload-artifact@v4
+        with:
+          name: Britannica-complete-merged-gzip
+          path: |
+            britannica.txt.gz
+            britannica_manifest.txt
+            britannica_README.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

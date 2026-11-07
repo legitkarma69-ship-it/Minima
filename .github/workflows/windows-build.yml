@@ -91,6 +91,17 @@ jobs:
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test zero tokenizer fingerprint checkpoint round-trip
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw "Visual C++ x64 tools were not found." }
+          $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC /I. tests\\checkpoint_hash_test.c checkpoint.c optim.c model.c arena.c util.c /Fe:checkpoint_hash_test.exe && checkpoint_hash_test.exe'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Test train_run boundary validation
         shell: pwsh
         run: |
@@ -110,6 +121,17 @@ jobs:
           if (!$vs) { throw "Visual C++ x64 tools were not found." }
           $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
           $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC /I. tests\gradcheck_test.c gradcheck.c backward.c forward.c model.c arena.c util.c /Fe:gradcheck_test.exe && gradcheck_test.exe'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test attention scratch allocation across sequence lengths
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$vs) { throw "Visual C++ x64 tools were not found." }
+          $vcvars = Join-Path $vs "VC/Auxiliary/Build/vcvars64.bat"
+          $command = 'call "' + $vcvars + '" >nul && cl /nologo /W4 /TC /I. tests\attention_workspace_test.c backward.c forward.c model.c arena.c util.c /Fe:attention_workspace_test.exe && attention_workspace_test.exe'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -151,6 +173,9 @@ jobs:
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 262144 1024 2'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 1048576 2048 2'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

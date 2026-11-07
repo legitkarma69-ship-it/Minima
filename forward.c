@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <stddef.h>
+#include <limits.h>
 
 // ------------------------------------------------------------------
 // Basic kernels
@@ -56,7 +57,7 @@ float silu(float x) {
 // Causal multi-head attention
 // ------------------------------------------------------------------
 
-static void attention(float* out, const float* qkv,
+static void attention(float* out, const float* qkv, float* scores,
     int batch, int seq, int dim, int n_heads, int head_dim) {
 
     const float scale = 1.0f / sqrtf((float)head_dim);
@@ -69,7 +70,6 @@ static void attention(float* out, const float* qkv,
             const float* v_base = k_base + dim;
 
             for (int qi = 0; qi < seq; qi++) {
-                float scores[512];
                 float max_score = -1.0e30f;
 
                 for (int kj = 0; kj <= qi; kj++) {
@@ -114,12 +114,8 @@ static void attention(float* out, const float* qkv,
 bool activations_init(Activations* act, Arena* temp_arena,
     int batch, int seq, const Model* model) {
 
-    if (!act || !temp_arena || !model || batch <= 0 || seq <= 0 ||
-        seq > model->max_seq || seq > 512 ||
-        model->dim <= 0 || model->ffn_dim <= 0 ||
-        model->vocab_size <= 0 || model->n_layers <= 0 ||
-        model->n_heads <= 0 || model->head_dim <= 0 ||
-        model->n_heads * model->head_dim != model->dim)
+    if (!act || !temp_arena || batch <= 0 || seq <= 0 || batch > INT_MAX / seq ||
+        !model_validate(model) || seq > model->max_seq)
         return false;
 
     memset(act, 0, sizeof(*act));
@@ -151,12 +147,14 @@ bool activations_init(Activations* act, Arena* temp_arena,
     act->dffn = arena_alloc(temp_arena, n * ffn * sizeof(float));
     act->dup = arena_alloc(temp_arena, n * ffn * sizeof(float));
     act->dgate = arena_alloc(temp_arena, n * ffn * sizeof(float));
+    act->attention_scores = arena_alloc(temp_arena, (size_t)seq * sizeof(float));
 
     return act->x && act->x_norm && act->qkv && act->attn_out &&
         act->ffn_buf && act->up_buf && act->gate_buf &&
         act->resid_attn && act->resid_ffn && act->logits &&
         act->dx && act->dx_tmp && act->dx_norm && act->dattn &&
-        act->dqkv && act->dffn && act->dup && act->dgate;
+        act->dqkv && act->dffn && act->dup && act->dgate &&
+        act->attention_scores;
 }
 
 // ------------------------------------------------------------------
@@ -166,15 +164,13 @@ bool activations_init(Activations* act, Arena* temp_arena,
 float* model_forward(Model* model, Activations* act,
     const uint16_t* tokens, int batch, int seq) {
 
-    if (!model || !act || !tokens || batch <= 0 || seq <= 0 ||
-        seq > model->max_seq || seq > 512 ||
-        model->dim <= 0 || model->ffn_dim <= 0 ||
-        model->vocab_size <= 0 || model->n_layers <= 0 ||
-        model->n_heads <= 0 || model->head_dim <= 0 ||
-        model->n_heads * model->head_dim != model->dim ||
+    if (!model_validate(model) || !act || !tokens ||
+        batch <= 0 || seq <= 0 || batch > INT_MAX / seq ||
+        seq > model->max_seq ||
         !act->x || !act->x_norm || !act->qkv || !act->attn_out ||
         !act->up_buf || !act->gate_buf || !act->ffn_buf ||
-        !act->resid_attn || !act->resid_ffn || !act->logits)
+        !act->resid_attn || !act->resid_ffn || !act->logits ||
+        !act->attention_scores)
         return NULL;
 
     const int dim = model->dim;
@@ -221,7 +217,8 @@ float* model_forward(Model* model, Activations* act,
         const float* w_qkv = model->attn_qkv + (size_t)layer * 3 * dim * dim;
         matmul(qkv, act->x_norm, w_qkv, (int)n, dim, 3 * dim);
 
-        attention(attn_out, qkv, batch, seq, dim, n_heads, head_dim);
+        attention(attn_out, qkv, act->attention_scores,
+            batch, seq, dim, n_heads, head_dim);
 
         const float* w_proj = model->attn_proj + (size_t)layer * dim * dim;
         matmul_add(act->x, attn_out, w_proj, (int)n, dim, dim);

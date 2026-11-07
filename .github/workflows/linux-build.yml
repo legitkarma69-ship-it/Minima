@@ -1,0 +1,103 @@
+name: Linux x64 build and regression tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up GCC
+        run: |
+          gcc --version
+          make --version
+
+      - name: Build engine CLI
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic \
+            arena.c backward.c chat.c checkpoint.c corpus.c diagnostics.c \
+            forward.c generate.c gradcheck.c main.c model.c optim.c \
+            tokenizer.c train.c train_validation.c util.c \
+            -lm -o minima
+
+      - name: Prepare deterministic tiny training corpus
+        run: |
+          for i in $(seq 1 256); do
+            printf 'The quick brown fox jumps over the lazy dog. A small model learns patterns from text. Record %s.\n' "$i"
+          done > minima_ci_corpus.txt
+
+      - name: Run tiny tokenizer and training probe
+        run: |
+          rm -f minima.model minima.model.tmp minima.bpe Minima/minima.model Minima/minima.bpe
+          ./minima --retrain-tokenizer-only --vocab-size 300 \
+            --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 \
+            --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 \
+            --max-seq 80 --tokenizer-sampling spread minima_ci_corpus.txt
+          test -s minima.bpe
+          output=$(./minima --use-existing-tokenizer --steps 1 \
+            --total-steps 2 --warmup 1 --vocab-size 300 \
+            --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 \
+            --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 \
+            --max-seq 80 --validation-batches 1 --log-interval 1 \
+            --validation-interval 1 --checkpoint-interval 1 \
+            --metrics minima_ci_metrics.csv minima_ci_corpus.txt 2>&1)
+          printf '%s\n' "$output"
+          grep -q 'Gradient allocation layout: PASS' <<< "$output"
+          grep -q 'Gradient checks passed: 10 / 10' <<< "$output"
+          test -s minima.model
+
+      - name: Run focused tokenizer tests
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/tokenizer_test.c tokenizer.c arena.c util.c \
+            -lm -o tokenizer_test
+          ./tokenizer_test
+
+      - name: Test incremental tokenizer trainer equivalence
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/tokenizer_incremental_test.c tokenizer.c arena.c util.c \
+            -lm -o tokenizer_incremental_test
+          ./tokenizer_incremental_test
+
+      - name: Test checkpoint validation and zero tokenizer fingerprint
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/checkpoint_hash_test.c checkpoint.c optim.c model.c \
+            arena.c util.c -lm -o checkpoint_hash_test
+          ./checkpoint_hash_test
+
+      - name: Test numerical gradient stability and workspace reuse
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/gradcheck_test.c gradcheck.c backward.c forward.c \
+            model.c arena.c util.c -lm -o gradcheck_test
+          ./gradcheck_test
+
+      - name: Test dynamic attention workspace at sequence boundaries
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/attention_workspace_test.c backward.c forward.c \
+            model.c arena.c util.c -lm -o attention_workspace_test
+          ./attention_workspace_test
+
+      - name: Test train_run input boundaries
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/train_validation_test.c train_validation.c model.c \
+            arena.c util.c -lm -o train_validation_test
+          ./train_validation_test
+
+      - name: Test reserved-token generation policy
+        run: |
+          gcc -D_POSIX_C_SOURCE=200809L -std=c11 -O2 -Wall -Wextra -Wpedantic -I. \
+            tests/generation_special_tokens_test.c generate.c forward.c \
+            model.c tokenizer.c arena.c util.c -lm -o generation_special_tokens_test
+          ./generation_special_tokens_test

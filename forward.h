@@ -33,6 +33,9 @@ typedef struct {
     float* dffn;            // [batch * seq, ffn_dim]
     float* dup;             // [batch * seq, ffn_dim]
     float* dgate;           // [batch * seq, ffn_dim]
+
+    // Reusable sequence-sized attention softmax scratch (forward and backward).
+    float* attention_scores; // [seq]
 } Activations;
 
 // Allocate all activation and gradient-workspace buffers.

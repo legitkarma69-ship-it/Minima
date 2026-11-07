@@ -17,7 +17,7 @@ static const wchar_t* const g_edit_keys[23] = {
 };
 static const wchar_t* const g_edit_defaults[23] = {
     L"2000", L"2048", L"64", L"2", L"2", L"128", L"64", L"4", L"32",
-    L"0.0003", L"100", L"2000", L"100", L"100", L"16", L"100", L"1234",
+    L"0.0003", L"100", L"20000", L"100", L"100", L"16", L"100", L"1234",
     L"262144", L"0.8", L"40", L"0.9", L"1.1", L"32"
 };
 static const wchar_t* const g_combo_keys[2] = {
@@ -102,6 +102,28 @@ void minima_settings_load(const MinimaSettingsContext* context) {
     }
     if (context->update_fresh_only_controls)
         context->update_fresh_only_controls();
+}
+
+void minima_settings_reset_defaults(const MinimaSettingsContext* context) {
+    if (!context) return;
+    for (int i = 0; i < 23; ++i)
+        SetWindowTextW(context->edit_controls[i], g_edit_defaults[i]);
+    for (int i = 0; i < 2; ++i) {
+        LRESULT index = SendMessageW(context->combo_controls[i],
+            CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)g_combo_defaults[i]);
+        if (index >= 0)
+            SendMessageW(context->combo_controls[i], CB_SETCURSEL, (WPARAM)index, 0);
+    }
+    SendMessageW(context->resume_control, BM_SETCHECK, BST_UNCHECKED, 0);
+    if (context->use_saved_tokenizer)
+        *context->use_saved_tokenizer = FALSE;
+    if (context->path && context->path[0])
+        WritePrivateProfileStringW(L"Training", L"prebuilt_tokenizer", L"0", context->path);
+    if (context->update_fresh_only_controls)
+        context->update_fresh_only_controls();
+
+    /* Save the reset configuration while preserving the existing corpus list. */
+    minima_settings_save(context);
 }
 
 void minima_settings_save(const MinimaSettingsContext* context) {

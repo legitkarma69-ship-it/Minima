@@ -21,6 +21,7 @@ typedef struct MinimaSettingsContext {
 } MinimaSettingsContext;
 
 void minima_settings_load(const MinimaSettingsContext* context);
+void minima_settings_reset_defaults(const MinimaSettingsContext* context);
 void minima_settings_save(const MinimaSettingsContext* context);
 
 #endif

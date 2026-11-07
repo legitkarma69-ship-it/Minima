@@ -77,7 +77,7 @@ static size_t model_parameter_count(const Model* m) {
 bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     const Rng* rng, uint64_t tokenizer_hash) {
     const Model* m = model;
-    if (!path || !model || !opt || !rng || !tokenizer_hash ||
+    if (!path || !model || !opt || !rng ||
         !model->tok_emb ||
         !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
@@ -185,7 +185,7 @@ fail:
 
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
     Rng* rng, uint64_t tokenizer_hash) {
-    if (!path || !model || !opt || !rng || !tokenizer_hash ||
+    if (!path || !model || !opt || !rng ||
         !model->tok_emb || !model->pos_emb || !model->attn_qkv ||
         !model->attn_proj || !model->ffn_up || !model->ffn_gate ||
         !model->ffn_down || !model->rms1_scale || !model->rms2_scale ||
