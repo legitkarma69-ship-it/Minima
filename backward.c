@@ -30,23 +30,73 @@ void gradients_zero(Gradients* g, const Model* model) {
 }
 
 bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
-    if (!g || !arena || !model) return false;
-
-    // Gradients share the exact tensor layout of Model. Copy every runtime
-    // dimension, not just vocabulary size, before allocating the buffers.
-    const ModelConfig config = {
-        model->vocab_size,
-        model->dim,
-        model->n_layers,
-        model->n_heads,
-        model->ffn_dim,
-        model->max_seq
-    };
-
-    if (!model_init_config(g, arena, 0, &config))
+    if (!g || !arena || !model || !arena->base ||
+        arena->used > arena->size ||
+        model->vocab_size < 260 || model->vocab_size > 8192 ||
+        model->dim <= 0 || model->dim > 512 ||
+        model->n_layers <= 0 || model->n_layers > 16 ||
+        model->n_heads <= 0 || model->n_heads > 32 ||
+        model->dim % model->n_heads != 0 ||
+        model->head_dim != model->dim / model->n_heads ||
+        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
+        model->max_seq < 32 || model->max_seq > 512)
         return false;
 
-    gradients_zero(g, model);
+    const size_t dim = (size_t)model->dim;
+    const size_t layers = (size_t)model->n_layers;
+    const size_t ffn = (size_t)model->ffn_dim;
+    const size_t expected_params =
+        (size_t)model->vocab_size * dim +
+        (size_t)model->max_seq * dim +
+        layers * 3 * dim * dim +
+        layers * dim * dim +
+        layers * ffn * dim * 2 +
+        layers * dim * ffn +
+        layers * dim * 2 + dim;
+    if (expected_params > SIZE_MAX / sizeof(float) ||
+        model->weight_bytes != expected_params * sizeof(float))
+        return false;
+
+    const size_t arena_used_before = arena->used;
+    const size_t arena_peak_before = arena->peak;
+    memset(g, 0, sizeof(*g));
+    g->vocab_size = model->vocab_size;
+    g->dim = model->dim;
+    g->n_layers = model->n_layers;
+    g->n_heads = model->n_heads;
+    g->head_dim = model->head_dim;
+    g->ffn_dim = model->ffn_dim;
+    g->max_seq = model->max_seq;
+    g->weight_bytes = model->weight_bytes;
+
+    const size_t tok_n = (size_t)model->vocab_size * dim;
+    const size_t pos_n = (size_t)model->max_seq * dim;
+    const size_t qkv_n = layers * 3 * dim * dim;
+    const size_t proj_n = layers * dim * dim;
+    const size_t up_n = layers * ffn * dim;
+    const size_t down_n = layers * dim * ffn;
+    const size_t rms_n = layers * dim;
+
+    /* Gradient buffers need only zero-filled storage. Calling model_init_config
+       here used to generate Gaussian weights and then immediately erase them. */
+    g->tok_emb = (float*)arena_alloc_zero(arena, tok_n * sizeof(float));
+    g->pos_emb = (float*)arena_alloc_zero(arena, pos_n * sizeof(float));
+    g->attn_qkv = (float*)arena_alloc_zero(arena, qkv_n * sizeof(float));
+    g->attn_proj = (float*)arena_alloc_zero(arena, proj_n * sizeof(float));
+    g->ffn_up = (float*)arena_alloc_zero(arena, up_n * sizeof(float));
+    g->ffn_gate = (float*)arena_alloc_zero(arena, up_n * sizeof(float));
+    g->ffn_down = (float*)arena_alloc_zero(arena, down_n * sizeof(float));
+    g->rms1_scale = (float*)arena_alloc_zero(arena, rms_n * sizeof(float));
+    g->rms2_scale = (float*)arena_alloc_zero(arena, rms_n * sizeof(float));
+    g->rms_final_scale =
+        (float*)arena_alloc_zero(arena, dim * sizeof(float));
+
+    if (!gradients_check_layout(g, model, arena)) {
+        arena->used = arena_used_before;
+        arena->peak = arena_peak_before;
+        memset(g, 0, sizeof(*g));
+        return false;
+    }
     return true;
 }
 
