@@ -197,12 +197,14 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
             sample[written++] = '\n';
         }
 
-        const size_t chunks = spread && quota > 1
+        const size_t chunks = spread && quota > 1 &&
+            quota < files[i].usable_bytes
             ? (quota < 64u ? quota : 64u) : 1u;
-        size_t remaining_file = quota;
+        const size_t base_chunk = quota / chunks;
+        const size_t extra_chunk_bytes = quota % chunks;
         for (size_t chunk = 0; chunk < chunks; chunk++) {
-            const size_t this_len = chunk + 1 == chunks
-                ? remaining_file : quota / chunks;
+            const size_t this_len = base_chunk +
+                (chunk < extra_chunk_bytes ? 1u : 0u);
             const size_t start = chunks == 1 ? 0 :
                 ((files[i].usable_bytes - this_len) * chunk) / (chunks - 1);
             if (start > (size_t)LONG_MAX - bom ||
@@ -216,10 +218,8 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
                 return CORPUS_LOAD_ERROR;
             }
             written += got;
-            remaining_file -= got;
         }
         fclose(f);
-        if (remaining_file != 0) return CORPUS_LOAD_ERROR;
         files[i].sampled = quota;
         sampled_files++;
         printf("  tokenizer source: %s (%zu / %zu bytes)\n",
