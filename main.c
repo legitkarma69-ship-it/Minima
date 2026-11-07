@@ -255,7 +255,8 @@ int main(int argc, char** argv) {
     const size_t activation_floats=training_tokens*(
         (size_t)(9+6*options.model.n_layers)*(size_t)options.model.dim +
         (size_t)(3*options.model.n_layers+3)*(size_t)options.model.ffn_dim +
-        2u*(size_t)options.model.vocab_size);
+        2u*(size_t)options.model.vocab_size) +
+        (size_t)options.sequence_length;
     const size_t activation_bytes=activation_floats*sizeof(float);
     if(activation_bytes>192u*1024u*1024u)
         die("estimated activations/logits require %.1f MiB; the temporary arena safety limit is 192 MiB",
