@@ -113,12 +113,8 @@ static void attention(float* out, const float* qkv, float* scores,
 bool activations_init(Activations* act, Arena* temp_arena,
     int batch, int seq, const Model* model) {
 
-    if (!act || !temp_arena || !model || batch <= 0 || seq <= 0 ||
-        seq > model->max_seq || seq > 512 ||
-        model->dim <= 0 || model->ffn_dim <= 0 ||
-        model->vocab_size <= 0 || model->n_layers <= 0 ||
-        model->n_heads <= 0 || model->head_dim <= 0 ||
-        model->n_heads * model->head_dim != model->dim)
+    if (!act || !temp_arena || batch <= 0 || seq <= 0 ||
+        !model_validate(model) || seq > model->max_seq)
         return false;
 
     memset(act, 0, sizeof(*act));
@@ -167,12 +163,8 @@ bool activations_init(Activations* act, Arena* temp_arena,
 float* model_forward(Model* model, Activations* act,
     const uint16_t* tokens, int batch, int seq) {
 
-    if (!model || !act || !tokens || batch <= 0 || seq <= 0 ||
-        seq > model->max_seq || seq > 512 ||
-        model->dim <= 0 || model->ffn_dim <= 0 ||
-        model->vocab_size <= 0 || model->n_layers <= 0 ||
-        model->n_heads <= 0 || model->head_dim <= 0 ||
-        model->n_heads * model->head_dim != model->dim ||
+    if (!model_validate(model) || !act || !tokens ||
+        batch <= 0 || seq <= 0 || seq > model->max_seq ||
         !act->x || !act->x_norm || !act->qkv || !act->attn_out ||
         !act->up_buf || !act->gate_buf || !act->ffn_buf ||
         !act->resid_attn || !act->resid_ffn || !act->logits ||
