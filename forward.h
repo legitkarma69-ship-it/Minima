@@ -33,6 +33,7 @@ typedef struct {
     float* dffn;            // [batch * seq, ffn_dim]
     float* dup;             // [batch * seq, ffn_dim]
     float* dgate;           // [batch * seq, ffn_dim]
+    float* attention_scores; // [seq], shared forward/backward attention scratch
 } Activations;
 
 // Allocate all activation and gradient-workspace buffers.
