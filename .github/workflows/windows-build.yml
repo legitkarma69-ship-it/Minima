@@ -106,6 +106,9 @@ jobs:
           $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 65536 512 2'
           & cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $command = 'call "' + $vcvars + '" >nul && tokenizer_benchmark.exe .\data\books.txt 262144 1024 2'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test tokenizer-only rebuild
         shell: pwsh
