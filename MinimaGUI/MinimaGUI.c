@@ -169,9 +169,13 @@ static BOOL is_chat_page_control(HWND child) {
 static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
     const int page = (int)page_parameter;
     if (child == g_main_tabs) return TRUE;
-    BOOL visible = page == 0;
-    if (page == 1) visible = is_advanced_page_control(child);
-    else if (page == 2) visible = is_chat_page_control(child);
+    BOOL visible;
+    if (page == 0)
+        visible = !is_advanced_page_control(child) && !is_chat_page_control(child);
+    else if (page == 1)
+        visible = is_advanced_page_control(child);
+    else
+        visible = is_chat_page_control(child);
     ShowWindow(child, visible ? SW_SHOWNA : SW_HIDE);
     return TRUE;
 }
