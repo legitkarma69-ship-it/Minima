@@ -9,6 +9,7 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 
 static const char* skip_setting_space(const char* p) {
     while (*p == ' ' || *p == '\t') ++p;
@@ -106,6 +107,17 @@ static void strip_generated_next_role(char* response) {
     if (marker) *marker = '\0';
 }
 
+static void trim_user_text_prefix(char* text) {
+    if (!text || !text[0]) return;
+    size_t length = strlen(text);
+    size_t remove = length > 16 ? length / 8 : 1;
+    if (remove >= length) remove = length - 1;
+    while (remove < length &&
+        (((unsigned char)text[remove] & 0xC0u) == 0x80u))
+        remove++;
+    memmove(text, text + remove, length - remove + 1);
+}
+
 int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
     const ChatOptions* options) {
     uint16_t input_ids[8192], prompt[512], output[512];
@@ -180,32 +192,24 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
 
             if (!built) {
                 /*
-                 * If a single user message is too long, keep its trailing
-                 * bytes while preserving both role markers.
+                 * A single message can exceed the model context. Preserve
+                 * its most recent UTF-8 text while keeping the role markers.
                  */
-                const char* prefix = history[0] ? "\nHuman: " : "Human: ";
-                const char* suffix = "\nAssistant:";
-                const size_t fixed_bytes = strlen(history) + strlen(prefix) +
-                    strlen(suffix);
-                if (fixed_bytes + 1 >= sizeof(prompt_text)) {
-                    history[0] = '\0';
-                    prefix = "Human: ";
+                history[0] = '\0';
+                for (;;) {
+                    if (build_chat_prompt(history, line, prompt_text,
+                        sizeof(prompt_text)) &&
+                        encode_chat_prompt(tok, prompt_text, prompt,
+                            model->max_seq - 1, &prompt_len))
+                        break;
+                    if (!line[0] || strlen(line) <= 1) {
+                        puts("BOT: [input encoding failed]");
+                        puts("CHAT_READY");
+                        break;
+                    }
+                    trim_user_text_prefix(line);
                 }
-                size_t available = sizeof(prompt_text) -
-                    strlen(history) - strlen(prefix) - strlen(suffix) - 1;
-                size_t user_bytes = strlen(line);
-                if (user_bytes > available) {
-                    memmove(line, line + (user_bytes - available), available);
-                    line[available] = '\0';
-                }
-                if (!build_chat_prompt(history, line, prompt_text,
-                    sizeof(prompt_text)) ||
-                    !encode_chat_prompt(tok, prompt_text, prompt,
-                        model->max_seq - 1, &prompt_len)) {
-                    puts("BOT: [input encoding failed]");
-                    puts("CHAT_READY");
-                    continue;
-                }
+                if (prompt_len <= 0) continue;
             }
         }
 
