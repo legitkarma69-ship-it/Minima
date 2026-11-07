@@ -67,7 +67,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Tokenizer tokenizer;
+    /* Tokenizer owns large fixed-size vocabulary/merge arrays. Keep it off the
+       default Windows thread stack, just like the focused unit-test fixtures. */
+    static Tokenizer tokenizer;
     const double train_start = now_seconds();
     const bool trained = tokenizer_train(&tokenizer, &arena, sample, sample_len,
         (int)vocab_size);
