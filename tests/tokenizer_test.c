@@ -135,8 +135,10 @@ int main(void) {
             (size_t)long_reference_n * sizeof(uint16_t)) == 0);
         CHECK(memcmp(long_reference, long_loaded,
             (size_t)long_reference_n * sizeof(uint16_t)) == 0);
+        char long_decoded[513];
         CHECK(tokenizer_decode(&loaded, long_loaded, long_loaded_n,
-            text_after, (int)sizeof(text_after)) == -1);
+            long_decoded, (int)sizeof(long_decoded)) == (int)sizeof(long_text));
+        CHECK(memcmp(long_decoded, long_text, sizeof(long_text)) == 0);
 
         /* Corrupt a byte-token payload without changing its length. */
         {
