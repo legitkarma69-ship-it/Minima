@@ -21,6 +21,9 @@
     <ClCompile Include="..\chat.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\train_validation.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\train.c">
       <Filter>Source Files</Filter>
     </ClCompile>
