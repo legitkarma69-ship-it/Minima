@@ -43,6 +43,10 @@ typedef struct {
 bool model_init(Model* m, Arena* arena, uint64_t seed, int vocab_size);
 bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig* config);
 
+/* Shared invariants used by initialization, forward/backward, and training. */
+bool model_config_validate(const ModelConfig* config);
+bool model_validate(const Model* model);
+
 // Convenience: number of parameters
 size_t model_param_count(const Model* m);
 
