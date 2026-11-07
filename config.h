@@ -11,7 +11,7 @@
 #define MODEL_MAX_HEADS 32
 #define MODEL_MAX_FFN_DIM 1024
 #define MODEL_MIN_SEQ 32
-#define MODEL_MAX_SEQ 512
+#define MODEL_MAX_SEQ_LIMIT 512
 
 /* Conservative defaults. Runtime configurations are validated in model.c. */
 #define MODEL_VOCAB_SIZE      2048
