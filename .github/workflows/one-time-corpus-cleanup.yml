@@ -1,0 +1,64 @@
+name: One-time corpus cleanup
+
+on:
+  push:
+    branches:
+      - corpus/clean-text-formatting
+
+permissions:
+  contents: write
+
+jobs:
+  clean-corpus:
+    if: github.event.head_commit.message == 'Run one-time corpus cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: corpus/clean-text-formatting
+      - name: Normalize books and Britannica text
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def clean(path, replace_tabs=False, remove_illustration_placeholders=False):
+              p = Path(path)
+              raw = p.read_bytes()
+              text = raw.decode("utf-8")
+              newline = "\r\n" if b"\r\n" in raw else "\n"
+              text = text.replace("\r\n", "\n").replace("\r", "\n")
+              before = text
+
+              text = re.sub(r"[ \t]+(?=\n|$)", "", text)
+              if replace_tabs:
+                  text = text.replace("\t", "    ")
+              if remove_illustration_placeholders:
+                  text, removed = re.subn(
+                      r"(?m)^[ \t]*\[Illustration\][ \t]*(?:\n|$)", "", text
+                  )
+                  print(f"{path}: removed {removed} empty illustration placeholders")
+              text = re.sub(r"\n{4,}", "\n\n\n", text)
+              text = text.replace("\n", newline)
+
+              p.write_bytes(text.encode("utf-8"))
+              print(
+                  f"{path}: {len(raw)} -> {p.stat().st_size} bytes; "
+                  f"{before.count(chr(10)) - text.count(chr(10))} excess line breaks removed"
+              )
+
+          clean("data/books.txt", replace_tabs=True)
+          clean("data/britannica.txt", remove_illustration_placeholders=True)
+          PY
+      - name: Commit cleaned corpus
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/books.txt data/britannica.txt
+          if git diff --cached --quiet; then
+            echo "No corpus changes were needed."
+          else
+            git commit -m "Normalize books and Britannica corpus formatting [skip ci]"
+            git push origin HEAD:corpus/clean-text-formatting
+          fi
