@@ -48,6 +48,7 @@ int main(void) {
     CHECK(arena_init(&train_arena, 64u * 1024u * 1024u));
     CHECK(arena_init(&load_arena, 16u * 1024u * 1024u));
     CHECK(arena_init(&bad_arena, 16u * 1024u * 1024u));
+    puts("Tokenizer test: arenas initialized."); fflush(stdout);
 
     /* Every possible byte must round-trip, including NUL and high-bit bytes. */
     uint8_t all_bytes[256];
@@ -80,6 +81,8 @@ int main(void) {
         CHECK(tokenizer_decode(&byte_tok, byte_ids, 1, decoded, 1) == -1);
         CHECK(decoded[0] == 'X');
     }
+
+    puts("Tokenizer test: byte round-trip passed."); fflush(stdout);
 
     /* Repeated pairs produce merge rules; persistence preserves exact behavior. */
     {
@@ -171,6 +174,8 @@ int main(void) {
             CHECK(bad_arena.used == used);
         }
     }
+
+    puts("Tokenizer test: persistence and corruption checks passed."); fflush(stdout);
 
     remove("tokenizer_test.bpe");
     remove("tokenizer_test.bpe.tmp");
