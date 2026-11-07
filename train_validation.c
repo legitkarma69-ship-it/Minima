@@ -60,6 +60,21 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
     if (!REQUIRE_MODEL_TENSORS(model))
         return validation_fail(reason_out, "one or more model weight tensors are null");
 
+    const size_t dim = (size_t)model->dim;
+    const size_t layers = (size_t)model->n_layers;
+    const size_t ffn = (size_t)model->ffn_dim;
+    const size_t expected_params =
+        (size_t)model->vocab_size * dim +
+        (size_t)model->max_seq * dim +
+        layers * 3 * dim * dim +
+        layers * dim * dim +
+        layers * ffn * dim * 2 +
+        layers * dim * ffn +
+        layers * dim * 2 + dim;
+    if (expected_params > SIZE_MAX / sizeof(float) ||
+        model->weight_bytes != expected_params * sizeof(float))
+        return validation_fail(reason_out, "model weight footprint does not match its dimensions");
+
     if (grads->vocab_size != model->vocab_size ||
         grads->dim != model->dim ||
         grads->n_layers != model->n_layers ||
