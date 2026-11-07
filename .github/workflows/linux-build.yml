@@ -35,6 +35,7 @@ jobs:
 
       - name: Run tiny tokenizer and training probe
         run: |
+          rm -f minima.model minima.model.tmp minima.bpe
           ./minima --retrain-tokenizer-only --vocab-size 300 \
             --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 \
             --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 \
