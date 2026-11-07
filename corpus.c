@@ -29,14 +29,20 @@ static bool file_has_text(FILE* f, bool* has_text) {
         ? 3 : 0;
 
     for (size_t i = start; i < prefix_len; i++) {
-        if (!is_text_whitespace(prefix[i])) *has_text = true;
+        if (!is_text_whitespace(prefix[i])) {
+            *has_text = true;
+            return true;
+        }
     }
 
     uint8_t buffer[4096];
     size_t got;
     while ((got = fread(buffer, 1, sizeof(buffer), f)) > 0) {
         for (size_t i = 0; i < got; i++) {
-            if (!is_text_whitespace(buffer[i])) *has_text = true;
+            if (!is_text_whitespace(buffer[i])) {
+                *has_text = true;
+                return true;
+            }
         }
     }
 
