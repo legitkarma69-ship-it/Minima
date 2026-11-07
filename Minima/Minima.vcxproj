@@ -141,6 +141,7 @@
     <ClCompile Include="..\gradcheck.c" />
     <ClCompile Include="..\generate.c" />
     <ClCompile Include="..\main.c" />
+    <ClCompile Include="..\mapped_buffer.c" />
     <ClCompile Include="..\model.c" />
     <ClCompile Include="..\optim.c" />
     <ClCompile Include="..\tokenizer.c" />
