@@ -120,7 +120,7 @@ static void trim_user_text_prefix(char* text) {
 
 int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
     const ChatOptions* options) {
-    uint16_t input_ids[8192], prompt[512], output[512];
+    uint16_t prompt[512], output[512];
     char line[8192], decoded[512 * TOK_MAX_TOKEN_LEN + 1];
     char history[CHAT_HISTORY_BYTES] = "";
     char prompt_text[CHAT_PROMPT_BYTES];
