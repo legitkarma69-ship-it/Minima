@@ -571,6 +571,8 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
 
     uint32_t reference_generation = 0;
     size_t active_count = sample_len;
+    size_t tie_fallback_count = 0;
+    uint64_t tie_scan_bytes = 0;
     const int merges_needed = target_vocab - tok->vocab_size;
     for (int merge_index = 0; merge_index < merges_needed; merge_index++) {
         if (heap_count == 0) break;
@@ -583,6 +585,8 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
             (heap_count > 2 &&
                 states[heap[2]].count == states[best_slot].count);
         if (tied_maximum) {
+            tie_fallback_count++;
+            tie_scan_bytes += (uint64_t)active_count;
             uint32_t winner_key = 0;
             if (!bpe_reference_tie_winner(nodes, 0, tok,
                     reference_table_size, reference_table,
