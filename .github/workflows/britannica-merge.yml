@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   merge:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - name: Check out the complete source corpus
@@ -22,70 +22,134 @@ jobs:
           fetch-depth: 1
 
       - name: Merge all 195 text parts in numeric filename order
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          source_dir="data/EN CY COM"
-          output="britannica.txt"
-          manifest="britannica_manifest.txt"
+          $sourceDirectory = Join-Path $env:GITHUB_WORKSPACE "data/EN CY COM"
+          $outputPath = Join-Path $env:GITHUB_WORKSPACE "britannica.txt"
+          $manifestPath = Join-Path $env:GITHUB_WORKSPACE "britannica_manifest.txt"
 
-          mapfile -d '' parts < <(
-            find "$source_dir" -maxdepth 1 -type f -name '*.txt' -print0 | sort -z -V
+          if (!(Test-Path -LiteralPath $sourceDirectory -PathType Container)) {
+            throw "Britannica source directory was not found: $sourceDirectory"
+          }
+
+          $parts = @(Get-ChildItem -LiteralPath $sourceDirectory -File -Filter "*.txt" | ForEach-Object {
+            $numberMatch = [regex]::Match($_.BaseName, "\d+")
+            if (!$numberMatch.Success) {
+              throw "Source filename does not contain a numeric ordering key: $($_.Name)"
+            }
+
+            [pscustomobject]@{
+              Number = [long]::Parse($numberMatch.Value, [Globalization.CultureInfo]::InvariantCulture)
+              Name = $_.Name
+              File = $_
+            }
+          } | Sort-Object Number, Name)
+
+          if ($parts.Count -ne 195) {
+            throw "Expected exactly 195 Britannica text parts, found $($parts.Count)."
+          }
+
+          $manifest = [System.Text.StringBuilder]::new()
+          [void]$manifest.AppendLine("Source files: $($parts.Count)")
+          [void]$manifest.AppendLine("Ordering: numeric filename order (ascending)")
+          [void]$manifest.AppendLine()
+
+          [long]$totalSourceBytes = 0
+          [long]$addedSeparatorNewlines = 0
+          $outputStream = [System.IO.File]::Create($outputPath)
+          try {
+            foreach ($part in $parts) {
+              $sourceStream = [System.IO.File]::OpenRead($part.File.FullName)
+              try {
+                [long]$partBytes = $sourceStream.Length
+                $totalSourceBytes += $partBytes
+                [void]$manifest.AppendLine("data/EN CY COM/$($part.Name)`t$partBytes bytes")
+
+                if ($partBytes -gt 0) {
+                  $sourceStream.Position = $partBytes - 1
+                  $lastByte = $sourceStream.ReadByte()
+                  $sourceStream.Position = 0
+                  $sourceStream.CopyTo($outputStream)
+                  if ($lastByte -ne 10) {
+                    $outputStream.WriteByte(10)
+                    $addedSeparatorNewlines++
+                  }
+                }
+              }
+              finally {
+                $sourceStream.Dispose()
+              }
+            }
+          }
+          finally {
+            $outputStream.Dispose()
+          }
+
+          [long]$outputBytes = (Get-Item -LiteralPath $outputPath).Length
+          [long]$expectedBytes = $totalSourceBytes + $addedSeparatorNewlines
+          if ($outputBytes -ne $expectedBytes -or $outputBytes -eq 0) {
+            throw "Merged output size validation failed. Expected $expectedBytes bytes, found $outputBytes."
+          }
+
+          $outputHash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [void]$manifest.AppendLine()
+          [void]$manifest.AppendLine("Total source bytes: $totalSourceBytes")
+          [void]$manifest.AppendLine("Separator newlines added: $addedSeparatorNewlines")
+          [void]$manifest.AppendLine("Merged output bytes: $outputBytes")
+          [void]$manifest.AppendLine("Merged SHA-256: $outputHash")
+
+          $compressedPath = Join-Path $env:GITHUB_WORKSPACE "britannica.txt.gz"
+          $inputStream = [System.IO.File]::OpenRead($outputPath)
+          $compressedStream = [System.IO.File]::Create($compressedPath)
+          try {
+            $gzipStream = [System.IO.Compression.GZipStream]::new(
+              $compressedStream,
+              [System.IO.Compression.CompressionLevel]::Fastest,
+              $true
+            )
+            try {
+              $inputStream.CopyTo($gzipStream)
+            }
+            finally {
+              $gzipStream.Dispose()
+            }
+          }
+          finally {
+            $inputStream.Dispose()
+            $compressedStream.Dispose()
+          }
+
+          $compressedBytes = (Get-Item -LiteralPath $compressedPath).Length
+          $compressedHash = (Get-FileHash -LiteralPath $compressedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          [void]$manifest.AppendLine("Compressed output bytes: $compressedBytes")
+          [void]$manifest.AppendLine("Compressed SHA-256: $compressedHash")
+          [System.IO.File]::WriteAllText(
+            $manifestPath,
+            $manifest.ToString(),
+            [System.Text.UTF8Encoding]::new($false)
           )
 
-          if [[ "${#parts[@]}" -ne 195 ]]; then
-            echo "Expected exactly 195 Britannica text parts, found ${#parts[@]}." >&2
-            exit 1
-          fi
-
-          : > "$output"
-          : > "$manifest"
-          printf 'Source files: %s\n' "${#parts[@]}" >> "$manifest"
-          printf 'Ordering: numeric filename order (ascending)\n\n' >> "$manifest"
-
-          total_source_bytes=0
-          added_separator_newlines=0
-          for part in "${parts[@]}"; do
-            bytes=$(stat -c '%s' "$part")
-            total_source_bytes=$((total_source_bytes + bytes))
-            printf '%s\t%s bytes\n' "$part" "$bytes" >> "$manifest"
-
-            cat "$part" >> "$output"
-            if [[ -s "$part" ]] && [[ "$(tail -c 1 "$part" | wc -l)" -eq 0 ]]; then
-              printf '\n' >> "$output"
-              added_separator_newlines=$((added_separator_newlines + 1))
-            fi
-          done
-
-          output_bytes=$(stat -c '%s' "$output")
-          expected_bytes=$((total_source_bytes + added_separator_newlines))
-          if [[ "$output_bytes" -ne "$expected_bytes" ]] || [[ ! -s "$output" ]]; then
-            echo "Merged output size validation failed." >&2
-            exit 1
-          fi
-
-          printf '\nTotal source bytes: %s\n' "$total_source_bytes" >> "$manifest"
-          printf 'Separator newlines added: %s\n' "$added_separator_newlines" >> "$manifest"
-          printf 'Merged output bytes: %s\n' "$output_bytes" >> "$manifest"
-          printf 'Merged SHA-256: %s\n' "$(sha256sum "$output" | cut -d ' ' -f 1)" >> "$manifest"
-
-          echo "Merged ${#parts[@]} files into $output"
-          echo "Source bytes: $total_source_bytes"
-          echo "Separator newlines added: $added_separator_newlines"
-          echo "Output bytes: $output_bytes"
-          echo "SHA-256: $(sha256sum "$output" | cut -d ' ' -f 1)"
-          echo "First source: ${parts[0]}"
-          echo "Last source: ${parts[${#parts[@]}-1]}"
-
-          gzip -1 -c "$output" > britannica.txt.gz
-          echo "Compressed output bytes: $(stat -c '%s' britannica.txt.gz)"
-          printf 'Compressed SHA-256: %s\n' "$(sha256sum britannica.txt.gz | cut -d ' ' -f 1)" >> "$manifest"
-          cat > britannica_README.txt <<'EOF'
+          $readme = @"
           This archive contains the complete merged Encyclopaedia Britannica, 11th Edition text.
           Decompress britannica.txt.gz to obtain britannica.txt.
           The 195 source parts were concatenated in ascending numeric filename order.
           Source file list, byte counts, separator handling, and checksums are in britannica_manifest.txt.
-          EOF
+          "@
+          [System.IO.File]::WriteAllText(
+            (Join-Path $env:GITHUB_WORKSPACE "britannica_README.txt"),
+            $readme,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          Write-Host "Merged $($parts.Count) files into britannica.txt"
+          Write-Host "Source bytes: $totalSourceBytes"
+          Write-Host "Separator newlines added: $addedSeparatorNewlines"
+          Write-Host "Output bytes: $outputBytes"
+          Write-Host "SHA-256: $outputHash"
+          Write-Host "First source: $($parts[0].Name)"
+          Write-Host "Last source: $($parts[-1].Name)"
+          Write-Host "Compressed output bytes: $compressedBytes"
+          Write-Host "Compressed SHA-256: $compressedHash"
 
       - name: Publish merged Britannica text
         uses: actions/upload-artifact@v4

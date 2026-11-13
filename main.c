@@ -533,9 +533,6 @@ int main(int argc, char** argv) {
         die("token ID mapping size overflow");
     MappedBuffer token_ids_mapping;
     memset(&token_ids_mapping, 0, sizeof(token_ids_mapping));
-#ifndef _WIN32
-    token_ids_mapping.file_descriptor = -1;
-#endif
     if (!mapped_buffer_create(&token_ids_mapping,
             corpus_len * sizeof(uint16_t)))
         die("could not create disk-backed token ID mapping");

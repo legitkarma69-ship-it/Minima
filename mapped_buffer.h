@@ -7,12 +7,8 @@
 typedef struct {
     void* data;
     size_t size;
-#ifdef _WIN32
     void* file_handle;
     void* mapping_handle;
-#else
-    int file_descriptor;
-#endif
 } MappedBuffer;
 
 /* Create a temporary, disk-backed memory mapping. The OS pages data in/out as

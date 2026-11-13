@@ -1,33 +1,15 @@
-#ifndef _WIN32
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE 200809L
-#endif
-#endif
-
 #include "mapped_buffer.h"
 
 #include <string.h>
 #include <stdint.h>
-#include <limits.h>
 
-#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#else
-#include <unistd.h>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <stdlib.h>
-#endif
 
 bool mapped_buffer_create(MappedBuffer* buffer, size_t size) {
     if (!buffer || size == 0) return false;
     memset(buffer, 0, sizeof(*buffer));
-#ifndef _WIN32
-    buffer->file_descriptor = -1;
-#endif
 
-#ifdef _WIN32
     char directory[MAX_PATH];
     char path[MAX_PATH];
     const DWORD directory_length = GetTempPathA(MAX_PATH, directory);
@@ -73,45 +55,14 @@ bool mapped_buffer_create(MappedBuffer* buffer, size_t size) {
     buffer->file_handle = file;
     buffer->mapping_handle = mapping;
     return true;
-#else
-    if (size > (size_t)LLONG_MAX) return false;
-    char path[] = "/tmp/minima-token-XXXXXX";
-    const int fd = mkstemp(path);
-    if (fd < 0) return false;
-    (void)unlink(path);
-    if (ftruncate(fd, (off_t)size) != 0) {
-        close(fd);
-        return false;
-    }
-    void* view = mmap(NULL, size, PROT_READ | PROT_WRITE,
-        MAP_SHARED, fd, 0);
-    if (view == MAP_FAILED) {
-        close(fd);
-        return false;
-    }
-    buffer->data = view;
-    buffer->size = size;
-    buffer->file_descriptor = fd;
-    return true;
-#endif
 }
 
 void mapped_buffer_destroy(MappedBuffer* buffer) {
     if (!buffer) return;
-#ifdef _WIN32
     if (buffer->data) UnmapViewOfFile(buffer->data);
     if (buffer->mapping_handle)
         CloseHandle((HANDLE)buffer->mapping_handle);
     if (buffer->file_handle)
         CloseHandle((HANDLE)buffer->file_handle);
-#else
-    if (buffer->data && buffer->size)
-        (void)munmap(buffer->data, buffer->size);
-    if (buffer->file_descriptor >= 0)
-        (void)close(buffer->file_descriptor);
-#endif
     memset(buffer, 0, sizeof(*buffer));
-#ifndef _WIN32
-    buffer->file_descriptor = -1;
-#endif
 }

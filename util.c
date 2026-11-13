@@ -3,13 +3,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#else
-#include <sys/stat.h>
-#include <time.h>
-#endif
 
 // -------------------- RNG --------------------
 
@@ -40,18 +35,12 @@ int rng_int(Rng* r, int lo, int hi) {
 // -------------------- File --------------------
 
 bool file_exists(const char* path) {
-#ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
     return (attr != INVALID_FILE_ATTRIBUTES &&
         !(attr & FILE_ATTRIBUTE_DIRECTORY));
-#else
-    struct stat st;
-    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
-#endif
 }
 
 size_t file_size(const char* path) {
-#ifdef _WIN32
     WIN32_FILE_ATTRIBUTE_DATA fad;
     if (!GetFileAttributesExA(path, GetFileExInfoStandard, &fad))
         return 0;
@@ -59,11 +48,6 @@ size_t file_size(const char* path) {
     ul.HighPart = fad.nFileSizeHigh;
     ul.LowPart = fad.nFileSizeLow;
     return (size_t)ul.QuadPart;
-#else
-    struct stat st;
-    if (stat(path, &st) != 0) return 0;
-    return (size_t)st.st_size;
-#endif
 }
 
 bool read_entire_file(const char* path, void* buf, size_t buf_size, size_t* out_read) {
@@ -78,18 +62,12 @@ bool read_entire_file(const char* path, void* buf, size_t buf_size, size_t* out_
 // -------------------- Timing --------------------
 
 double now_seconds(void) {
-#ifdef _WIN32
     static LARGE_INTEGER freq = { 0 };
     if (freq.QuadPart == 0)
         QueryPerformanceFrequency(&freq);
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
     return (double)t.QuadPart / (double)freq.QuadPart;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
-#endif
 }
 
 // -------------------- Fatal --------------------

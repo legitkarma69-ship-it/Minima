@@ -6,14 +6,10 @@
 #include <limits.h>
 #include <time.h>
 
-#ifdef _WIN32
 #include <io.h>
 #include <windows.h>
 #ifdef _MSC_VER
 #include <intrin.h>
-#endif
-#else
-#include <unistd.h>
 #endif
 
 // ------------------------------------------------------------------
@@ -1390,21 +1386,13 @@ bool tokenizer_save(const Tokenizer* tok, const char* path) {
             (size_t)tok->n_merges, f) == (size_t)tok->n_merges;
     if (ok && fflush(f) != 0) ok = false;
     if (ok) {
-#ifdef _WIN32
         if (_commit(_fileno(f)) != 0) ok = false;
-#else
-        if (fsync(fileno(f)) != 0) ok = false;
-#endif
     }
     if (fclose(f) != 0) ok = false;
 
     if (ok) {
-#ifdef _WIN32
         ok = MoveFileExA(temp_path, path,
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
-#else
-        ok = rename(temp_path, path) == 0;
-#endif
     }
     if (!ok) remove(temp_path);
     free(temp_path);

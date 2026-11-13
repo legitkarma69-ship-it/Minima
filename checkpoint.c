@@ -6,10 +6,8 @@
 #include <math.h>
 #include <stdlib.h>
 
-#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#endif
 
 #define CHECKPOINT_MAGIC_V4 "MINIMA04"
 #define CHECKPOINT_MAGIC_V5 "MINIMA05"
@@ -149,18 +147,11 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         return false;
     }
 
-#ifdef _WIN32
     if (!MoveFileExA(temp_path, path,
         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         remove(temp_path);
         return false;
     }
-#else
-    if (rename(temp_path, path) != 0) {
-        remove(temp_path);
-        return false;
-    }
-#endif
     return true;
 
 fail:

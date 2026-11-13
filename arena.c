@@ -1,19 +1,15 @@
 #include "arena.h"
-#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 
-#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#endif
 
 bool arena_init(Arena* a, size_t size) {
     if (!a || size == 0) return false;
 
     memset(a, 0, sizeof(*a));
 
-#ifdef _WIN32
     SYSTEM_INFO info;
     GetSystemInfo(&info);
     if (info.dwPageSize == 0) return false;
@@ -24,12 +20,6 @@ bool arena_init(Arena* a, size_t size) {
 
     a->page_size = (size_t)info.dwPageSize;
     a->committed = 0;
-#else
-    a->base = (uint8_t*)malloc(size);
-    if (!a->base) return false;
-    a->page_size = 4096;
-    a->committed = size;
-#endif
 
     a->size = size;
     a->used = 0;
@@ -40,11 +30,7 @@ bool arena_init(Arena* a, size_t size) {
 void arena_free(Arena* a) {
     if (!a || !a->base) return;
 
-#ifdef _WIN32
     VirtualFree(a->base, 0, MEM_RELEASE);
-#else
-    free(a->base);
-#endif
 
     memset(a, 0, sizeof(*a));
 }
@@ -59,7 +45,6 @@ void* arena_alloc(Arena* a, size_t n) {
 
     const size_t end = offset + n;
 
-#ifdef _WIN32
     if (end > a->committed) {
         const size_t page = a->page_size;
         if (page == 0 || end > SIZE_MAX - (page - 1)) return NULL;
@@ -74,7 +59,6 @@ void* arena_alloc(Arena* a, size_t n) {
             a->committed = commit_end;
         }
     }
-#endif
 
     void* ptr = a->base + offset;
     a->used = end;
