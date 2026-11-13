@@ -51,13 +51,27 @@ bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len,
     int vocab_size);
 
+/* Train from concatenated byte segments without counting pairs across the
+   supplied exclusive-end offsets. Offsets must be strictly increasing and
+   the final offset must equal sample_len. */
+bool tokenizer_train_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count,
+    int vocab_size);
+
 /* Slow recounting trainer retained as a correctness reference. */
 bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab);
+bool tokenizer_train_reference_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab);
 
 /* Incremental linked-sequence / indexed-heap trainer under equivalence test. */
 bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab);
+bool tokenizer_train_incremental_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab);
 
 // ---------- Encode / Decode ----------
 // Encode text → token ids. Returns number of tokens written, 0 for empty input,

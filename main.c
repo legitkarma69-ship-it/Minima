@@ -334,22 +334,28 @@ int main(int argc, char** argv) {
 
     uint8_t* tokenizer_sample = NULL;
     size_t tokenizer_sample_len = 0;
+    size_t tokenizer_sample_segment_ends[CORPUS_MAX_SAMPLE_SEGMENTS];
+    size_t tokenizer_sample_segment_count = 0;
     size_t tokenizer_sample_files = 0;
     size_t tokenizer_source_bytes = 0;
 
     if (!options.chat_mode && !resume && !options.use_existing_tokenizer) {
-        CorpusLoadResult sample_result = corpus_sample_files(&temp,
+        CorpusLoadResult sample_result = corpus_sample_files_segmented(&temp,
             corpus_paths, corpus_path_count, options.tokenizer_sample_bytes,
             options.tokenizer_spread, &tokenizer_sample,
-            &tokenizer_sample_len, &tokenizer_sample_files,
+            &tokenizer_sample_len, tokenizer_sample_segment_ends,
+            CORPUS_MAX_SAMPLE_SEGMENTS, &tokenizer_sample_segment_count,
+            &tokenizer_sample_files,
             &tokenizer_source_bytes);
 
         if (sample_result == CORPUS_LOAD_EMPTY && default_paths) {
             corpus_paths = root_paths;
-            sample_result = corpus_sample_files(&temp, corpus_paths,
+            sample_result = corpus_sample_files_segmented(&temp, corpus_paths,
                 corpus_path_count, options.tokenizer_sample_bytes,
                 options.tokenizer_spread, &tokenizer_sample,
-                &tokenizer_sample_len, &tokenizer_sample_files,
+                &tokenizer_sample_len, tokenizer_sample_segment_ends,
+                CORPUS_MAX_SAMPLE_SEGMENTS, &tokenizer_sample_segment_count,
+                &tokenizer_sample_files,
                 &tokenizer_source_bytes);
         }
         if (sample_result == CORPUS_LOAD_ERROR)
@@ -359,8 +365,9 @@ int main(int argc, char** argv) {
         if (sample_result == CORPUS_LOAD_OK) {
             printf("Tokenizer sample sources: %zu files, %zu source bytes\n",
                 tokenizer_sample_files, tokenizer_source_bytes);
-            printf("Tokenizer training sample: %zu bytes (source-balanced, %s)\n",
+            printf("Tokenizer training sample: %zu bytes in %zu independent pieces (source-balanced, %s)\n",
                 tokenizer_sample_len,
+                tokenizer_sample_segment_count,
                 options.tokenizer_spread ? "spread" : "prefix");
         }
     }
@@ -441,6 +448,8 @@ int main(int argc, char** argv) {
             tokenizer_sample = (uint8_t*)arena_alloc(&arena, tokenizer_sample_len);
             if (!tokenizer_sample) die("tokenizer sample allocation failed");
             memcpy(tokenizer_sample, corpus, tokenizer_sample_len);
+            tokenizer_sample_segment_ends[0] = tokenizer_sample_len;
+            tokenizer_sample_segment_count = 1;
         }
 
         const size_t sample_len = tokenizer_sample_len;
@@ -448,8 +457,9 @@ int main(int argc, char** argv) {
         printf("Estimated BPE workspace: approximately %.1f MiB (conservative)\n",
             ((double)sample_len * 230.0 + 3.0 * 1024.0 * 1024.0) /
                 (1024.0 * 1024.0));
-        if (!tokenizer_train(&tok, &arena, tokenizer_sample,
-            sample_len, options.model.vocab_size))
+        if (!tokenizer_train_segments(&tok, &arena, tokenizer_sample,
+            sample_len, tokenizer_sample_segment_ends,
+            tokenizer_sample_segment_count, options.model.vocab_size))
             die("tokenizer_train failed");
         if (tok.vocab_size != options.model.vocab_size)
             die("BPE stopped at vocabulary %d before the configured model vocabulary %d; the sample may not contain enough repeated pairs or eligible merges",

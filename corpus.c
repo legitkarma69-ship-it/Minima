@@ -6,8 +6,6 @@
 #include <stdint.h>
 #include <limits.h>
 
-#define CORPUS_MAX_PATHS 32
-
 static bool is_text_whitespace(uint8_t c) {
     return c == ' ' || c == '\t' || c == '\n' ||
         c == '\r' || c == '\v' || c == '\f';
@@ -66,17 +64,21 @@ typedef struct {
    The budget is shared evenly across sources; undersized sources return their
    unused share to the remaining sources instead of letting a giant file
    consume the entire tokenizer sample. */
-CorpusLoadResult corpus_sample_files(Arena* arena,
+CorpusLoadResult corpus_sample_files_segmented(Arena* arena,
     const char* const* paths, size_t path_count, size_t sample_cap,
     bool spread, uint8_t** sample_out, size_t* sample_len_out,
+    size_t* segment_ends_out, size_t segment_capacity,
+    size_t* segment_count_out,
     size_t* files_sampled_out, size_t* source_bytes_out) {
     if (!arena || !paths || path_count == 0 ||
         path_count > CORPUS_MAX_PATHS || sample_cap == 0 ||
-        !sample_out || !sample_len_out)
+        !sample_out || !sample_len_out || !segment_ends_out ||
+        !segment_count_out)
         return CORPUS_LOAD_ERROR;
 
     *sample_out = NULL;
     *sample_len_out = 0;
+    *segment_count_out = 0;
     if (files_sampled_out) *files_sampled_out = 0;
     if (source_bytes_out) *source_bytes_out = 0;
 
@@ -171,12 +173,25 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
     }
 
     size_t actual_bytes = 0;
+    size_t required_segments = 0;
+    size_t sampled_sources = 0;
     for (size_t i = 0; i < file_count; i++) {
         if (actual_bytes > SIZE_MAX - files[i].quota)
             return CORPUS_LOAD_ERROR;
         actual_bytes += files[i].quota;
+        if (files[i].quota == 0) continue;
+        const size_t chunks = spread && files[i].quota > 1 &&
+            files[i].quota < files[i].usable_bytes
+            ? (files[i].quota < 64u ? files[i].quota : 64u) : 1u;
+        if (sampled_sources > 0) required_segments++;
+        if (required_segments > SIZE_MAX - chunks)
+            return CORPUS_LOAD_ERROR;
+        required_segments += chunks;
+        sampled_sources++;
     }
     if (actual_bytes == 0) return CORPUS_LOAD_EMPTY;
+    if (required_segments > segment_capacity)
+        return CORPUS_LOAD_ERROR;
 
     const size_t allocation_size = actual_bytes + 2 * (file_count - 1) + 1;
     uint8_t* sample = (uint8_t*)arena_alloc(arena, allocation_size);
@@ -202,6 +217,7 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
         if (sampled_files > 0) {
             sample[written++] = '\n';
             sample[written++] = '\n';
+            segment_ends_out[(*segment_count_out)++] = written;
         }
 
         const size_t chunks = spread && quota > 1 &&
@@ -225,6 +241,7 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
                 return CORPUS_LOAD_ERROR;
             }
             written += got;
+            segment_ends_out[(*segment_count_out)++] = written;
         }
         fclose(f);
         files[i].sampled = quota;
@@ -239,6 +256,18 @@ CorpusLoadResult corpus_sample_files(Arena* arena,
     if (files_sampled_out) *files_sampled_out = sampled_files;
     if (source_bytes_out) *source_bytes_out = source_total;
     return CORPUS_LOAD_OK;
+}
+
+CorpusLoadResult corpus_sample_files(Arena* arena,
+    const char* const* paths, size_t path_count, size_t sample_cap,
+    bool spread, uint8_t** sample_out, size_t* sample_len_out,
+    size_t* files_sampled_out, size_t* source_bytes_out) {
+    size_t segment_ends[CORPUS_MAX_SAMPLE_SEGMENTS];
+    size_t segment_count = 0;
+    return corpus_sample_files_segmented(arena, paths, path_count,
+        sample_cap, spread, sample_out, sample_len_out, segment_ends,
+        CORPUS_MAX_SAMPLE_SEGMENTS, &segment_count,
+        files_sampled_out, source_bytes_out);
 }
 
 CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,

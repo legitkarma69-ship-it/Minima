@@ -12,6 +12,7 @@ Minima.exe --retrain-tokenizer-only --tokenizer-sample-bytes 1048576 ^
 - The default tokenizer sample is 1 MiB.
 - The sample budget is shared evenly across the selected source files. A small source can use all of its available text; its unused share is redistributed to the other sources.
 - `spread` takes up to 64 evenly spaced chunks from each source. `prefix` samples the beginning of each source.
+- Each sampled chunk and each inter-file separator is trained as an independent piece. The tokenizer never counts a byte pair across distant spread-sample chunks or across source-file boundaries.
 - The sampler reads only the selected chunks. Tokenizer-only rebuilds do not load the full corpus into the permanent arena.
 - Merge progress and elapsed time are printed every 50 merges.
 

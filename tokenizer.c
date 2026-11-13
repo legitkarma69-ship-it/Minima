@@ -121,12 +121,38 @@ static uint16_t tokenizer_find_merge_rank(const Tokenizer* tok,
 // Training
 // ------------------------------------------------------------------
 
-bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
-    const uint8_t* sample, size_t sample_len,
-    int target_vocab) {
+static bool tokenizer_segments_valid(const uint8_t* sample,
+    size_t sample_len, const size_t* segment_ends, size_t segment_count) {
+    if (!sample || sample_len == 0 || !segment_ends || segment_count == 0 ||
+        segment_count > sample_len)
+        return false;
+    size_t previous_end = 0;
+    for (size_t i = 0; i < segment_count; i++) {
+        if (segment_ends[i] <= previous_end ||
+            segment_ends[i] > sample_len)
+            return false;
+        previous_end = segment_ends[i];
+    }
+    return previous_end == sample_len;
+}
 
-    if (!tok || !arena || !sample || sample_len == 0 ||
-        target_vocab < 260 || target_vocab > TOK_MAX_VOCAB)
+bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len, int target_vocab) {
+    const size_t segment_end = sample_len;
+    return tokenizer_train_reference_segments(tok, arena, sample, sample_len,
+        &segment_end, 1, target_vocab);
+}
+
+bool tokenizer_train_reference_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab) {
+    if (!tok || !arena ||
+        !tokenizer_segments_valid(sample, sample_len, segment_ends,
+            segment_count) ||
+        target_vocab < 260 || target_vocab > TOK_MAX_VOCAB ||
+        sample_len > SIZE_MAX / sizeof(size_t) ||
+        sample_len > SIZE_MAX / 2 ||
+        sample_len > SIZE_MAX / sizeof(uint16_t) - 16)
         return false;
 
     memset(tok, 0, sizeof(*tok));
@@ -156,6 +182,14 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
     size_t max_tokens = sample_len + 16;
     uint16_t* ids = arena_alloc(arena, max_tokens * sizeof(uint16_t));
     if (!ids) die("arena OOM for training ids");
+    size_t* segment_lengths = (size_t*)arena_alloc(arena,
+        segment_count * sizeof(size_t));
+    if (!segment_lengths) die("arena OOM for training segment lengths");
+    size_t previous_end = 0;
+    for (size_t i = 0; i < segment_count; i++) {
+        segment_lengths[i] = segment_ends[i] - previous_end;
+        previous_end = segment_ends[i];
+    }
 
     // Initial: every byte becomes its own token
     size_t n = 0;
@@ -197,41 +231,47 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
         occupied_count = 0;
 
         // Count pairs
-        for (size_t i = 0; i + 1 < n; i++) {
-            uint16_t a = ids[i];
-            uint16_t b = ids[i + 1];
+        size_t segment_start = 0;
+        for (size_t segment = 0; segment < segment_count; segment++) {
+            const size_t segment_end = segment_start +
+                segment_lengths[segment];
+            for (size_t i = segment_start; i + 1 < segment_end; i++) {
+                uint16_t a = ids[i];
+                uint16_t b = ids[i + 1];
 
-            // Keep every learned token within TOK_MAX_TOKEN_LEN.
-            int len_a = tok->token_len[a];
-            int len_b = tok->token_len[b];
-            if (len_a <= 0 || len_b <= 0 ||
-                len_a > TOK_MAX_TOKEN_LEN - len_b)
-                continue;
+                // Keep every learned token within TOK_MAX_TOKEN_LEN.
+                int len_a = tok->token_len[a];
+                int len_b = tok->token_len[b];
+                if (len_a <= 0 || len_b <= 0 ||
+                    len_a > TOK_MAX_TOKEN_LEN - len_b)
+                    continue;
 
-            size_t h = pair_hash(a, b, pair_hash_size);
-            // Linear probing must either find this pair or an empty slot.
-            // Probe the dynamically sized table until the pair or an empty slot is found.
-            bool inserted = false;
-            const uint32_t key = ((uint32_t)a << 16) | b;
-            for (size_t probe = 0; probe < pair_hash_size; probe++) {
-                size_t slot = (h + probe) & (pair_hash_size - 1);
-                if (table[slot].count == 0) {
-                    table[slot].key = key;
-                    table[slot].count = 1;
-                    occupied_slots[occupied_count++] = slot;
-                    inserted = true;
-                    break;
+                size_t h = pair_hash(a, b, pair_hash_size);
+                // Linear probing must either find this pair or an empty slot.
+                // Probe the dynamically sized table until the pair or an empty slot is found.
+                bool inserted = false;
+                const uint32_t key = ((uint32_t)a << 16) | b;
+                for (size_t probe = 0; probe < pair_hash_size; probe++) {
+                    size_t slot = (h + probe) & (pair_hash_size - 1);
+                    if (table[slot].count == 0) {
+                        table[slot].key = key;
+                        table[slot].count = 1;
+                        occupied_slots[occupied_count++] = slot;
+                        inserted = true;
+                        break;
+                    }
+                    if (table[slot].key == key) {
+                        if (table[slot].count == INT32_MAX)
+                            return false;
+                        table[slot].count++;
+                        inserted = true;
+                        break;
+                    }
                 }
-                if (table[slot].key == key) {
-                    if (table[slot].count == INT32_MAX)
-                        return false;
-                    table[slot].count++;
-                    inserted = true;
-                    break;
-                }
+                if (!inserted)
+                    return false;
             }
-            if (!inserted)
-                return false;
+            segment_start = segment_end;
         }
 
         // Find most frequent pair
@@ -274,15 +314,25 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
         tok->n_merges++;
 
         // Replace all occurrences of the pair in the id stream
+        size_t old_segment_start = 0;
         size_t w = 0;
-        for (size_t r = 0; r < n; ) {
-            if (r + 1 < n && ids[r] == best_left && ids[r + 1] == best_right) {
-                ids[w++] = (uint16_t)new_id;
-                r += 2;
+        for (size_t segment = 0; segment < segment_count; segment++) {
+            const size_t old_segment_end = old_segment_start +
+                segment_lengths[segment];
+            size_t r = old_segment_start;
+            size_t new_segment_length = 0;
+            while (r < old_segment_end) {
+                if (r + 1 < old_segment_end && ids[r] == best_left &&
+                    ids[r + 1] == best_right) {
+                    ids[w++] = (uint16_t)new_id;
+                    r += 2;
+                } else {
+                    ids[w++] = ids[r++];
+                }
+                new_segment_length++;
             }
-            else {
-                ids[w++] = ids[r++];
-            }
+            segment_lengths[segment] = new_segment_length;
+            old_segment_start = old_segment_end;
         }
         n = w;
 
@@ -303,8 +353,16 @@ bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
    path remains available for regression tests and benchmark comparisons. */
 bool tokenizer_train(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab) {
-    return tokenizer_train_incremental(tok, arena, sample, sample_len,
-        target_vocab);
+    const size_t segment_end = sample_len;
+    return tokenizer_train_segments(tok, arena, sample, sample_len,
+        &segment_end, 1, target_vocab);
+}
+
+bool tokenizer_train_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab) {
+    return tokenizer_train_incremental_segments(tok, arena, sample,
+        sample_len, segment_ends, segment_count, target_vocab);
 }
 
 
@@ -596,7 +654,17 @@ static bool bpe_reference_tie_winner(const BpePairState* states,
 
 bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
     const uint8_t* sample, size_t sample_len, int target_vocab) {
-    if (!tok || !arena || !sample || sample_len == 0 ||
+    const size_t segment_end = sample_len;
+    return tokenizer_train_incremental_segments(tok, arena, sample,
+        sample_len, &segment_end, 1, target_vocab);
+}
+
+bool tokenizer_train_incremental_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab) {
+    if (!tok || !arena ||
+        !tokenizer_segments_valid(sample, sample_len, segment_ends,
+            segment_count) ||
         sample_len > INT32_MAX ||
         target_vocab < 260 || target_vocab > TOK_MAX_VOCAB ||
         sample_len > SIZE_MAX / sizeof(BpeNode) ||
@@ -674,22 +742,32 @@ bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
             reference_table_size * sizeof(BpeReferenceSlot));
     if (!reference_table) goto fail;
 
-    for (uint32_t i = 0; i < node_count; i++) {
-        nodes[i].id = (uint16_t)(TOK_BYTE_START + sample[i]);
-        nodes[i].active = 1;
-        nodes[i].prev = i == 0 ? BPE_NONE : i - 1;
-        nodes[i].next = i + 1 == node_count ? BPE_NONE : i + 1;
-        nodes[i].occ_prev = BPE_NONE;
-        nodes[i].occ_next = BPE_NONE;
-        nodes[i].pair_slot = BPE_NONE;
+    uint32_t segment_start = 0;
+    for (size_t segment = 0; segment < segment_count; segment++) {
+        const uint32_t segment_end = (uint32_t)segment_ends[segment];
+        for (uint32_t i = segment_start; i < segment_end; i++) {
+            nodes[i].id = (uint16_t)(TOK_BYTE_START + sample[i]);
+            nodes[i].active = 1;
+            nodes[i].prev = i == segment_start ? BPE_NONE : i - 1;
+            nodes[i].next = i + 1 == segment_end ? BPE_NONE : i + 1;
+            nodes[i].occ_prev = BPE_NONE;
+            nodes[i].occ_next = BPE_NONE;
+            nodes[i].pair_slot = BPE_NONE;
+        }
+        segment_start = segment_end;
     }
 
     uint32_t heap_count = 0;
-    for (uint32_t i = 0; i + 1 < node_count; i++) {
-        if (!bpe_pair_add(nodes, tok, states, state_table_size,
-                heap, &heap_count, i, first_slot_by_node,
-                first_occurrence_bits))
-            goto fail;
+    segment_start = 0;
+    for (size_t segment = 0; segment < segment_count; segment++) {
+        const uint32_t segment_end = (uint32_t)segment_ends[segment];
+        for (uint32_t i = segment_start; i + 1 < segment_end; i++) {
+            if (!bpe_pair_add(nodes, tok, states, state_table_size,
+                    heap, &heap_count, i, first_slot_by_node,
+                    first_occurrence_bits))
+                goto fail;
+        }
+        segment_start = segment_end;
     }
 
     uint32_t reference_generation = 0;
