@@ -13,7 +13,7 @@ typedef struct {
     float* x_norm;          // [batch * seq, dim]
 
     // Per-layer forward caches.
-    float* qkv;             // [layers, batch * seq, 3 * dim]
+    float* qkv;             // [layers, batch * seq, qkv_dim]
     float* attn_out;        // [layers, batch * seq, dim]
     float* ffn_buf;         // [layers, batch * seq, ffn_dim], SwiGLU output
     float* up_buf;          // [layers, batch * seq, ffn_dim], up projection
@@ -29,7 +29,7 @@ typedef struct {
     float* dx_tmp;          // [batch * seq, dim]
     float* dx_norm;         // [batch * seq, dim]
     float* dattn;          // [batch * seq, dim]
-    float* dqkv;            // [batch * seq, 3 * dim]
+    float* dqkv;            // [batch * seq, qkv_dim]
     float* dffn;            // [batch * seq, ffn_dim]
     float* dup;             // [batch * seq, ffn_dim]
     float* dgate;           // [batch * seq, ffn_dim]

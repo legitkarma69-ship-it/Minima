@@ -93,8 +93,7 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
 
     // Sizes (must match model_init exactly)
     size_t tok_n = (size_t)model->vocab_size * model->dim;
-    size_t pos_n = (size_t)model->max_seq * model->dim;
-    size_t qkv_n = (size_t)model->n_layers * 3 * model->dim * model->dim;
+    size_t qkv_n = (size_t)model->n_layers * model->qkv_dim * model->dim;
     size_t proj_n = (size_t)model->n_layers * model->dim * model->dim;
     size_t up_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
     size_t gate_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
@@ -104,7 +103,6 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
 
     // Allocate first moments
     opt->m_tok_emb = alloc_moment(arena, tok_n);
-    opt->m_pos_emb = alloc_moment(arena, pos_n);
     opt->m_attn_qkv = alloc_moment(arena, qkv_n);
     opt->m_attn_proj = alloc_moment(arena, proj_n);
     opt->m_ffn_up = alloc_moment(arena, up_n);
@@ -116,7 +114,6 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
 
     // Allocate second moments
     opt->v_tok_emb = alloc_moment(arena, tok_n);
-    opt->v_pos_emb = alloc_moment(arena, pos_n);
     opt->v_attn_qkv = alloc_moment(arena, qkv_n);
     opt->v_attn_proj = alloc_moment(arena, proj_n);
     opt->v_ffn_up = alloc_moment(arena, up_n);
@@ -126,7 +123,7 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
     opt->v_rms2_scale = alloc_moment(arena, rms_n);
     opt->v_rms_final_scale = alloc_moment(arena, final_n);
 
-    opt->n_params = tok_n + pos_n + qkv_n + proj_n + up_n + gate_n +
+    opt->n_params = tok_n + qkv_n + proj_n + up_n + gate_n +
         down_n + rms_n * 2 + final_n;
 
     return true;
@@ -148,8 +145,7 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
                      bias1, bias2)
 
     size_t tok_n = (size_t)model->vocab_size * model->dim;
-    size_t pos_n = (size_t)model->max_seq * model->dim;
-    size_t qkv_n = (size_t)model->n_layers * 3 * model->dim * model->dim;
+    size_t qkv_n = (size_t)model->n_layers * model->qkv_dim * model->dim;
     size_t proj_n = (size_t)model->n_layers * model->dim * model->dim;
     size_t up_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
     size_t gate_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
@@ -157,7 +153,6 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
     size_t rms_n = (size_t)model->n_layers * model->dim;
 
     UPDATE(tok_emb, tok_n);
-    UPDATE(pos_emb, pos_n);
     UPDATE(attn_qkv, qkv_n);
     UPDATE(attn_proj, proj_n);
     UPDATE(ffn_up, up_n);

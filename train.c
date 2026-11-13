@@ -111,7 +111,7 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
         options.tokenizer_spread?"spread":"prefix",options.batch_size,options.sequence_length);
     printf("Estimated activations + logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
         (double)options.activation_bytes/(1024.0*1024.0),
-        2.0*model->n_layers*model->max_seq*model->dim*sizeof(float)/(1024.0*1024.0));
+        2.0*model->n_layers*model->max_seq*model->kv_dim*sizeof(float)/(1024.0*1024.0));
 
     double train_loss_sum = 0.0;
     int train_loss_count = 0;

@@ -12,12 +12,14 @@ typedef struct {
     int max_seq;
     int n_layers;
     int n_heads;
+    int n_kv_heads;
     int head_dim;
     int dim;
+    int kv_dim;
 
-    // [n_layers, max_seq, dim] for K and V (we store the full projected K/V)
-    float* k_cache;   // [n_layers, max_seq, dim]
-    float* v_cache;   // [n_layers, max_seq, dim]
+    // [n_layers, max_seq, kv_dim] for compact grouped keys and values.
+    float* k_cache;
+    float* v_cache;
     int    pos;       // current length
 } KVCache;
 

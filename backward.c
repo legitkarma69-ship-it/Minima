@@ -1,4 +1,5 @@
 #include "backward.h"
+#include "rotary.h"
 #include "util.h"
 #include <math.h>
 #include <string.h>
@@ -11,15 +12,14 @@
 
 void gradients_zero(Gradients* g, const Model* model) {
     const size_t tok_n = (size_t)model->vocab_size * model->dim;
-    const size_t pos_n = (size_t)model->max_seq * model->dim;
-    const size_t qkv_n = (size_t)model->n_layers * 3 * model->dim * model->dim;
+    const size_t qkv_n = (size_t)model->n_layers * model->qkv_dim *
+        model->dim;
     const size_t proj_n = (size_t)model->n_layers * model->dim * model->dim;
     const size_t up_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
     const size_t down_n = (size_t)model->n_layers * model->dim * model->ffn_dim;
     const size_t rms_n = (size_t)model->n_layers * model->dim;
 
     memset(g->tok_emb, 0, tok_n * sizeof(float));
-    memset(g->pos_emb, 0, pos_n * sizeof(float));
     memset(g->attn_qkv, 0, qkv_n * sizeof(float));
     memset(g->attn_proj, 0, proj_n * sizeof(float));
     memset(g->ffn_up, 0, up_n * sizeof(float));
@@ -38,10 +38,10 @@ bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
     const size_t dim = (size_t)model->dim;
     const size_t layers = (size_t)model->n_layers;
     const size_t ffn = (size_t)model->ffn_dim;
+    const size_t qkv_dim = (size_t)model->qkv_dim;
     const size_t expected_params =
         (size_t)model->vocab_size * dim +
-        (size_t)model->max_seq * dim +
-        layers * 3 * dim * dim +
+        layers * qkv_dim * dim +
         layers * dim * dim +
         layers * ffn * dim * 2 +
         layers * dim * ffn +
@@ -57,14 +57,16 @@ bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
     g->dim = model->dim;
     g->n_layers = model->n_layers;
     g->n_heads = model->n_heads;
+    g->n_kv_heads = model->n_kv_heads;
     g->head_dim = model->head_dim;
+    g->kv_dim = model->kv_dim;
+    g->qkv_dim = model->qkv_dim;
     g->ffn_dim = model->ffn_dim;
     g->max_seq = model->max_seq;
     g->weight_bytes = model->weight_bytes;
 
     const size_t tok_n = (size_t)model->vocab_size * dim;
-    const size_t pos_n = (size_t)model->max_seq * dim;
-    const size_t qkv_n = layers * 3 * dim * dim;
+    const size_t qkv_n = layers * qkv_dim * dim;
     const size_t proj_n = layers * dim * dim;
     const size_t up_n = layers * ffn * dim;
     const size_t down_n = layers * dim * ffn;
@@ -73,7 +75,6 @@ bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
     /* Gradient buffers need only zero-filled storage. Calling model_init_config
        here used to generate Gaussian weights and then immediately erase them. */
     g->tok_emb = (float*)arena_alloc_zero(arena, tok_n * sizeof(float));
-    g->pos_emb = (float*)arena_alloc_zero(arena, pos_n * sizeof(float));
     g->attn_qkv = (float*)arena_alloc_zero(arena, qkv_n * sizeof(float));
     g->attn_proj = (float*)arena_alloc_zero(arena, proj_n * sizeof(float));
     g->ffn_up = (float*)arena_alloc_zero(arena, up_n * sizeof(float));
@@ -105,7 +106,10 @@ bool gradients_check_layout(const Gradients* g, const Model* model,
         g->dim != model->dim ||
         g->n_layers != model->n_layers ||
         g->n_heads != model->n_heads ||
+        g->n_kv_heads != model->n_kv_heads ||
         g->head_dim != model->head_dim ||
+        g->kv_dim != model->kv_dim ||
+        g->qkv_dim != model->qkv_dim ||
         g->ffn_dim != model->ffn_dim ||
         g->max_seq != model->max_seq ||
         g->weight_bytes != model->weight_bytes ||
@@ -115,14 +119,13 @@ bool gradients_check_layout(const Gradients* g, const Model* model,
         return false;
 
     float* tensors[] = {
-        g->tok_emb, g->pos_emb, g->attn_qkv, g->attn_proj,
+        g->tok_emb, g->attn_qkv, g->attn_proj,
         g->ffn_up, g->ffn_gate, g->ffn_down,
         g->rms1_scale, g->rms2_scale, g->rms_final_scale
     };
     const size_t counts[] = {
         (size_t)model->vocab_size * model->dim,
-        (size_t)model->max_seq * model->dim,
-        (size_t)model->n_layers * 3 * model->dim * model->dim,
+        (size_t)model->n_layers * model->qkv_dim * model->dim,
         (size_t)model->n_layers * model->dim * model->dim,
         (size_t)model->n_layers * model->ffn_dim * model->dim,
         (size_t)model->n_layers * model->ffn_dim * model->dim,
@@ -293,26 +296,33 @@ static float silu_derivative(float x) {
 
 static void attention_backward(float* dqkv, const float* qkv,
     const float* dout_attn, float* scores, int batch, int seq, int dim,
-    int n_heads, int head_dim) {
+    int n_heads, int n_kv_heads, int head_dim,
+    int kv_dim, int qkv_dim) {
 
     const float scale = 1.0f / sqrtf((float)head_dim);
 
     for (int b = 0; b < batch; b++) {
         for (int h = 0; h < n_heads; h++) {
-            const float* q_base = qkv + (size_t)b * seq * 3 * dim + h * head_dim;
-            const float* k_base = q_base + dim;
-            const float* v_base = k_base + dim;
+            const int kv_head = h / (n_heads / n_kv_heads);
+            const float* token_base = qkv + (size_t)b * seq * qkv_dim;
+            const float* q_base = token_base + h * head_dim;
+            const float* k_base = token_base + dim + kv_head * head_dim;
+            const float* v_base = token_base + dim + kv_dim +
+                kv_head * head_dim;
 
-            float* dq_base = dqkv + (size_t)b * seq * 3 * dim + h * head_dim;
-            float* dk_base = dq_base + dim;
-            float* dv_base = dk_base + dim;
+            float* dq_base = dqkv + (size_t)b * seq * qkv_dim +
+                h * head_dim;
+            float* dk_base = dqkv + (size_t)b * seq * qkv_dim +
+                dim + kv_head * head_dim;
+            float* dv_base = dqkv + (size_t)b * seq * qkv_dim +
+                dim + kv_dim + kv_head * head_dim;
 
             for (int qi = 0; qi < seq; qi++) {
                 float max_score = -1.0e30f;
                 for (int kj = 0; kj <= qi; kj++) {
                     float dot = 0.0f;
-                    const float* q = q_base + (size_t)qi * 3 * dim;
-                    const float* k = k_base + (size_t)kj * 3 * dim;
+                    const float* q = q_base + (size_t)qi * qkv_dim;
+                    const float* k = k_base + (size_t)kj * qkv_dim;
                     for (int d = 0; d < head_dim; d++)
                         dot += q[d] * k[d];
                     scores[kj] = dot * scale;
@@ -335,29 +345,29 @@ static void attention_backward(float* dqkv, const float* qkv,
                    second sequence-sized scratch array. */
                 float weighted_sum = 0.0f;
                 for (int kj = 0; kj <= qi; kj++) {
-                    const float* v = v_base + (size_t)kj * 3 * dim;
+                    const float* v = v_base + (size_t)kj * qkv_dim;
                     float value_dot = 0.0f;
                     for (int d = 0; d < head_dim; d++)
                         value_dot += do_h[d] * v[d];
                     weighted_sum += scores[kj] * value_dot;
 
-                    float* dv = dv_base + (size_t)kj * 3 * dim;
+                    float* dv = dv_base + (size_t)kj * qkv_dim;
                     for (int d = 0; d < head_dim; d++)
                         dv[d] += scores[kj] * do_h[d];
                 }
 
                 for (int kj = 0; kj <= qi; kj++) {
-                    const float* v = v_base + (size_t)kj * 3 * dim;
+                    const float* v = v_base + (size_t)kj * qkv_dim;
                     float value_dot = 0.0f;
                     for (int d = 0; d < head_dim; d++)
                         value_dot += do_h[d] * v[d];
                     const float ds = scores[kj] *
                         (value_dot - weighted_sum) * scale;
 
-                    float* dq = dq_base + (size_t)qi * 3 * dim;
-                    float* dk = dk_base + (size_t)kj * 3 * dim;
-                    const float* q = q_base + (size_t)qi * 3 * dim;
-                    const float* k = k_base + (size_t)kj * 3 * dim;
+                    float* dq = dq_base + (size_t)qi * qkv_dim;
+                    float* dk = dk_base + (size_t)kj * qkv_dim;
+                    const float* q = q_base + (size_t)qi * qkv_dim;
+                    const float* k = k_base + (size_t)kj * qkv_dim;
                     for (int d = 0; d < head_dim; d++) {
                         dq[d] += ds * k[d];
                         dk[d] += ds * q[d];
@@ -389,7 +399,10 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
     const int dim = model->dim;
     const int n_layers = model->n_layers;
     const int n_heads = model->n_heads;
+    const int n_kv_heads = model->n_kv_heads;
     const int head_dim = model->head_dim;
+    const int kv_dim = model->kv_dim;
+    const int qkv_dim = model->qkv_dim;
     const int ffn_dim = model->ffn_dim;
     const int vocab = model->vocab_size;
     const size_t n = (size_t)batch * seq;
@@ -488,12 +501,12 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
 
         // Attention block.
         const float* x_attn = act->resid_attn + layer_offset * dim;
-        const float* qkv = act->qkv + layer_offset * 3 * dim;
+        const float* qkv = act->qkv + layer_offset * qkv_dim;
         const float* attn_out = act->attn_out + layer_offset * dim;
         const float* w_proj = model->attn_proj +
             (size_t)layer * dim * dim;
         const float* w_qkv = model->attn_qkv +
-            (size_t)layer * 3 * dim * dim;
+            (size_t)layer * qkv_dim * dim;
 
         // Recompute the normalized attention input.
         for (size_t i = 0; i < n; i++)
@@ -507,15 +520,19 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
             attn_out, w_proj, dx, (int)n, dim, dim);
 
         // Attention backward uses the preserved forward QKV cache.
-        memset(act->dqkv, 0, n * 3 * (size_t)dim * sizeof(float));
+        memset(act->dqkv, 0,
+            n * (size_t)qkv_dim * sizeof(float));
         attention_backward(act->dqkv, qkv, act->dattn,
-            act->attention_scores, batch, seq, dim, n_heads, head_dim);
+            act->attention_scores, batch, seq, dim, n_heads, n_kv_heads,
+            head_dim, kv_dim, qkv_dim);
+        rotary_apply_qkv(act->dqkv, batch, seq, n_heads, n_kv_heads,
+            head_dim, qkv_dim, 0, 1);
 
         // QKV projection backward.
         memset(dx_norm, 0, dim_bytes);
         matmul_backward(dx_norm,
-            grads->attn_qkv + (size_t)layer * 3 * dim * dim,
-            act->x_norm, w_qkv, act->dqkv, (int)n, dim, 3 * dim);
+            grads->attn_qkv + (size_t)layer * qkv_dim * dim,
+            act->x_norm, w_qkv, act->dqkv, (int)n, dim, qkv_dim);
 
         // RMSNorm-1 backward, then add the attention residual gradient.
         rmsnorm_backward_batch(dx_tmp,
@@ -532,7 +549,7 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
         }
     }
 
-    // Embedding and learned-position gradients.
+    // Token-embedding gradients.
     for (int b = 0; b < batch; b++) {
         for (int t = 0; t < seq; t++) {
             const uint16_t id = tokens[b * seq + t];
@@ -540,11 +557,8 @@ void model_backward(Model* model, Gradients* grads, Activations* act,
 
             const float* row_grad = dx + ((size_t)b * seq + t) * dim;
             float* token_grad = grads->tok_emb + (size_t)id * dim;
-            float* position_grad = grads->pos_emb + (size_t)t * dim;
-
             for (int d = 0; d < dim; d++) {
                 token_grad[d] += row_grad[d];
-                position_grad[d] += row_grad[d];
             }
         }
     }
