@@ -1,4 +1,5 @@
 #include "forward.h"
+#include "rotary.h"
 #include "util.h"
 #include <math.h>
 #include <string.h>
@@ -63,24 +64,28 @@ float silu(float x) {
 // ------------------------------------------------------------------
 
 static void attention(float* out, const float* qkv, float* scores,
-    int batch, int seq, int dim, int n_heads, int head_dim) {
+    int batch, int seq, int dim, int n_heads, int n_kv_heads,
+    int head_dim, int kv_dim, int qkv_dim) {
 
     const float scale = 1.0f / sqrtf((float)head_dim);
 
     for (int b = 0; b < batch; b++) {
         for (int h = 0; h < n_heads; h++) {
-            // qkv token layout: [Q | K | V], each section has dim values.
-            const float* q_base = qkv + (size_t)b * seq * 3 * dim + h * head_dim;
-            const float* k_base = q_base + dim;
-            const float* v_base = k_base + dim;
+            // Q has one head per query; K and V use grouped KV heads.
+            const int kv_head = h / (n_heads / n_kv_heads);
+            const float* token_base = qkv + (size_t)b * seq * qkv_dim;
+            const float* q_base = token_base + h * head_dim;
+            const float* k_base = token_base + dim + kv_head * head_dim;
+            const float* v_base = token_base + dim + kv_dim +
+                kv_head * head_dim;
 
             for (int qi = 0; qi < seq; qi++) {
                 float max_score = -1.0e30f;
 
                 for (int kj = 0; kj <= qi; kj++) {
                     float dot = 0.0f;
-                    const float* q = q_base + (size_t)qi * 3 * dim;
-                    const float* k = k_base + (size_t)kj * 3 * dim;
+                    const float* q = q_base + (size_t)qi * qkv_dim;
+                    const float* k = k_base + (size_t)kj * qkv_dim;
                     for (int d = 0; d < head_dim; d++)
                         dot += q[d] * k[d];
                     scores[kj] = dot * scale;
@@ -102,7 +107,7 @@ static void attention(float* out, const float* qkv, float* scores,
                     out_h[d] = 0.0f;
 
                 for (int kj = 0; kj <= qi; kj++) {
-                    const float* v = v_base + (size_t)kj * 3 * dim;
+                    const float* v = v_base + (size_t)kj * qkv_dim;
                     const float weight = scores[kj];
                     for (int d = 0; d < head_dim; d++)
                         out_h[d] += weight * v[d];
@@ -134,7 +139,8 @@ bool activations_init(Activations* act, Arena* temp_arena,
     act->x = arena_alloc(temp_arena, n * dim * sizeof(float));
     act->x_norm = arena_alloc(temp_arena, n * dim * sizeof(float));
 
-    act->qkv = arena_alloc(temp_arena, layers * n * 3 * dim * sizeof(float));
+    act->qkv = arena_alloc(temp_arena,
+        layers * n * (size_t)model->qkv_dim * sizeof(float));
     act->attn_out = arena_alloc(temp_arena, layers * n * dim * sizeof(float));
     act->ffn_buf = arena_alloc(temp_arena, layers * n * ffn * sizeof(float));
     act->up_buf = arena_alloc(temp_arena, layers * n * ffn * sizeof(float));
@@ -148,7 +154,8 @@ bool activations_init(Activations* act, Arena* temp_arena,
     act->dx_tmp = arena_alloc(temp_arena, n * dim * sizeof(float));
     act->dx_norm = arena_alloc(temp_arena, n * dim * sizeof(float));
     act->dattn = arena_alloc(temp_arena, n * dim * sizeof(float));
-    act->dqkv = arena_alloc(temp_arena, n * 3 * dim * sizeof(float));
+    act->dqkv = arena_alloc(temp_arena,
+        n * (size_t)model->qkv_dim * sizeof(float));
     act->dffn = arena_alloc(temp_arena, n * ffn * sizeof(float));
     act->dup = arena_alloc(temp_arena, n * ffn * sizeof(float));
     act->dgate = arena_alloc(temp_arena, n * ffn * sizeof(float));
@@ -181,13 +188,16 @@ float* model_forward(Model* model, Activations* act,
     const int dim = model->dim;
     const int n_layers = model->n_layers;
     const int n_heads = model->n_heads;
+    const int n_kv_heads = model->n_kv_heads;
     const int head_dim = model->head_dim;
+    const int kv_dim = model->kv_dim;
+    const int qkv_dim = model->qkv_dim;
     const int ffn_dim = model->ffn_dim;
     const int vocab = model->vocab_size;
     const size_t n = (size_t)batch * seq;
     const size_t layer_stride = n;
 
-    // Token + learned position embeddings.
+    // Token embeddings; position is represented by rotary Q/K features.
     for (int b = 0; b < batch; b++) {
         for (int t = 0; t < seq; t++) {
             const uint16_t id = tokens[b * seq + t];
@@ -195,15 +205,14 @@ float* model_forward(Model* model, Activations* act,
 
             float* dst = act->x + ((size_t)b * seq + t) * dim;
             const float* tok = model->tok_emb + (size_t)id * dim;
-            const float* pos = model->pos_emb + (size_t)t * dim;
             for (int d = 0; d < dim; d++)
-                dst[d] = tok[d] + pos[d];
+                dst[d] = tok[d];
         }
     }
 
     for (int layer = 0; layer < n_layers; layer++) {
         const size_t layer_offset = (size_t)layer * layer_stride;
-        float* qkv = act->qkv + layer_offset * 3 * dim;
+        float* qkv = act->qkv + layer_offset * qkv_dim;
         float* attn_out = act->attn_out + layer_offset * dim;
         float* up = act->up_buf + layer_offset * ffn_dim;
         float* gate = act->gate_buf + layer_offset * ffn_dim;
@@ -219,11 +228,15 @@ float* model_forward(Model* model, Activations* act,
             rmsnorm(act->x_norm + i * dim, resid_attn + i * dim,
                 model->rms1_scale + (size_t)layer * dim, dim, 1e-5f);
 
-        const float* w_qkv = model->attn_qkv + (size_t)layer * 3 * dim * dim;
-        matmul(qkv, act->x_norm, w_qkv, (int)n, dim, 3 * dim);
+        const float* w_qkv = model->attn_qkv +
+            (size_t)layer * qkv_dim * dim;
+        matmul(qkv, act->x_norm, w_qkv, (int)n, dim, qkv_dim);
+        rotary_apply_qkv(qkv, batch, seq, n_heads, n_kv_heads,
+            head_dim, qkv_dim, 0, 0);
 
         attention(attn_out, qkv, act->attention_scores,
-            batch, seq, dim, n_heads, head_dim);
+            batch, seq, dim, n_heads, n_kv_heads, head_dim,
+            kv_dim, qkv_dim);
 
         const float* w_proj = model->attn_proj + (size_t)layer * dim * dim;
         matmul_add(act->x, attn_out, w_proj, (int)n, dim, dim);

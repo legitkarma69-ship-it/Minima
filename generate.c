@@ -1,5 +1,6 @@
 #include "generate.h"
 #include "forward.h"
+#include "rotary.h"
 #include "util.h"
 #include <math.h>
 #include <string.h>
@@ -10,7 +11,7 @@
 // ------------------------------------------------------------------
 
 bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq) {
-    if (!cache || !arena || !model || max_seq <= 0 ||
+    if (!cache || !arena || !model || !model_validate(model) || max_seq <= 0 ||
         max_seq > model->max_seq || max_seq > 512 ||
         model->n_layers <= 0 || model->dim <= 0 ||
         model->dim > 512 || model->ffn_dim <= 0 ||
@@ -24,11 +25,13 @@ bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq)
     cache->max_seq = max_seq;
     cache->n_layers = model->n_layers;
     cache->n_heads = model->n_heads;
+    cache->n_kv_heads = model->n_kv_heads;
     cache->head_dim = model->head_dim;
     cache->dim = model->dim;
+    cache->kv_dim = model->kv_dim;
 
     const size_t count = (size_t)model->n_layers *
-        (size_t)max_seq * (size_t)model->dim;
+        (size_t)max_seq * (size_t)model->kv_dim;
     if (count > SIZE_MAX / sizeof(float)) return false;
 
     const size_t bytes = count * sizeof(float);
@@ -79,11 +82,10 @@ static void forward_one(Model* model, KVCache* cache,
     int ffn_dim = model->ffn_dim;
     int pos = cache->pos;
 
-    // Token + position embedding
+    // Token embedding; rotary features encode this position inside attention.
     const float* tok = model->tok_emb + token_id * dim;
-    const float* pos_emb = model->pos_emb + pos * dim;
     for (int d = 0; d < dim; d++)
-        x[d] = tok[d] + pos_emb[d];
+        x[d] = tok[d];
 
     // Temporary buffers (stack is fine for this tiny model)
     float x_norm[512];
@@ -98,28 +100,36 @@ static void forward_one(Model* model, KVCache* cache,
         rmsnorm_inplace(x_norm, model->rms1_scale + layer * dim, dim, 1e-5f);
 
         // QKV
-        const float* w_qkv = model->attn_qkv + (size_t)layer * 3 * dim * dim;
-        matvec(qkv, x_norm, w_qkv, dim, 3 * dim);
+        const float* w_qkv = model->attn_qkv +
+            (size_t)layer * model->qkv_dim * dim;
+        matvec(qkv, x_norm, w_qkv, dim, model->qkv_dim);
+        rotary_apply_qkv(qkv, 1, 1, n_heads, model->n_kv_heads,
+            head_dim, model->qkv_dim, pos, 0);
 
         // Split Q, K, V and write K/V into cache
-        float* k_cache_l = cache->k_cache + (size_t)layer * cache->max_seq * dim;
-        float* v_cache_l = cache->v_cache + (size_t)layer * cache->max_seq * dim;
+        const int kv_dim = model->kv_dim;
+        float* k_cache_l = cache->k_cache +
+            (size_t)layer * cache->max_seq * kv_dim;
+        float* v_cache_l = cache->v_cache +
+            (size_t)layer * cache->max_seq * kv_dim;
 
         // store current K and V
-        memcpy(k_cache_l + pos * dim, qkv + dim, dim * sizeof(float));
-        memcpy(v_cache_l + pos * dim, qkv + 2 * dim, dim * sizeof(float));
+        memcpy(k_cache_l + pos * kv_dim, qkv + dim, kv_dim * sizeof(float));
+        memcpy(v_cache_l + pos * kv_dim, qkv + dim + kv_dim,
+            kv_dim * sizeof(float));
 
         // Attention (only the new query against all keys 0..pos)
         memset(attn_out, 0, dim * sizeof(float));
         float scale = 1.0f / sqrtf((float)head_dim);
 
         for (int h = 0; h < n_heads; h++) {
+            const int kv_head = h / (n_heads / model->n_kv_heads);
             const float* q = qkv + h * head_dim;
             float scores[512];
             float max_score = -1e30f;
 
             for (int kj = 0; kj <= pos; kj++) {
-                const float* k = k_cache_l + kj * dim + h * head_dim;
+                const float* k = k_cache_l + kj * kv_dim + kv_head * head_dim;
                 float dot = 0.0f;
                 for (int d = 0; d < head_dim; d++)
                     dot += q[d] * k[d];
@@ -138,7 +148,7 @@ static void forward_one(Model* model, KVCache* cache,
 
             float* out_h = attn_out + h * head_dim;
             for (int kj = 0; kj <= pos; kj++) {
-                const float* v = v_cache_l + kj * dim + h * head_dim;
+                const float* v = v_cache_l + kj * kv_dim + kv_head * head_dim;
                 float s = scores[kj];
                 for (int d = 0; d < head_dim; d++)
                     out_h[d] += s * v[d];
@@ -192,7 +202,7 @@ static void forward_one(Model* model, KVCache* cache,
 bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
     const uint16_t* tokens, int seq, float tolerance) {
 
-    if (!model || !cache || !temp_arena || !tokens || seq <= 0 ||
+    if (!model || !model_validate(model) || !cache || !temp_arena || !tokens || seq <= 0 ||
         seq > model->max_seq || seq > cache->max_seq ||
         seq > 512 || !isfinite(tolerance) || tolerance <= 0.0f ||
         model->dim <= 0 || model->dim > 512 ||
@@ -204,7 +214,9 @@ bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
         cache->n_layers != model->n_layers ||
         cache->dim != model->dim ||
         cache->n_heads != model->n_heads ||
+        cache->n_kv_heads != model->n_kv_heads ||
         cache->head_dim != model->head_dim ||
+        cache->kv_dim != model->kv_dim ||
         !cache->k_cache || !cache->v_cache)
         return false;
 
@@ -278,7 +290,7 @@ static void print_token_escaped(const Tokenizer* tok, int id) {
 // are normalized over sampleable tokens, not only the displayed top N.
 bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n) {
-    if (!model || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
+    if (!model || !model_validate(model) || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
         top_n <= 0 || model->vocab_size <= 0 ||
         model->vocab_size > 8192 || tok->vocab_size != model->vocab_size ||
         model->dim <= 0 || model->dim > 512 ||
@@ -289,7 +301,9 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
         prompt_len > model->max_seq || prompt_len > cache->max_seq ||
         cache->n_layers != model->n_layers || cache->dim != model->dim ||
         cache->n_heads != model->n_heads ||
+        cache->n_kv_heads != model->n_kv_heads ||
         cache->head_dim != model->head_dim ||
+        cache->kv_dim != model->kv_dim ||
         !cache->k_cache || !cache->v_cache)
         return false;
 
@@ -423,7 +437,7 @@ int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
     float temperature, int top_k, float top_p,
     float repetition_penalty, Rng* rng) {
 
-    if (!model || !tok || !cache || !prompt_ids || !out_ids || !rng ||
+    if (!model || !model_validate(model) || !tok || !cache || !prompt_ids || !out_ids || !rng ||
         prompt_len<=0 || out_cap<=0 || n_new<0 ||
         !isfinite(temperature) || temperature<=0.0f ||
         !isfinite(top_p) || top_p<=0.0f || top_p>1.0f ||
@@ -433,7 +447,9 @@ int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
         model->n_heads<=0 || model->head_dim<=0 ||
         model->n_heads*model->head_dim!=model->dim ||
         cache->n_layers!=model->n_layers || cache->dim!=model->dim ||
-        cache->n_heads!=model->n_heads || cache->head_dim!=model->head_dim ||
+        cache->n_heads!=model->n_heads ||
+        cache->n_kv_heads!=model->n_kv_heads ||
+        cache->head_dim!=model->head_dim || cache->kv_dim!=model->kv_dim ||
         !cache->k_cache || !cache->v_cache || cache->max_seq<=0 ||
         cache->max_seq>512 || tok->vocab_size!=model->vocab_size) return 0;
 

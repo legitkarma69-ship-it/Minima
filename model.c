@@ -28,6 +28,16 @@ static void fill_normal(float* p, size_t n, float std, Rng* rng) {
         p[i] = randn(rng) * std;
 }
 
+/* Use GQA with the largest proper divisor at or below half the query heads.
+   This keeps every query head in an equal-sized KV group for any valid model
+   configuration, while retaining MHA for single-head models. */
+static int model_kv_head_count(int n_heads) {
+    if (n_heads <= 1) return 1;
+    for (int kv_heads = n_heads / 2; kv_heads >= 1; kv_heads--)
+        if (n_heads % kv_heads == 0) return kv_heads;
+    return 1;
+}
+
 bool model_config_validate(const ModelConfig* config) {
     return config &&
         config->vocab_size >= MODEL_MIN_VOCAB_SIZE &&
@@ -36,6 +46,7 @@ bool model_config_validate(const ModelConfig* config) {
         config->n_layers > 0 && config->n_layers <= MODEL_MAX_LAYERS &&
         config->n_heads > 0 && config->n_heads <= MODEL_MAX_HEADS &&
         config->dim % config->n_heads == 0 &&
+        config->dim / config->n_heads >= 2 &&
         config->ffn_dim > 0 && config->ffn_dim <= MODEL_MAX_FFN_DIM &&
         config->max_seq >= MODEL_MIN_SEQ &&
         config->max_seq <= MODEL_MAX_SEQ_LIMIT;
@@ -49,7 +60,7 @@ bool model_validate(const Model* model) {
     };
     if (!model_config_validate(&config) ||
         model->head_dim != model->dim / model->n_heads ||
-        !model->tok_emb || !model->pos_emb ||
+        !model->tok_emb ||
         !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
@@ -59,10 +70,16 @@ bool model_validate(const Model* model) {
     const size_t dim = (size_t)model->dim;
     const size_t layers = (size_t)model->n_layers;
     const size_t ffn = (size_t)model->ffn_dim;
+    const int expected_kv_heads = model_kv_head_count(model->n_heads);
+    const size_t kv_dim = (size_t)expected_kv_heads *
+        (size_t)(model->dim / model->n_heads);
+    const size_t qkv_dim = dim + 2 * kv_dim;
+    if (model->n_kv_heads != expected_kv_heads ||
+        model->kv_dim != (int)kv_dim || model->qkv_dim != (int)qkv_dim)
+        return false;
     const size_t params =
         (size_t)model->vocab_size * dim +
-        (size_t)model->max_seq * dim +
-        layers * 3 * dim * dim +
+        layers * qkv_dim * dim +
         layers * dim * dim +
         layers * ffn * dim * 2 +
         layers * dim * ffn +
@@ -87,22 +104,23 @@ bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig*
     m->n_layers = config->n_layers;
     m->n_heads = config->n_heads;
     m->head_dim = config->dim / config->n_heads;
+    m->n_kv_heads = model_kv_head_count(config->n_heads);
+    m->kv_dim = m->n_kv_heads * m->head_dim;
+    m->qkv_dim = m->dim + 2 * m->kv_dim;
     m->ffn_dim = config->ffn_dim;
     m->max_seq = config->max_seq;
 
     Rng rng;
     rng_seed(&rng, seed);
 
-    // ----- Token + position embeddings -----
+    // ----- Token embeddings -----
     m->tok_emb = alloc_weights(arena, (size_t)m->vocab_size * m->dim);
-    m->pos_emb = alloc_weights(arena, (size_t)m->max_seq * m->dim);
 
     // Standard embedding init: N(0, 0.02)
     fill_normal(m->tok_emb, (size_t)m->vocab_size * m->dim, 0.02f, &rng);
-    fill_normal(m->pos_emb, (size_t)m->max_seq * m->dim, 0.02f, &rng);
 
     // ----- Attention & FFN weights -----
-    size_t qkv_count = (size_t)m->n_layers * 3 * m->dim * m->dim;
+    size_t qkv_count = (size_t)m->n_layers * m->qkv_dim * m->dim;
     size_t proj_count = (size_t)m->n_layers * m->dim * m->dim;
     size_t up_count = (size_t)m->n_layers * m->ffn_dim * m->dim;
     size_t gate_count = (size_t)m->n_layers * m->ffn_dim * m->dim;
@@ -141,7 +159,6 @@ bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig*
     // Record total weight footprint
     m->weight_bytes =
         ((size_t)m->vocab_size * m->dim +
-            (size_t)m->max_seq * m->dim +
             qkv_count + proj_count + up_count + gate_count + down_count +
             rms_count * 2 + m->dim) * sizeof(float);
 
@@ -164,6 +181,7 @@ void model_summary(const Model* m) {
     printf("  dim        : %d\n", m->dim);
     printf("  n_layers   : %d\n", m->n_layers);
     printf("  n_heads    : %d\n", m->n_heads);
+    printf("  n_kv_heads : %d (grouped-query attention)\n", m->n_kv_heads);
     printf("  head_dim   : %d\n", m->head_dim);
     printf("  ffn_dim    : %d\n", m->ffn_dim);
     printf("  max_seq    : %d\n", m->max_seq);

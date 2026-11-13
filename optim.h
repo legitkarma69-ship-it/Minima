@@ -25,7 +25,6 @@ typedef struct {
 
     // First and second moments – same shapes / order as Model weights
     float* m_tok_emb;
-    float* m_pos_emb;
     float* m_attn_qkv;
     float* m_attn_proj;
     float* m_ffn_up;
@@ -36,7 +35,6 @@ typedef struct {
     float* m_rms_final_scale;
 
     float* v_tok_emb;
-    float* v_pos_emb;
     float* v_attn_qkv;
     float* v_attn_proj;
     float* v_ffn_up;

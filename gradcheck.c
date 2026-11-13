@@ -107,10 +107,8 @@ bool gradient_check(Model* model, Gradients* grads, Arena* temp_arena,
 
     const GradientCheckTensor tensors[] = {
         { "tok_emb", model->tok_emb, grads->tok_emb, vocab * dim },
-        { "pos_emb", model->pos_emb, grads->pos_emb,
-            (size_t)model->max_seq * dim },
         { "attn_qkv", model->attn_qkv, grads->attn_qkv,
-            layers * 3 * dim * dim },
+            layers * (size_t)model->qkv_dim * dim },
         { "attn_proj", model->attn_proj, grads->attn_proj,
             layers * dim * dim },
         { "ffn_up", model->ffn_up, grads->ffn_up,

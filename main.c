@@ -576,7 +576,7 @@ int main(int argc, char** argv) {
         die("gradient allocation failed");
     if (!gradients_check_layout(&grads, &model, &arena))
         die("gradient allocation layout does not match runtime model configuration");
-    printf("Gradient allocation layout: PASS (runtime configuration, all 10 tensors)\n");
+    printf("Gradient allocation layout: PASS (runtime configuration, all 9 tensors)\n");
 
     // ------------------------------------------------------------------
     // 6. Numerical gradient check

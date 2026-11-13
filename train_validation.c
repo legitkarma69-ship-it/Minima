@@ -9,16 +9,16 @@ static bool validation_fail(const char** reason_out, const char* reason) {
 }
 
 #define REQUIRE_MODEL_TENSORS(m) \
-    ((m)->tok_emb && (m)->pos_emb && (m)->attn_qkv && \
+    ((m)->tok_emb && (m)->attn_qkv && \
      (m)->attn_proj && (m)->ffn_up && (m)->ffn_gate && \
      (m)->ffn_down && (m)->rms1_scale && (m)->rms2_scale && \
      (m)->rms_final_scale)
 
 #define REQUIRE_OPT_TENSORS(o) \
-    ((o)->m_tok_emb && (o)->m_pos_emb && (o)->m_attn_qkv && \
+    ((o)->m_tok_emb && (o)->m_attn_qkv && \
      (o)->m_attn_proj && (o)->m_ffn_up && (o)->m_ffn_gate && \
      (o)->m_ffn_down && (o)->m_rms1_scale && (o)->m_rms2_scale && \
-     (o)->m_rms_final_scale && (o)->v_tok_emb && (o)->v_pos_emb && \
+     (o)->m_rms_final_scale && (o)->v_tok_emb && \
      (o)->v_attn_qkv && (o)->v_attn_proj && (o)->v_ffn_up && \
      (o)->v_ffn_gate && (o)->v_ffn_down && (o)->v_rms1_scale && \
      (o)->v_rms2_scale && (o)->v_rms_final_scale)
@@ -55,7 +55,10 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
         grads->dim != model->dim ||
         grads->n_layers != model->n_layers ||
         grads->n_heads != model->n_heads ||
+        grads->n_kv_heads != model->n_kv_heads ||
         grads->head_dim != model->head_dim ||
+        grads->kv_dim != model->kv_dim ||
+        grads->qkv_dim != model->qkv_dim ||
         grads->ffn_dim != model->ffn_dim ||
         grads->max_seq != model->max_seq ||
         grads->weight_bytes != model->weight_bytes ||

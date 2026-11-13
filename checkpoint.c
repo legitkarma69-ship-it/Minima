@@ -11,8 +11,8 @@
 #include <windows.h>
 #endif
 
-#define CHECKPOINT_MAGIC "MINIMA03"
-#define CHECKPOINT_VERSION 3u
+#define CHECKPOINT_MAGIC "MINIMA04"
+#define CHECKPOINT_VERSION 4u
 
 static bool write_bytes(FILE* f, const void* data, size_t size, size_t count) {
     return fwrite(data, size, count, f) == count;
@@ -35,16 +35,14 @@ static size_t model_parameter_count(const Model* m) {
     size_t dim = (size_t)m->dim;
     size_t ffn = (size_t)m->ffn_dim;
     return (size_t)m->vocab_size * dim +
-        (size_t)m->max_seq * dim +
-        layers * (3 * dim * dim + dim * dim +
+        layers * ((size_t)m->qkv_dim * dim + dim * dim +
             ffn * dim + ffn * dim + dim * ffn +
             2 * dim) + dim;
 }
 
 #define MODEL_ARRAYS(F) \
     F(tok_emb, (size_t)m->vocab_size * m->dim); \
-    F(pos_emb, (size_t)m->max_seq * m->dim); \
-    F(attn_qkv, (size_t)m->n_layers * 3 * m->dim * m->dim); \
+    F(attn_qkv, (size_t)m->n_layers * m->qkv_dim * m->dim); \
     F(attn_proj, (size_t)m->n_layers * m->dim * m->dim); \
     F(ffn_up, (size_t)m->n_layers * m->ffn_dim * m->dim); \
     F(ffn_gate, (size_t)m->n_layers * m->ffn_dim * m->dim); \
@@ -55,8 +53,7 @@ static size_t model_parameter_count(const Model* m) {
 
 #define OPT_ARRAYS(F) \
     F(tok_emb, (size_t)m->vocab_size * m->dim); \
-    F(pos_emb, (size_t)m->max_seq * m->dim); \
-    F(attn_qkv, (size_t)m->n_layers * 3 * m->dim * m->dim); \
+    F(attn_qkv, (size_t)m->n_layers * m->qkv_dim * m->dim); \
     F(attn_proj, (size_t)m->n_layers * m->dim * m->dim); \
     F(ffn_up, (size_t)m->n_layers * m->ffn_dim * m->dim); \
     F(ffn_gate, (size_t)m->n_layers * m->ffn_dim * m->dim); \
@@ -79,7 +76,7 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     const Model* m = model;
     if (!path || !model || !opt || !rng ||
         !model->tok_emb ||
-        !model->pos_emb || !model->attn_qkv || !model->attn_proj ||
+        !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
         !model->rms1_scale || !model->rms2_scale ||
         !model->rms_final_scale || opt->n_params != model_parameter_count(model) ||
@@ -186,14 +183,14 @@ fail:
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
     Rng* rng, uint64_t tokenizer_hash) {
     if (!path || !model || !opt || !rng ||
-        !model->tok_emb || !model->pos_emb || !model->attn_qkv ||
+        !model->tok_emb || !model->attn_qkv ||
         !model->attn_proj || !model->ffn_up || !model->ffn_gate ||
         !model->ffn_down || !model->rms1_scale || !model->rms2_scale ||
         !model->rms_final_scale || opt->n_params != model_parameter_count(model) ||
-        !opt->m_tok_emb || !opt->m_pos_emb || !opt->m_attn_qkv ||
+        !opt->m_tok_emb || !opt->m_attn_qkv ||
         !opt->m_attn_proj || !opt->m_ffn_up || !opt->m_ffn_gate ||
         !opt->m_ffn_down || !opt->m_rms1_scale || !opt->m_rms2_scale ||
-        !opt->m_rms_final_scale || !opt->v_tok_emb || !opt->v_pos_emb ||
+        !opt->m_rms_final_scale || !opt->v_tok_emb ||
         !opt->v_attn_qkv || !opt->v_attn_proj || !opt->v_ffn_up ||
         !opt->v_ffn_gate || !opt->v_ffn_down || !opt->v_rms1_scale ||
         !opt->v_rms2_scale || !opt->v_rms_final_scale)

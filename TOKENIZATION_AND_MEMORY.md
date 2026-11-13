@@ -37,3 +37,10 @@ For example:
 ```text
 Minima.exe --threads 8 --steps 2000 data/books.txt data/chatlogs.txt data/britannica.txt
 ```
+
+## Attention architecture
+
+- Attention uses rotary position features (RoPE) on query and key vectors instead of a learned position-embedding table. This gives the model relative position information without a separate learned vector for every position; the configured `max_seq` still sets the runtime limit.
+- Grouped-query attention derives fewer key/value heads from the configured query-head count. Each KV head serves an equal group of query heads. The default uses at most half as many KV heads, reducing attention projection weights and generation-cache memory; a one-head model keeps ordinary multi-head attention.
+- These architecture changes alter checkpoint tensor shapes. Existing model checkpoints must be replaced by training a new model; tokenizer files remain usable.
+- More aggressive options such as ternary-weight pretraining need specialized quantization-aware training and CPU kernels. This project keeps standard float32 weights and its existing AdamW trainer, which suit its portable CPU implementation.

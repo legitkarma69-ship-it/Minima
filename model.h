@@ -12,16 +12,17 @@ typedef struct {
     int dim;
     int n_layers;
     int n_heads;
+    int n_kv_heads;
     int head_dim;
+    int kv_dim;
+    int qkv_dim;
     int ffn_dim;
     int max_seq;
 
     // ---------- Weights (all pointers into the arena) ----------
     float* tok_emb;          // [vocab_size, dim]
-    float* pos_emb;          // [max_seq, dim]   (learned absolute)
-
     // Per-layer (contiguous blocks)
-    float* attn_qkv;         // [n_layers, 3*dim, dim]
+    float* attn_qkv;         // [n_layers, qkv_dim, dim] (Q + compact grouped K/V)
     float* attn_proj;        // [n_layers, dim, dim]
     float* ffn_up;           // [n_layers, ffn_dim, dim]
     float* ffn_gate;         // [n_layers, ffn_dim, dim]   (SwiGLU)
