@@ -11,8 +11,10 @@
 #include <windows.h>
 #endif
 
-#define CHECKPOINT_MAGIC "MINIMA04"
-#define CHECKPOINT_VERSION 4u
+#define CHECKPOINT_MAGIC_V4 "MINIMA04"
+#define CHECKPOINT_MAGIC_V5 "MINIMA05"
+#define CHECKPOINT_VERSION_V4 4u
+#define CHECKPOINT_VERSION_V5 5u
 
 static bool write_bytes(FILE* f, const void* data, size_t size, size_t count) {
     return fwrite(data, size, count, f) == count;
@@ -68,13 +70,25 @@ static size_t model_parameter_count(const Model* m) {
 
 #define WRITE_OPT_MOMENTS(name, count) do { \
     if (!write_floats(f, opt->m_##name, (count))) goto fail; \
-    if (!write_floats(f, opt->v_##name, (count))) goto fail; \
+    if (opt->type == OPTIMIZER_ADAMW && \
+        !write_floats(f, opt->v_##name, (count))) goto fail; \
 } while (0)
+
+#define OPT_SECOND_MOMENTS_VALID(o) \
+    ((o)->type != OPTIMIZER_ADAMW || \
+     ((o)->v_tok_emb && (o)->v_attn_qkv && (o)->v_attn_proj && \
+      (o)->v_ffn_up && (o)->v_ffn_gate && (o)->v_ffn_down && \
+      (o)->v_rms1_scale && (o)->v_rms2_scale && (o)->v_rms_final_scale))
 
 bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     const Rng* rng, uint64_t tokenizer_hash) {
     const Model* m = model;
     if (!path || !model || !opt || !rng ||
+        (opt->type != OPTIMIZER_ADAMW && opt->type != OPTIMIZER_LION) ||
+        !opt->m_tok_emb || !opt->m_attn_qkv || !opt->m_attn_proj ||
+        !opt->m_ffn_up || !opt->m_ffn_gate || !opt->m_ffn_down ||
+        !opt->m_rms1_scale || !opt->m_rms2_scale ||
+        !opt->m_rms_final_scale || !OPT_SECOND_MOMENTS_VALID(opt) ||
         !model->tok_emb ||
         !model->attn_qkv || !model->attn_proj ||
         !model->ffn_up || !model->ffn_gate || !model->ffn_down ||
@@ -95,8 +109,8 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     FILE* f = fopen(temp_path, "wb");
     if (!f) return false;
 
-    const char magic[8] = CHECKPOINT_MAGIC;
-    uint32_t version = CHECKPOINT_VERSION;
+    const char magic[8] = CHECKPOINT_MAGIC_V5;
+    uint32_t version = CHECKPOINT_VERSION_V5;
     uint32_t dims[6] = {
         (uint32_t)model->vocab_size, (uint32_t)model->dim,
         (uint32_t)model->n_layers, (uint32_t)model->n_heads,
@@ -105,6 +119,7 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     uint64_t params = (uint64_t)model_parameter_count(model);
     int64_t step = opt->step;
     uint64_t rng_state = rng->state;
+    const int32_t optimizer_type = (int32_t)opt->type;
 
     if (!write_bytes(f, magic, 1, sizeof(magic)) ||
         !write_bytes(f, &version, sizeof(version), 1) ||
@@ -121,7 +136,8 @@ bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
         !write_bytes(f, &opt->schedule_base_lr, sizeof(float), 1) ||
         !write_bytes(f, &opt->schedule_total_steps, sizeof(int64_t), 1) ||
         !write_bytes(f, &opt->schedule_warmup_steps, sizeof(int64_t), 1) ||
-        !write_bytes(f, &opt->schedule_type, sizeof(int32_t), 1))
+        !write_bytes(f, &opt->schedule_type, sizeof(int32_t), 1) ||
+        !write_bytes(f, &optimizer_type, sizeof(optimizer_type), 1))
         goto fail;
 
     MODEL_ARRAYS(WRITE_MODEL);
@@ -153,13 +169,49 @@ fail:
     return false;
 }
 
+bool checkpoint_read_optimizer_type(const char* path, OptimizerType* type_out) {
+    if (!path || !type_out) return false;
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+
+    char magic[8];
+    uint32_t version = 0;
+    bool ok = read_bytes(f, magic, 1, sizeof(magic)) &&
+        read_bytes(f, &version, sizeof(version), 1);
+    OptimizerType type = OPTIMIZER_ADAMW;
+    if (ok && version == CHECKPOINT_VERSION_V4) {
+        ok = memcmp(magic, CHECKPOINT_MAGIC_V4, sizeof(magic)) == 0;
+    } else if (ok && version == CHECKPOINT_VERSION_V5) {
+        ok = memcmp(magic, CHECKPOINT_MAGIC_V5, sizeof(magic)) == 0;
+        /* Version 5 appends the optimizer identifier after the 112-byte
+           version-4 header. */
+        int32_t stored_type = -1;
+        if (ok && fseek(f, 112L, SEEK_SET) == 0 &&
+            read_bytes(f, &stored_type, sizeof(stored_type), 1) &&
+            (stored_type == OPTIMIZER_ADAMW || stored_type == OPTIMIZER_LION))
+            type = (OptimizerType)stored_type;
+        else
+            ok = false;
+    } else {
+        ok = false;
+    }
+
+    if (fclose(f) != 0) ok = false;
+    if (ok) *type_out = type;
+    return ok;
+}
+
 #define STAGE_MODEL(name, count) do { \
     staged_model.name = cursor; cursor += (count); \
 } while (0)
 
 #define STAGE_OPT_MOMENTS(name, count) do { \
     staged_opt.m_##name = cursor; cursor += (count); \
-    staged_opt.v_##name = cursor; cursor += (count); \
+    if (staged_opt.type == OPTIMIZER_ADAMW) { \
+        staged_opt.v_##name = cursor; cursor += (count); \
+    } else { \
+        staged_opt.v_##name = NULL; \
+    } \
 } while (0)
 
 #define READ_MODEL(name, count) do { \
@@ -168,7 +220,8 @@ fail:
 
 #define READ_OPT_MOMENTS(name, count) do { \
     if (!read_floats(f, staged_opt.m_##name, (count))) goto fail; \
-    if (!read_floats(f, staged_opt.v_##name, (count))) goto fail; \
+    if (staged_opt.type == OPTIMIZER_ADAMW && \
+        !read_floats(f, staged_opt.v_##name, (count))) goto fail; \
 } while (0)
 
 #define COMMIT_MODEL(name, count) do { \
@@ -177,12 +230,14 @@ fail:
 
 #define COMMIT_OPT_MOMENTS(name, count) do { \
     memcpy(opt->m_##name, staged_opt.m_##name, (count) * sizeof(float)); \
-    memcpy(opt->v_##name, staged_opt.v_##name, (count) * sizeof(float)); \
+    if (staged_opt.type == OPTIMIZER_ADAMW) \
+        memcpy(opt->v_##name, staged_opt.v_##name, (count) * sizeof(float)); \
 } while (0)
 
 bool checkpoint_load(const char* path, Model* model, Optim* opt,
     Rng* rng, uint64_t tokenizer_hash) {
     if (!path || !model || !opt || !rng ||
+        (opt->type != OPTIMIZER_ADAMW && opt->type != OPTIMIZER_LION) ||
         !model->tok_emb || !model->attn_qkv ||
         !model->attn_proj || !model->ffn_up || !model->ffn_gate ||
         !model->ffn_down || !model->rms1_scale || !model->rms2_scale ||
@@ -190,15 +245,15 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !opt->m_tok_emb || !opt->m_attn_qkv ||
         !opt->m_attn_proj || !opt->m_ffn_up || !opt->m_ffn_gate ||
         !opt->m_ffn_down || !opt->m_rms1_scale || !opt->m_rms2_scale ||
-        !opt->m_rms_final_scale || !opt->v_tok_emb ||
-        !opt->v_attn_qkv || !opt->v_attn_proj || !opt->v_ffn_up ||
-        !opt->v_ffn_gate || !opt->v_ffn_down || !opt->v_rms1_scale ||
-        !opt->v_rms2_scale || !opt->v_rms_final_scale)
+        !opt->m_rms_final_scale || !OPT_SECOND_MOMENTS_VALID(opt))
         return false;
 
     const size_t param_count = model_parameter_count(model);
-    if (param_count > SIZE_MAX / (3 * sizeof(float))) return false;
-    float* staging = (float*)malloc(param_count * 3 * sizeof(float));
+    const size_t staged_arrays = opt->type == OPTIMIZER_ADAMW ? 3u : 2u;
+    if (param_count > SIZE_MAX / staged_arrays / sizeof(float))
+        return false;
+    const size_t staged_floats = param_count * staged_arrays;
+    float* staging = (float*)malloc(staged_floats * sizeof(float));
     if (!staging) return false;
 
     Model staged_model = *model;
@@ -219,11 +274,18 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     float lr, beta1, beta2, eps, weight_decay, schedule_base_lr;
     int64_t schedule_total_steps = 0, schedule_warmup_steps = 0;
     int32_t schedule_type = -1;
+    int32_t saved_optimizer_type = OPTIMIZER_ADAMW;
 
     if (!read_bytes(f, magic, 1, sizeof(magic)) ||
-        memcmp(magic, CHECKPOINT_MAGIC, sizeof(magic)) != 0 ||
-        !read_bytes(f, &version, sizeof(version), 1) ||
-        version != CHECKPOINT_VERSION ||
+        !read_bytes(f, &version, sizeof(version), 1))
+        goto fail;
+    if (!((version == CHECKPOINT_VERSION_V4 &&
+            memcmp(magic, CHECKPOINT_MAGIC_V4, sizeof(magic)) == 0) ||
+          (version == CHECKPOINT_VERSION_V5 &&
+            memcmp(magic, CHECKPOINT_MAGIC_V5, sizeof(magic)) == 0)))
+        goto fail;
+
+    if (
         !read_bytes(f, dims, sizeof(uint32_t), 6) ||
         !read_bytes(f, &checkpoint_params, sizeof(checkpoint_params), 1) ||
         !read_bytes(f, &step, sizeof(step), 1) ||
@@ -239,6 +301,10 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
         !read_bytes(f, &schedule_warmup_steps, sizeof(int64_t), 1) ||
         !read_bytes(f, &schedule_type, sizeof(int32_t), 1))
         goto fail;
+    if (version == CHECKPOINT_VERSION_V5 &&
+        !read_bytes(f, &saved_optimizer_type, sizeof(saved_optimizer_type), 1))
+        goto fail;
+    if (saved_optimizer_type != (int32_t)opt->type) goto fail;
 
     if (dims[0] != (uint32_t)model->vocab_size ||
         dims[1] != (uint32_t)model->dim ||
@@ -265,7 +331,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
 
     // Reject truncated files, unexpected trailing bytes, and non-finite state.
     if (fgetc(f) != EOF || ferror(f)) goto fail;
-    for (size_t i = 0; i < param_count * 3; ++i)
+    for (size_t i = 0; i < staged_floats; ++i)
         if (!isfinite(staging[i])) goto fail;
 
     if (fclose(f) != 0) { free(staging); return false; }
@@ -285,6 +351,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     opt->schedule_total_steps = schedule_total_steps;
     opt->schedule_warmup_steps = schedule_warmup_steps;
     opt->schedule_type = schedule_type;
+    opt->type = (OptimizerType)saved_optimizer_type;
     free(staging);
     return true;
 

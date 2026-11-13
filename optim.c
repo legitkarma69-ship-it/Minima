@@ -38,6 +38,21 @@ static void adamw_update(float* param, float* m, float* v, const float* grad,
     }
 }
 
+// Lion uses the sign of a blended momentum/gradient update and keeps only
+// one momentum buffer. Weight decay remains decoupled, as in AdamW.
+static void lion_update(float* param, float* momentum, const float* grad,
+    size_t n, float lr, float beta1, float beta2, float weight_decay) {
+
+    for (size_t i = 0; i < n; i++) {
+        const float g = grad[i];
+        const float update = beta1 * momentum[i] + (1.0f - beta1) * g;
+
+        param[i] *= 1.0f - lr * weight_decay;
+        param[i] -= lr * (update > 0.0f ? 1.0f : update < 0.0f ? -1.0f : 0.0f);
+        momentum[i] = beta2 * momentum[i] + (1.0f - beta2) * g;
+    }
+}
+
 // Small scalar regression test for bias correction and decoupled decay.
 bool optim_check_adamw(void) {
     float actual_param = 1.25f;
@@ -78,12 +93,17 @@ bool optim_check_adamw(void) {
 // Public API
 // ------------------------------------------------------------------
 
-bool optim_init(Optim* opt, const Model* model, Arena* arena,
-    float lr, float beta1, float beta2,
+bool optim_init_type(Optim* opt, const Model* model, Arena* arena,
+    OptimizerType type, float lr, float beta1, float beta2,
     float eps, float weight_decay) {
+
+    if (!opt || !model || !arena ||
+        (type != OPTIMIZER_ADAMW && type != OPTIMIZER_LION))
+        return false;
 
     memset(opt, 0, sizeof(*opt));
 
+    opt->type = type;
     opt->lr = lr;
     opt->beta1 = beta1;
     opt->beta2 = beta2;
@@ -112,16 +132,17 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
     opt->m_rms2_scale = alloc_moment(arena, rms_n);
     opt->m_rms_final_scale = alloc_moment(arena, final_n);
 
-    // Allocate second moments
-    opt->v_tok_emb = alloc_moment(arena, tok_n);
-    opt->v_attn_qkv = alloc_moment(arena, qkv_n);
-    opt->v_attn_proj = alloc_moment(arena, proj_n);
-    opt->v_ffn_up = alloc_moment(arena, up_n);
-    opt->v_ffn_gate = alloc_moment(arena, gate_n);
-    opt->v_ffn_down = alloc_moment(arena, down_n);
-    opt->v_rms1_scale = alloc_moment(arena, rms_n);
-    opt->v_rms2_scale = alloc_moment(arena, rms_n);
-    opt->v_rms_final_scale = alloc_moment(arena, final_n);
+    if (type == OPTIMIZER_ADAMW) {
+        opt->v_tok_emb = alloc_moment(arena, tok_n);
+        opt->v_attn_qkv = alloc_moment(arena, qkv_n);
+        opt->v_attn_proj = alloc_moment(arena, proj_n);
+        opt->v_ffn_up = alloc_moment(arena, up_n);
+        opt->v_ffn_gate = alloc_moment(arena, gate_n);
+        opt->v_ffn_down = alloc_moment(arena, down_n);
+        opt->v_rms1_scale = alloc_moment(arena, rms_n);
+        opt->v_rms2_scale = alloc_moment(arena, rms_n);
+        opt->v_rms_final_scale = alloc_moment(arena, final_n);
+    }
 
     opt->n_params = tok_n + qkv_n + proj_n + up_n + gate_n +
         down_n + rms_n * 2 + final_n;
@@ -129,8 +150,40 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
     return true;
 }
 
+bool optim_init(Optim* opt, const Model* model, Arena* arena,
+    float lr, float beta1, float beta2,
+    float eps, float weight_decay) {
+    return optim_init_type(opt, model, arena, OPTIMIZER_ADAMW,
+        lr, beta1, beta2, eps, weight_decay);
+}
+
 void optim_step(Optim* opt, Model* model, const Model* grads) {
     opt->step++;
+
+    size_t tok_n = (size_t)model->vocab_size * model->dim;
+    size_t qkv_n = (size_t)model->n_layers * model->qkv_dim * model->dim;
+    size_t proj_n = (size_t)model->n_layers * model->dim * model->dim;
+    size_t up_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
+    size_t gate_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
+    size_t down_n = (size_t)model->n_layers * model->dim * model->ffn_dim;
+    size_t rms_n = (size_t)model->n_layers * model->dim;
+
+    if (opt->type == OPTIMIZER_LION) {
+#define LION_UPDATE(field, count) \
+        lion_update(model->field, opt->m_##field, grads->field, (count), \
+                    opt->lr, opt->beta1, opt->beta2, opt->weight_decay)
+        LION_UPDATE(tok_emb, tok_n);
+        LION_UPDATE(attn_qkv, qkv_n);
+        LION_UPDATE(attn_proj, proj_n);
+        LION_UPDATE(ffn_up, up_n);
+        LION_UPDATE(ffn_gate, gate_n);
+        LION_UPDATE(ffn_down, down_n);
+        LION_UPDATE(rms1_scale, rms_n);
+        LION_UPDATE(rms2_scale, rms_n);
+        LION_UPDATE(rms_final_scale, model->dim);
+#undef LION_UPDATE
+        return;
+    }
 
     float b1 = opt->beta1;
     float b2 = opt->beta2;
@@ -143,14 +196,6 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
                      grads->field, (count), \
                      opt->lr, b1, b2, opt->eps, opt->weight_decay, \
                      bias1, bias2)
-
-    size_t tok_n = (size_t)model->vocab_size * model->dim;
-    size_t qkv_n = (size_t)model->n_layers * model->qkv_dim * model->dim;
-    size_t proj_n = (size_t)model->n_layers * model->dim * model->dim;
-    size_t up_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
-    size_t gate_n = (size_t)model->n_layers * model->ffn_dim * model->dim;
-    size_t down_n = (size_t)model->n_layers * model->dim * model->ffn_dim;
-    size_t rms_n = (size_t)model->n_layers * model->dim;
 
     UPDATE(tok_emb, tok_n);
     UPDATE(attn_qkv, qkv_n);

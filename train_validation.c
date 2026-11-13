@@ -14,14 +14,17 @@ static bool validation_fail(const char** reason_out, const char* reason) {
      (m)->ffn_down && (m)->rms1_scale && (m)->rms2_scale && \
      (m)->rms_final_scale)
 
-#define REQUIRE_OPT_TENSORS(o) \
+#define REQUIRE_OPT_FIRST_MOMENTS(o) \
     ((o)->m_tok_emb && (o)->m_attn_qkv && \
      (o)->m_attn_proj && (o)->m_ffn_up && (o)->m_ffn_gate && \
      (o)->m_ffn_down && (o)->m_rms1_scale && (o)->m_rms2_scale && \
-     (o)->m_rms_final_scale && (o)->v_tok_emb && \
+     (o)->m_rms_final_scale)
+
+#define REQUIRE_OPT_SECOND_MOMENTS(o) \
+    ((o)->type != OPTIMIZER_ADAMW || ((o)->v_tok_emb && \
      (o)->v_attn_qkv && (o)->v_attn_proj && (o)->v_ffn_up && \
      (o)->v_ffn_gate && (o)->v_ffn_down && (o)->v_rms1_scale && \
-     (o)->v_rms2_scale && (o)->v_rms_final_scale)
+     (o)->v_rms2_scale && (o)->v_rms_final_scale))
 
 bool train_run_validate_inputs(const Model* model, const Optim* opt,
     const Gradients* grads, const Arena* temp, const uint16_t* all_ids,
@@ -65,16 +68,18 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
         !REQUIRE_MODEL_TENSORS(grads))
         return validation_fail(reason_out, "gradient tensors do not match the model layout");
 
-    if (!REQUIRE_OPT_TENSORS(opt) ||
+    if ((opt->type != OPTIMIZER_ADAMW && opt->type != OPTIMIZER_LION) ||
+        !REQUIRE_OPT_FIRST_MOMENTS(opt) ||
+        !REQUIRE_OPT_SECOND_MOMENTS(opt) ||
         opt->n_params != model_param_count(model))
-        return validation_fail(reason_out, "optimizer moment buffers do not match the model parameter count");
+        return validation_fail(reason_out, "optimizer state does not match the model parameter count or optimizer type");
 
     if (!isfinite(opt->lr) || opt->lr <= 0.0f ||
         !isfinite(opt->beta1) || opt->beta1 < 0.0f || opt->beta1 >= 1.0f ||
         !isfinite(opt->beta2) || opt->beta2 < 0.0f || opt->beta2 >= 1.0f ||
         !isfinite(opt->eps) || opt->eps <= 0.0f ||
         !isfinite(opt->weight_decay) || opt->weight_decay < 0.0f)
-        return validation_fail(reason_out, "AdamW hyperparameters are invalid");
+        return validation_fail(reason_out, "optimizer hyperparameters are invalid");
 
     if (!isfinite(opt->schedule_base_lr) || opt->schedule_base_lr <= 0.0f ||
         opt->schedule_total_steps <= 0 ||

@@ -31,6 +31,8 @@
 #define DEFAULT_SEQUENCE_LENGTH 32
 #define DEFAULT_STEPS 2000
 #define DEFAULT_LR 3e-4f
+#define DEFAULT_LION_LR 3e-5f
+#define DEFAULT_LION_WEIGHT_DECAY 0.1f
 #define DEFAULT_WARMUP_STEPS 100
 #define DEFAULT_LOG_INTERVAL 100
 #define DEFAULT_VALIDATION_BATCHES 16
@@ -39,6 +41,7 @@
 
 typedef struct {
     float learning_rate;
+    float weight_decay;
     int total_steps;
     bool total_steps_explicit;
     int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval;
@@ -54,6 +57,10 @@ typedef struct {
     bool chat_mode;
     ModelConfig model;
     const char* lr_schedule;
+    OptimizerType optimizer;
+    bool optimizer_explicit;
+    bool learning_rate_explicit;
+    bool weight_decay_explicit;
     bool tokenizer_spread;
     bool tokenizer_only;
     bool use_existing_tokenizer;
@@ -90,6 +97,8 @@ static void print_usage(const char* exe) {
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
     printf("  --heads N --ffn-dim N --max-seq N --batch-size N --sequence-length N\n");
     printf("  --lr-schedule cosine|constant --tokenizer-sampling spread|prefix\n");
+    printf("  --optimizer adamw|lion (Lion uses less optimizer memory; tune --lr)\n");
+    printf("  --weight-decay FLOAT\n");
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
@@ -105,6 +114,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->model=default_model;
     o->batch_size=DEFAULT_BATCH_SIZE; o->sequence_length=DEFAULT_SEQUENCE_LENGTH;
     o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
+    o->weight_decay=0.01f; o->weight_decay_explicit=false;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->validation_interval=DEFAULT_LOG_INTERVAL;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
@@ -114,6 +124,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
+    o->optimizer=OPTIMIZER_ADAMW; o->optimizer_explicit=false;
+    o->learning_rate_explicit=false;
     o->total_steps=0; o->total_steps_explicit=false;
     o->tokenizer_only=false; o->use_existing_tokenizer=false;
 
@@ -208,6 +220,16 @@ static int parse_arguments(int argc, char** argv, bool* resume,
                 die("--lr-schedule must be cosine or constant");
             o->lr_schedule=argv[i];
         }
+        else if (strcmp(argv[i], "--optimizer") == 0) {
+            if (++i >= argc) die("--optimizer requires adamw or lion");
+            if (strcmp(argv[i], "adamw") == 0)
+                o->optimizer = OPTIMIZER_ADAMW;
+            else if (strcmp(argv[i], "lion") == 0)
+                o->optimizer = OPTIMIZER_LION;
+            else
+                die("--optimizer must be adamw or lion");
+            o->optimizer_explicit = true;
+        }
         else if (strcmp(argv[i], "--tokenizer-sampling") == 0) {
             if(++i>=argc)die("--tokenizer-sampling requires spread or prefix");
             if(strcmp(argv[i],"spread")!=0 && strcmp(argv[i],"prefix")!=0)
@@ -217,6 +239,12 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         else if (strcmp(argv[i], "--lr") == 0) {
             if (++i >= argc) die("--lr requires a value");
             o->learning_rate=parse_float_value("--lr",argv[i],1e-7f,1.0f);
+            o->learning_rate_explicit=true;
+        }
+        else if (strcmp(argv[i], "--weight-decay") == 0) {
+            if (++i >= argc) die("--weight-decay requires a value");
+            o->weight_decay=parse_float_value("--weight-decay",argv[i],0.0f,1.0f);
+            o->weight_decay_explicit=true;
         }
         else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--save-file") == 0) {
             const char* option=argv[i];
@@ -239,6 +267,11 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         die("--retrain-tokenizer-only cannot be combined with resume, chat, diagnostics-only, or --use-existing-tokenizer");
     if (o->use_existing_tokenizer && (*resume || o->chat_mode || *diagnostics_only))
         die("--use-existing-tokenizer is for fresh training only");
+    if (o->optimizer == OPTIMIZER_LION) {
+        if (!o->learning_rate_explicit) o->learning_rate = DEFAULT_LION_LR;
+        if (!o->weight_decay_explicit)
+            o->weight_decay = DEFAULT_LION_WEIGHT_DECAY;
+    }
     if (*diagnostics_only) {
         if (!*resume)
             die("--diagnostics-only requires --resume");
@@ -258,6 +291,10 @@ int main(int argc, char** argv) {
     TrainOptions options;
     const int user_path_count = parse_arguments(argc, argv,
         &resume, &diagnostics_only, &steps_to_run, user_paths, &options);
+    OptimizerType optimizer_type = options.optimizer;
+    if (resume && !options.optimizer_explicit &&
+        !checkpoint_read_optimizer_type("minima.model", &optimizer_type))
+        die("could not read optimizer type from checkpoint; specify --optimizer adamw|lion");
 #ifdef _OPENMP
     omp_set_dynamic(0);
     if (options.threads > 0) omp_set_num_threads(options.threads);
@@ -534,8 +571,19 @@ int main(int argc, char** argv) {
     model_summary(&model);
 
     Optim opt;
-    if (!optim_init(&opt, &model, &arena, options.learning_rate, 0.9f, 0.95f, 1e-8f, 0.01f))
+    const float optimizer_beta1 =
+        optimizer_type == OPTIMIZER_LION ? 0.95f : 0.9f;
+    const float optimizer_beta2 =
+        optimizer_type == OPTIMIZER_LION ? 0.98f : 0.95f;
+    if (!optim_init_type(&opt, &model, &arena, optimizer_type,
+        options.learning_rate, optimizer_beta1, optimizer_beta2, 1e-8f,
+        options.weight_decay))
         die("optim_init failed");
+    printf("Optimizer: %s (%.1f MiB optimizer state)\n",
+        optimizer_type == OPTIMIZER_LION ? "Lion" : "AdamW",
+        (double)model.weight_bytes *
+            (optimizer_type == OPTIMIZER_LION ? 1.0 : 2.0) /
+            (1024.0 * 1024.0));
 
     Rng rng;
     rng_seed(&rng, options.seed ^ 0x9e3779b97f4a7c15ULL);

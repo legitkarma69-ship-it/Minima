@@ -38,9 +38,27 @@ For example:
 Minima.exe --threads 8 --steps 2000 data/books.txt data/chatlogs.txt data/britannica.txt
 ```
 
+## Optimizer memory
+
+AdamW remains the default. Pass `--optimizer lion` to use Lion, which keeps
+one 32-bit momentum value per parameter instead of AdamW's two moment values.
+That saves about 4 MiB of optimizer RAM per million parameters; model weights
+and activation memory are unchanged. Lion's sign-based updates generally need
+a smaller learning rate and stronger weight decay, so Minima starts Lion at
+`3e-5` / `0.1` rather than AdamW's `3e-4` / `0.01`. These are starting points
+for tuning, not a promise that Lion will lower loss on every small-batch run.
+Override them with `--lr` and `--weight-decay`.
+
+```text
+Minima.exe --optimizer lion --steps 2000 data/books.txt data/chatlogs.txt
+```
+
+Checkpoints store the optimizer choice and state. When resuming, Minima reads
+that choice automatically; version-4 AdamW checkpoints are still supported.
+
 ## Attention architecture
 
 - Attention uses rotary position features (RoPE) on query and key vectors instead of a learned position-embedding table. This gives the model relative position information without a separate learned vector for every position; the configured `max_seq` still sets the runtime limit.
 - Grouped-query attention derives fewer key/value heads from the configured query-head count. Each KV head serves an equal group of query heads. The default uses at most half as many KV heads, reducing attention projection weights and generation-cache memory; a one-head model keeps ordinary multi-head attention.
 - These architecture changes alter checkpoint tensor shapes. Existing model checkpoints must be replaced by training a new model; tokenizer files remain usable.
-- More aggressive options such as ternary-weight pretraining need specialized quantization-aware training and CPU kernels. This project keeps standard float32 weights and its existing AdamW trainer, which suit its portable CPU implementation.
+- More aggressive options such as ternary-weight pretraining need specialized quantization-aware training and CPU kernels. Minima currently keeps standard float32 weights and provides AdamW and Lion for portable CPU training.

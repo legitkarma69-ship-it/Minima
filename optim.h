@@ -6,7 +6,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+typedef enum {
+    OPTIMIZER_ADAMW = 0,
+    OPTIMIZER_LION = 1
+} OptimizerType;
+
 typedef struct {
+    OptimizerType type;
+
     // Hyper-parameters
     float lr;
     float beta1;
@@ -23,7 +30,7 @@ typedef struct {
     int64_t schedule_warmup_steps;
     int32_t schedule_type; /* 0 = cosine, 1 = constant */
 
-    // First and second moments – same shapes / order as Model weights
+    // First moments use the model layout. Lion omits second-moment buffers.
     float* m_tok_emb;
     float* m_attn_qkv;
     float* m_attn_proj;
@@ -54,9 +61,13 @@ bool optim_init(Optim* opt, const Model* model, Arena* arena,
     float lr, float beta1, float beta2,
     float eps, float weight_decay);
 
-// One AdamW step.  `grads` must have exactly the same layout as the model
-// weights (we will define a Gradients struct next, or you can pass the
-// same pointers that the backward pass writes into).
+// Allocate the state required by a selected optimizer. Lion uses only its
+// first-moment buffers, saving one float per parameter compared with AdamW.
+bool optim_init_type(Optim* opt, const Model* model, Arena* arena,
+    OptimizerType type, float lr, float beta1, float beta2,
+    float eps, float weight_decay);
+
+// One optimizer step. `grads` has the same parameter layout as `model`.
 void optim_step(Optim* opt, Model* model, const Model* grads);
 
 // Deterministic scalar regression test for the AdamW update.
