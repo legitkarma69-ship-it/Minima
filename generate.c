@@ -16,7 +16,7 @@ bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq)
         model->n_layers <= 0 || model->dim <= 0 ||
         model->dim > 512 || model->ffn_dim <= 0 ||
         model->ffn_dim > 1024 || model->vocab_size <= 0 ||
-        model->vocab_size > 8192 || model->n_heads <= 0 ||
+        model->vocab_size > TOK_MAX_VOCAB || model->n_heads <= 0 ||
         model->head_dim <= 0 ||
         model->n_heads * model->head_dim != model->dim)
         return false;
@@ -207,7 +207,7 @@ bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
         seq > 512 || !isfinite(tolerance) || tolerance <= 0.0f ||
         model->dim <= 0 || model->dim > 512 ||
         model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
-        model->vocab_size <= 0 || model->vocab_size > 8192 ||
+        model->vocab_size <= 0 || model->vocab_size > TOK_MAX_VOCAB ||
         model->n_layers <= 0 || model->n_heads <= 0 ||
         model->head_dim <= 0 ||
         model->n_heads * model->head_dim != model->dim ||
@@ -233,7 +233,7 @@ bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
     if (!full_logits) return false;
 
     float x[512];
-    float cached_logits[8192];
+    float cached_logits[TOK_MAX_VOCAB];
     float max_abs = 0.0f;
     float max_rel = 0.0f;
 
@@ -292,7 +292,7 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
     KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n) {
     if (!model || !model_validate(model) || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
         top_n <= 0 || model->vocab_size <= 0 ||
-        model->vocab_size > 8192 || tok->vocab_size != model->vocab_size ||
+        model->vocab_size > TOK_MAX_VOCAB || tok->vocab_size != model->vocab_size ||
         model->dim <= 0 || model->dim > 512 ||
         model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
         model->n_layers <= 0 || model->n_heads <= 0 ||
@@ -309,7 +309,7 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
 
     if (top_n > 20) top_n = 20;
     float x[512];
-    float logits[8192];
+    float logits[TOK_MAX_VOCAB];
     kvcache_reset(cache);
 
     for (int i = 0; i < prompt_len; i++) {
@@ -395,7 +395,7 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
     int top_k, float top_p, float repetition_penalty,
     const uint16_t* history, int history_len, Rng* rng) {
     int idx[256]; float vals[256]; int n=0;
-    uint8_t seen[8192]={0};
+    uint8_t seen[TOK_MAX_VOCAB]={0};
     if(top_k<1)top_k=1;if(top_k>vocab)top_k=vocab;if(top_k>256)top_k=256;
     if(repetition_penalty>1.0f)
         for(int j=0;j<history_len;j++)if(history[j]<(uint16_t)vocab)seen[history[j]]=1;
@@ -443,7 +443,7 @@ int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
         !isfinite(top_p) || top_p<=0.0f || top_p>1.0f ||
         !isfinite(repetition_penalty) || repetition_penalty<1.0f ||
         model->dim<=0 || model->dim>512 || model->ffn_dim<=0 || model->ffn_dim>1024 ||
-        model->vocab_size<=0 || model->vocab_size>8192 ||
+        model->vocab_size<=0 || model->vocab_size>TOK_MAX_VOCAB ||
         model->n_heads<=0 || model->head_dim<=0 ||
         model->n_heads*model->head_dim!=model->dim ||
         cache->n_layers!=model->n_layers || cache->dim!=model->dim ||
@@ -461,7 +461,7 @@ int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
     for(int i=0;i<prompt_len;i++)if(prompt_ids[i]>=model->vocab_size||prompt_ids[i]>=tok->vocab_size)return 0;
 
     kvcache_reset(cache);
-    float x[512],logits[8192];
+    float x[512],logits[TOK_MAX_VOCAB];
     for(int i=0;i<prompt_len;i++){out_ids[i]=prompt_ids[i];forward_one(model,cache,prompt_ids[i],x,logits);}
     for(int i=0;i<n_new;i++){
         for (int special = 0; special < TOK_SPECIAL_COUNT; special++)
