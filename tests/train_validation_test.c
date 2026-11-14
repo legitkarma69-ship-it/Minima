@@ -9,10 +9,10 @@
     return 1; } } while (0)
 
 #define CHECK_INVALID(m, o, g, a, ids, tr, va, r, opts) do { \
-    const char* reason = NULL; \
+    const char* invalid_reason = NULL; \
     CHECK(!train_run_validate_inputs((m), (o), (g), (a), (ids), \
-        (tr), (va), (r), (opts), &reason)); \
-    CHECK(reason != NULL && reason[0] != 0); \
+        (tr), (va), (r), (opts), &invalid_reason)); \
+    CHECK(invalid_reason != NULL && invalid_reason[0] != 0); \
 } while (0)
 
 int main(void) {
