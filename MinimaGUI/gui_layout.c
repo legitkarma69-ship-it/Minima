@@ -18,6 +18,7 @@ static BOOL is_advanced_page_control(HWND child) {
 static BOOL is_chat_page_control(HWND child) {
     return child == g_group_output || child == g_output_label || child == g_log ||
         child == g_chat_input ||
+        child == GetDlgItem(g_window, IDC_STATUS) ||
         child == GetDlgItem(g_window, IDC_CHAT_START) ||
         child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
         child == GetDlgItem(g_window, IDC_CHAT_STOP);
@@ -59,7 +60,10 @@ void gui_layout_layout_controls(HWND hwnd) {
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
     const int advanced_y=work_top+scale_px(106);
-    if(g_main_tabs)MoveWindow(g_main_tabs,pad,scale_px(6),inner,scale_px(28),TRUE);
+    if(g_main_tabs) {
+        MoveWindow(g_main_tabs,pad,scale_px(6),inner,scale_px(28),TRUE);
+        TabCtrl_SetItemSize(g_main_tabs, scale_px(150), scale_px(23));
+    }
     if(g_group_corpus)MoveWindow(g_group_corpus,scale_px(8),scale_px(40),width-scale_px(16),corpus_h,TRUE);
     if(g_corpus)MoveWindow(g_corpus,pad,scale_px(64),inner,scale_px(58),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(128),scale_px(104),scale_px(26),TRUE);
@@ -104,6 +108,9 @@ void gui_layout_layout_controls(HWND hwnd) {
     MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
     if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
     if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
+    if(g_active_page==2)
+        MoveWindow(GetDlgItem(hwnd,IDC_STATUS),width-pad-scale_px(150),
+            output_top+scale_px(4),scale_px(140),scale_px(18),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
     if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(112):pad,chat_y,inner-scale_px(340)-scale_px(112),scale_px(180),TRUE);

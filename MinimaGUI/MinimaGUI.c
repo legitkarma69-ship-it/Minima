@@ -45,6 +45,7 @@ static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
+static BOOL g_chat_send_when_ready;
 static volatile LONG g_running;
 static BOOL g_close_when_done;
 static BOOL g_tokenizer_rebuild_mode;
@@ -88,7 +89,8 @@ static BOOL CALLBACK set_child_font(HWND child, LPARAM font) {
 
 static void rebuild_ui_font(HWND hwnd) {
     HFONT old_font = g_ui_font;
-    g_ui_font = CreateFontW(-scale_px(9), 0, 0, 0, FW_NORMAL,
+    g_ui_font = CreateFontW(-MulDiv(9, (int)(g_dpi ? g_dpi : 96), 72),
+        0, 0, 0, FW_NORMAL,
         FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
         L"Segoe UI");
@@ -169,6 +171,7 @@ static void set_running(BOOL running) {
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
+    EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
     EnableWindow(g_temperature,!running || g_chat_mode);
     EnableWindow(g_top_k,!running || g_chat_mode);
@@ -176,7 +179,7 @@ static void set_running(BOOL running) {
     EnableWindow(g_repetition,!running || g_chat_mode);
     EnableWindow(g_max_tokens,!running || g_chat_mode);
     EnableWindow(g_chat_test,FALSE);
-    SetWindowTextW(g_status,running?(g_chat_mode?L"Chat running":L"Training running"):L"Idle");
+    SetWindowTextW(g_status,running?(g_chat_mode?L"Starting chat":L"Training running"):L"Idle");
     update_fresh_only_controls();
 }
 
@@ -303,6 +306,14 @@ static void remember_prebuilt_tokenizer_settings(void) {
 
 static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
+    if (!chat_mode && !tokenizer_only &&
+        SendMessageW(g_resume, BM_GETCHECK, 0, 0) == BST_CHECKED &&
+        g_use_saved_tokenizer) {
+        MessageBoxW(g_window,
+            L"The tokenizer was rebuilt after the saved checkpoint was created. Resume cannot use that checkpoint. Uncheck Resume to start a fresh model with the rebuilt tokenizer.",
+            L"Checkpoint uses the previous tokenizer", MB_ICONWARNING);
+        return;
+    }
     BOOL use_prebuilt_tokenizer = (!chat_mode && !tokenizer_only &&
         SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED && g_use_saved_tokenizer);
     if(use_prebuilt_tokenizer && !prebuilt_tokenizer_settings_match()) {
@@ -459,7 +470,6 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     EnableWindow(GetDlgItem(g_window,IDC_STOP),!chat_mode && !tokenizer_only);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     EnableWindow(GetDlgItem(g_window,IDC_SAVE_NOW),!chat_mode && !tokenizer_only);
-    EnableWindow(g_chat_input,chat_mode);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_STOP),chat_mode);
     append_log(chat_mode?L"\r\n--- Starting checkpoint chat ---\r\n":
@@ -624,6 +634,7 @@ static void send_chat_message(void) {
     free(utf8);SetWindowTextW(g_chat_input,L"");
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
     EnableWindow(g_chat_test,FALSE);
+    SetWindowTextW(g_status,L"Waiting for Minima");
 }
 
 static BOOL read_float_control(HWND control, float minimum, float maximum, float* value) {
@@ -844,7 +855,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
         add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
-        add_tooltip(g_chat_input, L"Choose a sample prompt from the dropdown or type your own prompt.");
+        add_tooltip(g_chat_input, L"Type a message and press Enter to start chat and send it. While chatting, Enter sends each message. Use the dropdown for sample prompts.");
+        add_tooltip(GetDlgItem(hwnd, IDC_CHAT_START), L"Start the checkpoint chat. You can also type a message below and press Enter.");
         add_tooltip(g_chat_test, L"Run one isolated generation with the current sampling settings. It does not change the active chat defaults or model checkpoint.");
     }
 
@@ -1001,7 +1013,14 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_chat_mode, InterlockedCompareExchange(&g_running,0,0) != 0);
         EnableWindow(g_chat_test,
             g_chat_mode && InterlockedCompareExchange(&g_running,0,0) != 0);
-        if (g_chat_mode) SetWindowTextW(g_status, L"Chat running");
+        if (g_chat_mode) {
+            SetWindowTextW(g_status, L"Chat ready");
+            if (g_chat_send_when_ready &&
+                IsWindowEnabled(GetDlgItem(hwnd, IDC_CHAT_SEND))) {
+                g_chat_send_when_ready = FALSE;
+                send_chat_message();
+            }
+        }
         return 0;
     case WM_APPEND_LOG:
         append_log((const wchar_t*)lp);
@@ -1010,7 +1029,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ENGINE_EXIT:
         if(wp==0 && g_tokenizer_rebuild_mode) {
             g_use_saved_tokenizer=TRUE; remember_prebuilt_tokenizer_settings();
-            append_log(L"Tokenizer rebuilt successfully. Start a fresh training run to use it; the GUI will reuse it if tokenizer settings and corpus selection remain unchanged.\r\n");
+            SendMessageW(g_resume, BM_SETCHECK, BST_UNCHECKED, 0);
+            update_fresh_only_controls();
+            append_log(L"Tokenizer rebuilt successfully. Resume was turned off because the existing checkpoint uses the previous tokenizer. Start a fresh training run to use the rebuilt tokenizer; the GUI will reuse it if tokenizer settings and corpus selection remain unchanged.\r\n");
         }
         if(wp==0 && g_fresh_used_saved_tokenizer) {
             g_use_saved_tokenizer=FALSE;
@@ -1021,10 +1042,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_process) { CloseHandle(g_process); g_process = NULL; }
         if (g_thread) { CloseHandle(g_thread); g_thread = NULL; }
         if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write=NULL; }
-        EnableWindow(g_chat_input,FALSE);
         EnableWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),FALSE);
         EnableWindow(g_chat_test,FALSE);
         EnableWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),FALSE);
+        g_chat_send_when_ready=FALSE;
         g_chat_mode=FALSE;
         set_running(FALSE);
         append_log(wp == 0 ? L"\r\n--- Engine exited successfully ---\r\n" : L"\r\n--- Engine exited with an error ---\r\n");
@@ -1099,6 +1120,29 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
 
     MSG msg;
     while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+        if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN) {
+            HWND focus = GetFocus();
+            const BOOL chat_input_focused = focus == g_chat_input ||
+                (focus && IsChild(g_chat_input, focus));
+            const BOOL prompt_list_open = SendMessageW(g_chat_input,
+                CB_GETDROPPEDSTATE, 0, 0) != 0;
+            if (chat_input_focused && !prompt_list_open) {
+                if (g_chat_mode) {
+                    if (IsWindowEnabled(GetDlgItem(hwnd, IDC_CHAT_SEND)))
+                        send_chat_message();
+                    continue;
+                }
+
+                wchar_t draft[4096];
+                GetWindowTextW(g_chat_input, draft, _countof(draft));
+                if (draft[0] && !InterlockedCompareExchange(&g_running,0,0)) {
+                    g_chat_send_when_ready = TRUE;
+                    start_engine(TRUE, FALSE);
+                    if (!g_chat_mode) g_chat_send_when_ready = FALSE;
+                }
+                continue;
+            }
+        }
         if(msg.message==WM_KEYDOWN && msg.wParam==VK_TAB &&
            GetAncestor(GetFocus(),GA_ROOT)==hwnd) {
             BOOL backwards=(GetKeyState(VK_SHIFT)&0x8000)!=0;

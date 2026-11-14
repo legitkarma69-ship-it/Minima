@@ -9,7 +9,7 @@ void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
     HWND* monitor_group, HWND* output_group) {
     if (tabs) {
         *tabs = CreateWindowW(WC_TABCONTROLW, L"",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | TCS_FIXEDWIDTH,
             12, 6, 920, 28, parent, (HMENU)(INT_PTR)IDC_MAIN_TABS,
             GetModuleHandleW(NULL), NULL);
         if (*tabs) {
@@ -180,10 +180,13 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"It was a dark");
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Hello there, how do you do?");
     SendMessageW(g_chat_input,CB_ADDSTRING,0,(LPARAM)L"Explain how a small language model learns patterns.");
-    EnableWindow(g_chat_input,FALSE);
+    COMBOBOXINFO chat_combo_info = { sizeof(chat_combo_info) };
+    if (GetComboBoxInfo(g_chat_input, &chat_combo_info) && chat_combo_info.hwndItem)
+        SendMessageW(chat_combo_info.hwndItem, EM_SETCUEBANNER, TRUE,
+            (LPARAM)L"Type a message and press Enter to start or send; the arrow shows examples.");
     g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,parent,(HMENU)(INT_PTR)IDC_CHAT_TEST,NULL,NULL);
     REGISTER_ADVANCED(g_chat_test);
-    CreateWindowW(L"BUTTON",L"Generate / Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,parent,(HMENU)(INT_PTR)IDC_CHAT_SEND,NULL,NULL);
+    CreateWindowW(L"BUTTON",L"Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,parent,(HMENU)(INT_PTR)IDC_CHAT_SEND,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,parent,(HMENU)(INT_PTR)IDC_CHAT_STOP,NULL,NULL);
 #undef g_corpus
 #undef g_steps

@@ -50,7 +50,8 @@ The engine appends structured rows to `minima_metrics.csv`. The lightweight GDI 
 ## Chat
 
 - Start chat loads the existing checkpoint and tokenizer.
-- The GUI provides a text input and Generate/Send button.
+- The message field accepts typed text; its dropdown contains example prompts. Press Enter to start chat and send the first message, or click Start chat and send when the engine is ready. Enter sends later messages.
+- Resume is cleared automatically after a successful tokenizer rebuild because the old checkpoint is incompatible with the new tokenizer.
 - Temperature, top-k, top-p, repetition penalty, and maximum new tokens are configurable.
 - Chat transcript is appended to `minima_chat.txt` and reloaded when the GUI starts. The visible transcript persists; the model's rolling context starts fresh when a new chat process is launched.
 - Stop generation terminates the inference child process. This does not affect checkpoint weights.
