@@ -37,11 +37,17 @@ Sampling modes vary temperature, top-k, top-p, and repetition penalty. The
 metrics describe surface repetition and token diversity; they do not measure
 semantic quality or factual correctness.
 
-The current corpus split is still a contiguous 95/5 token-stream split after
-the selected files have been concatenated. If a source document crosses that
-boundary, related text can appear on both sides. The distribution divergence
-and frequency reports help reveal some differences, but they do not fix that
-data-splitting limitation.
+Each corpus source is encoded independently and receives its own held-out
+validation region. The final 5% of each source is assigned to validation, with
+a minimum region sized to support the configured sequence length; the
+implementation also keeps at least one sequence of training text in each
+usable source. A separator token is inserted at the train/validation boundary
+and at the end of the source, and training samples are constrained to their
+source spans so they cannot cross source or split boundaries. This avoids a
+single global concatenation boundary and prevents adjacent text from one
+source from leaking across its own train/validation split. Validation is still
+not a guarantee of independence when sources contain duplicated or closely
+related material.
 
 ## Interpretation
 
