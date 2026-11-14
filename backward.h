@@ -29,6 +29,8 @@ double gradients_clip_global_norm(Gradients* g, const Model* model,
 // targets: [batch*seq]   (token ids)
 // Returns average loss over the batch.
 // Writes dlogits into the provided buffer (same shape as logits).
+// Exact in-place aliasing is supported: dlogits may equal logits. Partial
+// overlap between the two buffers is not supported.
 float loss_cross_entropy(const float* logits, const uint16_t* targets,
     float* dlogits, int batch, int seq, int vocab);
 
