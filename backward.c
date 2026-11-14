@@ -228,6 +228,9 @@ float loss_cross_entropy(const float* logits, const uint16_t* targets,
     float loss = 0.0f;
 
     for (int i = 0; i < count; i++) {
+        /* In-place aliasing is safe: max, sum_exp, and loss are computed
+           before writes begin; each probability reads row[v] before replacing
+           that same element in drow. Partial overlap is not supported. */
         const float* row = logits + (size_t)i * vocab;
         const int target = targets[i];
         if (target < 0 || target >= vocab) return NAN;
