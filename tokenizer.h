@@ -6,8 +6,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#define TOK_MAX_VOCAB     16384
-#define TOK_MAX_MERGES    (TOK_MAX_VOCAB - 256)
+#define TOK_MAX_VOCAB     32768
+#define TOK_MAX_MERGES    (TOK_MAX_VOCAB - 260)
 #define TOK_MAX_TOKEN_LEN 64          // longest token string we keep
 
 /* Reserved token IDs are serialized but not emitted by the raw-byte encoder. */
