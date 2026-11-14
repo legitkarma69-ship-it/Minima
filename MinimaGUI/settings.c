@@ -16,9 +16,9 @@ static const wchar_t* const g_edit_keys[24] = {
     L"top_k", L"top_p", L"repetition", L"max_tokens", L"grad_clip"
 };
 static const wchar_t* const g_edit_defaults[24] = {
-    L"10000", L"2048", L"64", L"2", L"2", L"128", L"64", L"4", L"64",
-    L"0.0003", L"2500", L"50000", L"1000", L"1000", L"16", L"1000", L"1234",
-    L"1048576", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0"
+    L"10000", L"30000", L"128", L"8", L"4", L"512", L"128", L"4", L"128",
+    L"0.0002", L"3000", L"100000", L"1000", L"1000", L"16", L"1000", L"1234",
+    L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0"
 };
 static const wchar_t* const g_combo_keys[3] = {
     L"lr_schedule", L"tokenizer_sampling", L"corpus_mix"
