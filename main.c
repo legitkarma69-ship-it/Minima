@@ -521,7 +521,7 @@ int main(int argc, char** argv) {
             sample_len, tokenizer_sample_segment_ends,
             tokenizer_sample_segment_count, options.model.vocab_size))
             die("tokenizer_train failed");
-        printf("Tokenizer preflight: valid tokenizer produced %d / %d requested vocabulary entries.\\n",
+        printf("Tokenizer preflight: valid tokenizer produced %d / %d requested vocabulary entries.\n",
             tok.vocab_size, options.model.vocab_size);
         if (tok.vocab_size != options.model.vocab_size)
             die("valid tokenizer did not reach the exact configured vocabulary target (%d / %d); this run treats --vocab-size as a hard requirement. Increase or diversify the tokenizer sample, or lower --vocab-size",
@@ -722,6 +722,18 @@ int main(int argc, char** argv) {
         die("gradient allocation layout does not match runtime model configuration");
     printf("Gradient allocation layout: PASS (runtime configuration, all 9 tensors)\n");
 
+    
+    /* Lower-bound estimate for the live training allocations. */
+    const double weight_mib = (double)model.weight_bytes / (1024.0 * 1024.0);
+    const double gradient_mib = weight_mib;
+    const double optimizer_mib = weight_mib *
+        (optimizer_type == OPTIMIZER_LION ? 1.0 : 2.0);
+    const double activation_mib = (double)activation_bytes / (1024.0 * 1024.0);
+    printf("Estimated training working set: weights %.1f + gradients %.1f + "
+        "optimizer %.1f + activations/logits %.1f = %.1f MiB\\n",
+        weight_mib, gradient_mib, optimizer_mib, activation_mib,
+        weight_mib + gradient_mib + optimizer_mib + activation_mib);
+    printf("  Excludes tokenizer workspace, mapped corpus token IDs, and process/runtime overhead.\\n");
     // ------------------------------------------------------------------
     // 6. Numerical gradient check
     // ------------------------------------------------------------------
