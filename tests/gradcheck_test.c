@@ -20,33 +20,32 @@ static uint32_t next_value(uint32_t* state) {
     return x;
 }
 
-static void gradient_counts(const Model* model, size_t counts[10]) {
+static void gradient_counts(const Model* model, size_t counts[9]) {
     const size_t dim = (size_t)model->dim;
     const size_t layers = (size_t)model->n_layers;
     const size_t ffn = (size_t)model->ffn_dim;
     counts[0] = (size_t)model->vocab_size * dim;
-    counts[1] = (size_t)model->max_seq * dim;
-    counts[2] = layers * 3 * dim * dim;
-    counts[3] = layers * dim * dim;
+    counts[1] = layers * (size_t)model->qkv_dim * dim;
+    counts[2] = layers * dim * dim;
+    counts[3] = layers * ffn * dim;
     counts[4] = layers * ffn * dim;
-    counts[5] = layers * ffn * dim;
-    counts[6] = layers * dim * ffn;
+    counts[5] = layers * dim * ffn;
+    counts[6] = layers * dim;
     counts[7] = layers * dim;
-    counts[8] = layers * dim;
-    counts[9] = dim;
+    counts[8] = dim;
 }
 
 static bool snapshot_gradients(const Gradients* g, const Model* model,
     float* snapshot) {
-    size_t counts[10];
+    size_t counts[9];
     const float* tensors[] = {
-        g->tok_emb, g->pos_emb, g->attn_qkv, g->attn_proj,
-        g->ffn_up, g->ffn_gate, g->ffn_down,
-        g->rms1_scale, g->rms2_scale, g->rms_final_scale
+        g->tok_emb, g->attn_qkv, g->attn_proj, g->ffn_up,
+        g->ffn_gate, g->ffn_down, g->rms1_scale,
+        g->rms2_scale, g->rms_final_scale
     };
     gradient_counts(model, counts);
     size_t offset = 0;
-    for (size_t i = 0; i < 10; i++) {
+    for (size_t i = 0; i < 9; i++) {
         memcpy(snapshot + offset, tensors[i], counts[i] * sizeof(float));
         offset += counts[i];
     }
