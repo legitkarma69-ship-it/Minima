@@ -27,7 +27,7 @@ The engine working directory is the executable directory. Keep the `data` folder
 - Configure tokenizer sample byte limit (4 MiB maximum) and either evenly spread sampling or prefix sampling.
 - Start training, request a graceful stop, or request an immediate checkpoint save.
 
-Runtime model limits are validated by the engine: vocabulary 260-8192, dimension 1-512, layers 1-16, heads 1-32 (dimension must divide evenly by heads), FFN dimension 1-1024, and context length 32-512. Batch size is 1-16 and training sequence length is 8-512 and cannot exceed context length. The engine also rejects excessively large logits scratch configurations.
+Runtime model limits are validated by the engine: vocabulary 260-32768, dimension 1-512, layers 1-16, heads 1-32 (dimension must divide evenly by heads), FFN dimension 1-1024, and context length 32-512. Batch size is 1-16 and training sequence length is 8-512 and cannot exceed context length. The default model is 30,000 vocabulary entries, dimension 128, 8 layers, 4 attention heads, FFN 512, and context 128 (about 5.74 million parameters). The default training schedule is 100,000 optimizer steps, run in 10,000-step segments. The engine also rejects excessively large logits scratch configurations.
 
 Changing vocabulary or model architecture makes an existing checkpoint incompatible. Resume and chat must use the same model configuration and tokenizer as the checkpoint.
 
