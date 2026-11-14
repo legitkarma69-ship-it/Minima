@@ -90,8 +90,6 @@ static float evaluate_loss(Model* model, Arena* temp,
     if (!activations_init(&act, temp, batch_size, seq_len, model))
         return NAN;
 
-    float* dlogits = arena_alloc(temp,
-        (size_t)batch_size * seq_len * model->vocab_size * sizeof(float));
     uint16_t* batch_tokens = arena_alloc(temp,
         (size_t)batch_size * seq_len * sizeof(uint16_t));
     uint16_t* batch_targets = arena_alloc(temp,
@@ -99,7 +97,7 @@ static float evaluate_loss(Model* model, Arena* temp,
     const size_t sample_count = (size_t)validation_batches * (size_t)batch_size;
     size_t* sample_sources = arena_alloc(temp, sample_count * sizeof(size_t));
 
-    if (!dlogits || !batch_tokens || !batch_targets || !sample_sources)
+    if (!batch_tokens || !batch_targets || !sample_sources)
         return NAN;
 
     SourcePlan plan;
@@ -144,8 +142,10 @@ static float evaluate_loss(Model* model, Arena* temp,
             batch_tokens, batch_size, seq_len);
         if (!logits) return NAN;
 
+        /* Cross-entropy reads a complete row before overwriting it with its
+           gradient, so the forward logits buffer is safe to reuse in place. */
         const float loss = loss_cross_entropy(logits, batch_targets,
-            dlogits, batch_size, seq_len, model->vocab_size);
+            logits, batch_size, seq_len, model->vocab_size);
         if (!isfinite(loss)) return NAN;
         loss_sum += loss;
     }
@@ -186,7 +186,6 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
     Activations act;
     uint16_t* batch_tokens;
     uint16_t* batch_targets;
-    float* dlogits;
 
     const int64_t initial_step = opt->step;
     if (!options.diagnostics_only && options.steps > 0 &&
@@ -239,11 +238,9 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
         if (!activations_init(&act, temp, options.batch_size, options.sequence_length, model))
             die("activation allocation failed");
 
-        dlogits = arena_alloc(temp,
-            (size_t)options.batch_size * options.sequence_length * model->vocab_size * sizeof(float));
         batch_tokens = arena_alloc(temp, options.batch_size * options.sequence_length * sizeof(uint16_t));
         batch_targets = arena_alloc(temp, options.batch_size * options.sequence_length * sizeof(uint16_t));
-        if (!dlogits || !batch_tokens || !batch_targets)
+        if (!batch_tokens || !batch_targets)
             die("training scratch allocation failed");
 
         for (int b = 0; b < options.batch_size; b++) {
@@ -262,12 +259,14 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
             batch_tokens, options.batch_size, options.sequence_length);
         if (!logits) die("model_forward failed");
 
-        const float loss = loss_cross_entropy(logits, batch_targets, dlogits,
+        /* Reuse the logits allocation for the gradient; no second
+           vocabulary-sized temporary buffer is needed during training. */
+        const float loss = loss_cross_entropy(logits, batch_targets, logits,
             options.batch_size, options.sequence_length, model->vocab_size);
         if (!isfinite(loss)) die("training loss became non-finite");
 
         gradients_zero(grads, model);
-        model_backward(model, grads, &act, dlogits,
+        model_backward(model, grads, &act, logits,
             batch_tokens, options.batch_size, options.sequence_length);
         bool gradient_was_clipped = false;
         const double gradient_norm = gradients_clip_global_norm(grads, model,
