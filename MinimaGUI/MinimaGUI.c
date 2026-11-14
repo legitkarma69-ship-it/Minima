@@ -32,15 +32,16 @@ static HWND g_steps, g_resume, g_status;
 HWND g_main_tabs;
 static MinimaSettingsContext g_settings_context;
 int g_active_page;
-static HWND g_tab_controls[40];
+static HWND g_tab_controls[64];
 static int g_tab_control_count;
 static HWND g_lr, g_warmup, g_total_steps, g_log_interval, g_validation_batches;
+static HWND g_grad_clip;
 static HWND g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_validation_interval;
 HWND g_graph;
 static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens;
 HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
-static HWND g_lr_schedule, g_tokenizer_sampling, g_batch_size, g_sequence_length;
+static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
@@ -59,7 +60,7 @@ HWND g_group_advanced, g_group_monitor, g_group_output;
 BOOL g_advanced_expanded = FALSE;
 UINT g_dpi = 96;
 static HFONT g_ui_font;
-HWND g_advanced_controls[32];
+HWND g_advanced_controls[64];
 int g_advanced_control_count;
 GuiInitialRect g_initial_rects[160];
 int g_initial_rect_count;
@@ -169,7 +170,7 @@ static void set_running(BOOL running) {
     EnableWindow(GetDlgItem(g_window,IDC_BASIC_DEFAULTS),!running);
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
-        g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling};
+        g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -362,6 +363,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%s\" --steps %ld",g_engine_path,count);
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED)wcscat_s(command,_countof(command),L" --resume");
         if(!append_option(command,_countof(command),L"--lr",g_lr) ||
+           !append_option(command,_countof(command),L"--grad-clip",g_grad_clip) ||
            !append_option(command,_countof(command),L"--warmup",g_warmup) ||
 
            !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
@@ -379,6 +381,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
            !append_option(command,_countof(command),L"--batch-size",g_batch_size) ||
            !append_option(command,_countof(command),L"--sequence-length",g_sequence_length) ||
            !append_combo_option(command,_countof(command),L"--lr-schedule",g_lr_schedule) ||
+           !append_combo_option(command,_countof(command),L"--corpus-mix",g_corpus_mix) ||
            !append_combo_option(command,_countof(command),L"--tokenizer-sampling",g_tokenizer_sampling)){
             MessageBoxW(g_window,L"Check the training settings.",L"ProjectMinima",MB_ICONWARNING);return;
         }
@@ -768,14 +771,14 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[23] = {
+    HWND edits[24] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
-        g_top_k, g_top_p, g_repetition, g_max_tokens
+        g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip
     };
-    HWND combos[2] = { g_lr_schedule, g_tokenizer_sampling };
+    HWND combos[3] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
     CopyMemory(g_settings_context.combo_controls, combos, sizeof(combos));
     g_settings_context.resume_control = g_resume;
@@ -818,6 +821,8 @@ static void create_controls(HWND hwnd) {
         &g_max_tokens,
         &g_lr_schedule,
         &g_tokenizer_sampling,
+        &g_corpus_mix,
+        &g_grad_clip,
         &g_total_steps,
         &g_status,
         &g_graph,
@@ -832,7 +837,7 @@ static void create_controls(HWND hwnd) {
     HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
-        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,
+        g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
         g_batch_size,g_sequence_length,g_total_steps };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
@@ -854,6 +859,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_tokenizer_bytes, L"Maximum sample bytes used for BPE training. The sample is split evenly across each selected source file without loading the full files.");
         add_tooltip(g_lr_schedule, L"Cosine decay reaches zero at the saved global schedule horizon. Constant keeps the base rate.");
         add_tooltip(g_tokenizer_sampling, L"Spread samples across each selected source file; prefix samples from the beginning of each source.");
+        add_tooltip(g_corpus_mix, L"Choose how training examples are divided among selected files. Sqrt is a middle ground: large files still contribute more while smaller sources are no longer nearly ignored.");
+        add_tooltip(g_grad_clip, L"Maximum global gradient length. 1.0 is a common stability setting; use 0 to disable clipping. The run log reports average and peak unclipped lengths and how often clipping was applied.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -877,7 +884,7 @@ static void create_controls(HWND hwnd) {
         g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
-        g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_total_steps,
+        g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),

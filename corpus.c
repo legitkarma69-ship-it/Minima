@@ -334,6 +334,7 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
         total += separators;
     }
 
+    if (total == SIZE_MAX) return CORPUS_LOAD_ERROR;
     uint8_t* data = (uint8_t*)arena_alloc(arena, total + 1);
     if (!data) return CORPUS_LOAD_ERROR;
 
@@ -350,6 +351,7 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
             data[written++] = '\n';
         }
 
+        size_t separator_bytes = loaded > 0 ? 2u : 0u;
         size_t start = written;
         size_t got = fread(data + written, 1, files[i].size, f);
         int read_error = ferror(f);
@@ -363,6 +365,17 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
             got -= 3;
         }
 
+        /* A UTF-8 BOM is metadata, not corpus text. Skip BOM-only files and
+           roll back their separator so source offsets remain exact. */
+        if (got == 0) {
+            written = start - separator_bytes;
+            continue;
+        }
+
+        corpus->sources[loaded].byte_start = start;
+        corpus->sources[loaded].byte_length = got;
+        corpus->sources[loaded].path = files[i].path;
+
         written += got;
         loaded++;
 
@@ -375,5 +388,6 @@ CorpusLoadResult corpus_load_files(Corpus* corpus, Arena* arena,
     corpus->data = data;
     corpus->length = written;
     corpus->files_loaded = loaded;
+    corpus->source_count = loaded;
     return CORPUS_LOAD_OK;
 }

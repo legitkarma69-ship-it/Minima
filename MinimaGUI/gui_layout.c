@@ -91,7 +91,7 @@ void gui_layout_layout_controls(HWND hwnd) {
             int y=work_top+scale_px(19)+(oy-scale_px(168));
             int w=(int)((r.right-r.left)*xs);
             MoveWindow(child,x,y,w>scale_px(20)?w:scale_px(20),r.bottom-r.top,TRUE);
-        }else if(oy>=scale_px(258)&&oy<scale_px(355)){
+        }else if(oy>=scale_px(258)&&oy<scale_px(390)){
             int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
             int y=advanced_y+scale_px(28)+(oy-scale_px(258));
             int w=(int)((r.right-r.left)*xs);

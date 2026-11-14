@@ -10,9 +10,17 @@
     (CORPUS_MAX_PATHS * 64u + CORPUS_MAX_PATHS - 1u)
 
 typedef struct {
+    size_t byte_start;
+    size_t byte_length;
+    const char* path;
+} CorpusSource;
+
+typedef struct {
     uint8_t* data;
     size_t length;
     size_t files_loaded;
+    size_t source_count;
+    CorpusSource sources[CORPUS_MAX_PATHS];
 } Corpus;
 
 typedef enum {

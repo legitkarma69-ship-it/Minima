@@ -11,6 +11,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define TRAIN_MAX_SOURCES 32u
+
+typedef enum {
+    CORPUS_MIX_PROPORTIONAL = 0,
+    CORPUS_MIX_SQRT = 1,
+    CORPUS_MIX_EQUAL = 2
+} CorpusMixMode;
+
+typedef struct {
+    const char* name;
+    int train_start;
+    int train_tokens;
+    int validation_start;
+    int validation_tokens;
+} TrainSourceSpan;
+
 typedef struct {
     int steps;
     int log_interval;
@@ -19,10 +35,14 @@ typedef struct {
     int checkpoint_interval;
     int batch_size;
     int sequence_length;
+    float grad_clip_norm;
     uint64_t seed;
     size_t tokenizer_sample_bytes;
     bool tokenizer_spread;
     bool diagnostics_only;
+    CorpusMixMode corpus_mix;
+    const TrainSourceSpan* corpus_sources;
+    size_t corpus_source_count;
     size_t activation_bytes;
     const char* metrics_path;
     const char* stop_file;

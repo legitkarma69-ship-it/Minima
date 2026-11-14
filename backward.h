@@ -19,6 +19,11 @@ bool gradients_check_layout(const Gradients* g, const Model* model,
 // Zero all gradients (call at the start of every training step)
 void gradients_zero(Gradients* g, const Model* model);
 
+/* Clips all parameter gradients by one global L2 norm. Returns the norm
+   before clipping, or NAN when the gradient set is invalid/non-finite. */
+double gradients_clip_global_norm(Gradients* g, const Model* model,
+    float max_norm, bool* clipped_out);
+
 // Cross-entropy loss + gradient of logits
 // logits: [batch*seq, vocab]
 // targets: [batch*seq]   (token ids)

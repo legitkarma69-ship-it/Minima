@@ -28,12 +28,13 @@
 #endif
 
 #define DEFAULT_BATCH_SIZE 4
-#define DEFAULT_SEQUENCE_LENGTH 32
-#define DEFAULT_STEPS 2000
+#define DEFAULT_SEQUENCE_LENGTH 64
+#define DEFAULT_STEPS 10000
+#define DEFAULT_TOTAL_STEPS 50000
 #define DEFAULT_LR 3e-4f
 #define DEFAULT_LION_LR 3e-5f
 #define DEFAULT_LION_WEIGHT_DECAY 0.1f
-#define DEFAULT_WARMUP_STEPS 100
+#define DEFAULT_WARMUP_STEPS 2500
 #define DEFAULT_LOG_INTERVAL 1000
 #define DEFAULT_VALIDATION_BATCHES 16
 #define DEFAULT_CHECKPOINT_INTERVAL 1000
@@ -42,6 +43,7 @@
 typedef struct {
     float learning_rate;
     float weight_decay;
+    float grad_clip_norm;
     int total_steps;
     bool total_steps_explicit;
     int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval;
@@ -57,6 +59,7 @@ typedef struct {
     bool chat_mode;
     ModelConfig model;
     const char* lr_schedule;
+    CorpusMixMode corpus_mix;
     OptimizerType optimizer;
     bool optimizer_explicit;
     bool learning_rate_explicit;
@@ -93,12 +96,15 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
 static void print_usage(const char* exe) {
     printf("Usage: %s [options] [corpus.txt ...]\n", exe);
     printf("  --resume --steps N --total-steps N --lr FLOAT --warmup N --log-interval N\n");
+    printf("  Defaults: 10,000 steps in a 50,000-step schedule; warmup 2,500\n");
     printf("  --validation-batches N --validation-interval N --checkpoint-interval N --seed N\n");
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
     printf("  --heads N --ffn-dim N --max-seq N --batch-size N --sequence-length N\n");
     printf("  --lr-schedule cosine|constant --tokenizer-sampling spread|prefix\n");
+    printf("  --corpus-mix proportional|sqrt|equal (default: sqrt)\n");
     printf("  --optimizer adamw|lion (Lion uses less optimizer memory; tune --lr)\n");
     printf("  --weight-decay FLOAT\n");
+    printf("  --grad-clip FLOAT (global gradient norm; 0 disables clipping)\n");
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
@@ -115,6 +121,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->batch_size=DEFAULT_BATCH_SIZE; o->sequence_length=DEFAULT_SEQUENCE_LENGTH;
     o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
     o->weight_decay=0.01f; o->weight_decay_explicit=false;
+    o->grad_clip_norm=1.0f;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->validation_interval=DEFAULT_LOG_INTERVAL;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
@@ -124,9 +131,10 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
+    o->corpus_mix=CORPUS_MIX_SQRT;
     o->optimizer=OPTIMIZER_ADAMW; o->optimizer_explicit=false;
     o->learning_rate_explicit=false;
-    o->total_steps=0; o->total_steps_explicit=false;
+    o->total_steps=DEFAULT_TOTAL_STEPS; o->total_steps_explicit=false;
     o->tokenizer_only=false; o->use_existing_tokenizer=false;
 
     for (int i = 1; i < argc; i++) {
@@ -220,6 +228,17 @@ static int parse_arguments(int argc, char** argv, bool* resume,
                 die("--lr-schedule must be cosine or constant");
             o->lr_schedule=argv[i];
         }
+        else if (strcmp(argv[i], "--corpus-mix") == 0) {
+            if (++i >= argc) die("--corpus-mix requires proportional, sqrt, or equal");
+            if (strcmp(argv[i], "proportional") == 0)
+                o->corpus_mix = CORPUS_MIX_PROPORTIONAL;
+            else if (strcmp(argv[i], "sqrt") == 0)
+                o->corpus_mix = CORPUS_MIX_SQRT;
+            else if (strcmp(argv[i], "equal") == 0)
+                o->corpus_mix = CORPUS_MIX_EQUAL;
+            else
+                die("--corpus-mix must be proportional, sqrt, or equal");
+        }
         else if (strcmp(argv[i], "--optimizer") == 0) {
             if (++i >= argc) die("--optimizer requires adamw or lion");
             if (strcmp(argv[i], "adamw") == 0)
@@ -240,6 +259,10 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (++i >= argc) die("--lr requires a value");
             o->learning_rate=parse_float_value("--lr",argv[i],1e-7f,1.0f);
             o->learning_rate_explicit=true;
+        }
+        else if (strcmp(argv[i], "--grad-clip") == 0) {
+            if (++i >= argc) die("--grad-clip requires a value");
+            o->grad_clip_norm=parse_float_value("--grad-clip",argv[i],0.0f,1000.0f);
         }
         else if (strcmp(argv[i], "--weight-decay") == 0) {
             if (++i >= argc) die("--weight-decay requires a value");
@@ -527,36 +550,110 @@ int main(int argc, char** argv) {
     }
 
     // ------------------------------------------------------------------
-    // 4. Encode the complete corpus and create held-out validation region
+    // 4. Encode each source and create source-local held-out regions
     // ------------------------------------------------------------------
-    if (corpus_len > SIZE_MAX / sizeof(uint16_t))
+    const size_t source_count = have_corpus ? loaded_corpus.source_count : 1u;
+    if (source_count == 0 || source_count > TRAIN_MAX_SOURCES ||
+        source_count > SIZE_MAX / 2u ||
+        corpus_len > SIZE_MAX - 2u * source_count)
+        die("corpus source metadata or token mapping size is invalid");
+    const size_t token_capacity = corpus_len + 2u * source_count;
+    if (token_capacity > (size_t)INT_MAX ||
+        token_capacity > SIZE_MAX / sizeof(uint16_t))
         die("token ID mapping size overflow");
     MappedBuffer token_ids_mapping;
     memset(&token_ids_mapping, 0, sizeof(token_ids_mapping));
     if (!mapped_buffer_create(&token_ids_mapping,
-            corpus_len * sizeof(uint16_t)))
+            token_capacity * sizeof(uint16_t)))
         die("could not create disk-backed token ID mapping");
     uint16_t* all_ids = (uint16_t*)token_ids_mapping.data;
+    TrainSourceSpan train_sources[TRAIN_MAX_SOURCES];
+    size_t train_source_count = 0;
+    size_t token_cursor = 0;
+    int train_tokens = 0;
+    int validation_tokens = 0;
+    const int minimum_source_text_tokens = options.sequence_length * 2;
 
-    const int n_tokens = tokenizer_encode(&tok, corpus, corpus_len,
-        all_ids, (int)corpus_len);
-    if (n_tokens <= 0) die("corpus tokenization failed");
-    printf("total tokens = %d (disk-backed token array: %.1f MiB)\n\n",
-        n_tokens, (double)corpus_len * sizeof(uint16_t) /
-            (1024.0 * 1024.0));
+    /* Tokenize each file independently so BPE merges cannot manufacture
+       cross-file text. EOS markers terminate each source's train and held-out
+       piece, and sampling never crosses either boundary. */
+    for (size_t source_index = 0; source_index < source_count; ++source_index) {
+        const uint8_t* source_text = corpus;
+        size_t source_bytes = corpus_len;
+        const char* source_name = "synthetic corpus";
+        if (have_corpus) {
+            const CorpusSource* source = &loaded_corpus.sources[source_index];
+            source_text = corpus + source->byte_start;
+            source_bytes = source->byte_length;
+            source_name = source->path;
+        }
+        if (source_bytes == 0 || source_bytes > (size_t)INT_MAX ||
+            token_cursor >= token_capacity)
+            die("corpus source has invalid byte or token bounds");
+
+        const size_t source_token_start = token_cursor;
+        if (token_capacity - token_cursor < 2u)
+            die("token mapping has no room for source boundary markers");
+        const int out_capacity = (int)(token_capacity - token_cursor - 2u);
+        const int encoded = tokenizer_encode(&tok, source_text, source_bytes,
+            all_ids + token_cursor, out_capacity);
+        if (encoded <= 0) die("corpus tokenization failed for %s", source_name);
+
+        if (encoded < minimum_source_text_tokens) {
+            printf("Skipping training source too short for separate train/validation windows: %s (%zu tokens)\n",
+                source_name, (size_t)encoded);
+            token_cursor = source_token_start;
+            continue;
+        }
+
+        int validation_text_count = encoded / 20;
+        if (validation_text_count < options.sequence_length)
+            validation_text_count = options.sequence_length;
+        if (validation_text_count > encoded - options.sequence_length)
+            validation_text_count = encoded - options.sequence_length;
+        const int source_train_text_count = encoded - validation_text_count;
+        if (source_train_text_count < options.sequence_length ||
+            validation_text_count < options.sequence_length) {
+            token_cursor = source_token_start;
+            continue;
+        }
+
+        const size_t validation_text_start =
+            source_token_start + (size_t)source_train_text_count;
+        memmove(all_ids + validation_text_start + 1u,
+            all_ids + validation_text_start,
+            (size_t)validation_text_count * sizeof(uint16_t));
+        all_ids[validation_text_start] = TOK_EOS_ID;
+        all_ids[validation_text_start + 1u + (size_t)validation_text_count] = TOK_EOS_ID;
+
+        TrainSourceSpan* span = &train_sources[train_source_count++];
+        span->name = source_name;
+        span->train_start = (int)source_token_start;
+        span->train_tokens = source_train_text_count + 1;
+        span->validation_start = (int)validation_text_start + 1;
+        span->validation_tokens = validation_text_count + 1;
+        train_tokens += span->train_tokens;
+        validation_tokens += span->validation_tokens;
+        token_cursor += (size_t)encoded + 2u;
+    }
+
+    if (train_source_count == 0 || token_cursor == 0)
+        die("no corpus source is long enough for the configured sequence length");
+    const int n_tokens = (int)token_cursor;
+    printf("total tokens = %d from %zu usable sources (disk-backed token array: %.1f MiB)\n\n",
+        n_tokens, train_source_count,
+        (double)token_capacity * sizeof(uint16_t) / (1024.0 * 1024.0));
 
     /* Raw source bytes are no longer needed after tokenization. Releasing this
        separate arena avoids retaining the complete text beside the token map. */
     arena_free(&corpus_arena);
 
-    const int train_tokens = n_tokens - n_tokens / 20;
-    const int validation_tokens = n_tokens - train_tokens;
-    if (train_tokens < options.batch_size * options.sequence_length + 1 ||
-        validation_tokens < options.batch_size * options.sequence_length + 1)
-        die("corpus too small for a 95/5 train/validation split");
+    if (train_tokens < options.sequence_length + 1 ||
+        validation_tokens < options.sequence_length + 1)
+        die("usable corpus sources are too small for the configured sequence length");
 
-    printf("Training tokens:   %d (95%%)\n", train_tokens);
-    printf("Validation tokens: %d (5%%)\n\n", validation_tokens);
+    printf("Training tokens:   %d (source-wise held-out split)\n", train_tokens);
+    printf("Validation tokens: %d (source-wise held-out split)\n\n", validation_tokens);
 
     // ------------------------------------------------------------------
     // 5. Model, optimizer, gradients, and optional checkpoint restore
@@ -647,7 +744,7 @@ int main(int argc, char** argv) {
 
     // Establish one schedule horizon on a fresh run and persist it before updates.
     if (!resume) {
-        const int total_steps = options.total_steps_explicit ? options.total_steps : steps_to_run;
+        const int total_steps = options.total_steps;
         if (total_steps < steps_to_run)
             die("--total-steps must be at least --steps for a fresh run");
         opt.schedule_base_lr = options.learning_rate;
@@ -668,10 +765,14 @@ int main(int argc, char** argv) {
         .checkpoint_interval = options.checkpoint_interval,
         .batch_size = options.batch_size,
         .sequence_length = options.sequence_length,
+        .grad_clip_norm = options.grad_clip_norm,
         .seed = options.seed,
         .tokenizer_sample_bytes = options.tokenizer_sample_bytes,
         .tokenizer_spread = options.tokenizer_spread,
         .diagnostics_only = diagnostics_only,
+        .corpus_mix = options.corpus_mix,
+        .corpus_sources = train_sources,
+        .corpus_source_count = train_source_count,
         .activation_bytes = activation_bytes,
         .metrics_path = options.metrics_path,
         .stop_file = options.stop_file,

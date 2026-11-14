@@ -84,6 +84,8 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_max_tokens (*page_controls->max_tokens)
 #define g_lr_schedule (*page_controls->lr_schedule)
 #define g_tokenizer_sampling (*page_controls->tokenizer_sampling)
+#define g_corpus_mix (*page_controls->corpus_mix)
+#define g_grad_clip (*page_controls->grad_clip)
 #define g_total_steps (*page_controls->total_steps)
 #define g_status (*page_controls->status)
 #define g_graph (*page_controls->graph)
@@ -112,16 +114,16 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     g_max_seq=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,540,173,42,23,parent,NULL,NULL,NULL);
 
     CreateWindowW(L"STATIC",L"Steps",WS_CHILD|WS_VISIBLE,12,210,42,18,parent,NULL,NULL,NULL);
-    g_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,parent,(HMENU)(INT_PTR)IDC_STEPS,NULL,NULL);
+    g_steps=CreateWindowW(L"EDIT",L"10000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,56,207,58,23,parent,(HMENU)(INT_PTR)IDC_STEPS,NULL,NULL);
     g_resume=CreateWindowW(L"BUTTON",L"Resume",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,118,208,75,23,parent,(HMENU)(INT_PTR)IDC_RESUME,NULL,NULL);
     CreateWindowW(L"STATIC",L"Batch",WS_CHILD|WS_VISIBLE,198,210,38,18,parent,NULL,NULL,NULL);
     g_batch_size=CreateWindowW(L"EDIT",L"4",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,237,207,35,23,parent,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Seq",WS_CHILD|WS_VISIBLE,278,210,30,18,parent,NULL,NULL,NULL);
-    g_sequence_length=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,309,207,40,23,parent,NULL,NULL,NULL);
+    g_sequence_length=CreateWindowW(L"EDIT",L"64",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,309,207,40,23,parent,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"LR",WS_CHILD|WS_VISIBLE,355,210,22,18,parent,NULL,NULL,NULL);
     g_lr=CreateWindowW(L"EDIT",L"0.0003",WS_CHILD|WS_VISIBLE|WS_BORDER,379,207,65,23,parent,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,450,210,52,18,parent,NULL,NULL,NULL);
-    g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,parent,NULL,NULL,NULL);
+    g_warmup=CreateWindowW(L"EDIT",L"2500",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,parent,NULL,NULL,NULL);
 
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,parent,NULL,NULL,NULL));
     g_log_interval=CreateWindowW(L"EDIT",L"1000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_log_interval);
@@ -152,8 +154,16 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Tokenizer sample",WS_CHILD|WS_VISIBLE,330,329,95,18,parent,NULL,NULL,NULL));
     g_tokenizer_sampling=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,427,326,95,100,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_tokenizer_sampling);
     SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"spread");SendMessageW(g_tokenizer_sampling,CB_ADDSTRING,0,(LPARAM)L"prefix");SendMessageW(g_tokenizer_sampling,CB_SETCURSEL,0,0);
+    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Data mix",WS_CHILD|WS_VISIBLE,12,362,90,18,parent,NULL,NULL,NULL));
+    g_corpus_mix=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,124,358,150,100,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_corpus_mix);
+    SendMessageW(g_corpus_mix,CB_ADDSTRING,0,(LPARAM)L"sqrt");
+    SendMessageW(g_corpus_mix,CB_ADDSTRING,0,(LPARAM)L"proportional");
+    SendMessageW(g_corpus_mix,CB_ADDSTRING,0,(LPARAM)L"equal");
+    SendMessageW(g_corpus_mix,CB_SETCURSEL,0,0);
+    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Clip norm",WS_CHILD|WS_VISIBLE,300,362,82,18,parent,NULL,NULL,NULL));
+    g_grad_clip=CreateWindowW(L"EDIT",L"1.0",WS_CHILD|WS_VISIBLE|WS_BORDER,390,358,60,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_grad_clip);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,parent,NULL,NULL,NULL));
-    g_total_steps=CreateWindowW(L"EDIT",L"2000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_total_steps);
+    g_total_steps=CreateWindowW(L"EDIT",L"50000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_total_steps);
 
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,parent,(HMENU)(INT_PTR)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,parent,(HMENU)(INT_PTR)IDC_STOP,NULL,NULL);
@@ -214,6 +224,8 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #undef g_max_tokens
 #undef g_lr_schedule
 #undef g_tokenizer_sampling
+#undef g_corpus_mix
+#undef g_grad_clip
 #undef g_total_steps
 #undef g_status
 #undef g_graph

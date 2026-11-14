@@ -27,7 +27,7 @@ extern HWND g_window, g_corpus, g_log, g_main_tabs;
 extern HWND g_chat_input, g_chat_test, g_graph;
 extern HWND g_group_corpus, g_group_model, g_group_training;
 extern HWND g_group_advanced, g_group_monitor, g_group_output, g_output_label;
-extern HWND g_advanced_controls[32];
+extern HWND g_advanced_controls[64];
 extern int g_advanced_control_count;
 extern GuiInitialRect g_initial_rects[160];
 extern int g_initial_rect_count;

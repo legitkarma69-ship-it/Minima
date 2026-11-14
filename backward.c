@@ -30,6 +30,57 @@ void gradients_zero(Gradients* g, const Model* model) {
     memset(g->rms_final_scale, 0, (size_t)model->dim * sizeof(float));
 }
 
+double gradients_clip_global_norm(Gradients* g, const Model* model,
+    float max_norm, bool* clipped_out) {
+    if (clipped_out) *clipped_out = false;
+    if (!g || !model || !model_validate(model) ||
+        g->vocab_size != model->vocab_size || g->dim != model->dim ||
+        g->n_layers != model->n_layers || g->ffn_dim != model->ffn_dim ||
+        g->weight_bytes != model->weight_bytes ||
+        !isfinite(max_norm) || max_norm < 0.0f ||
+        !g->tok_emb || !g->attn_qkv || !g->attn_proj || !g->ffn_up ||
+        !g->ffn_gate || !g->ffn_down || !g->rms1_scale ||
+        !g->rms2_scale || !g->rms_final_scale)
+        return NAN;
+
+    float* tensors[] = {
+        g->tok_emb, g->attn_qkv, g->attn_proj, g->ffn_up,
+        g->ffn_gate, g->ffn_down, g->rms1_scale, g->rms2_scale,
+        g->rms_final_scale
+    };
+    const size_t counts[] = {
+        (size_t)model->vocab_size * model->dim,
+        (size_t)model->n_layers * model->qkv_dim * model->dim,
+        (size_t)model->n_layers * model->dim * model->dim,
+        (size_t)model->n_layers * model->ffn_dim * model->dim,
+        (size_t)model->n_layers * model->ffn_dim * model->dim,
+        (size_t)model->n_layers * model->dim * model->ffn_dim,
+        (size_t)model->n_layers * model->dim,
+        (size_t)model->n_layers * model->dim,
+        (size_t)model->dim
+    };
+    double squared_norm = 0.0;
+    for (size_t tensor = 0; tensor < sizeof(tensors) / sizeof(tensors[0]); ++tensor) {
+        for (size_t i = 0; i < counts[tensor]; ++i) {
+            const double gradient = tensors[tensor][i];
+            if (!isfinite(gradient)) return NAN;
+            squared_norm += gradient * gradient;
+        }
+    }
+    if (!isfinite(squared_norm)) return NAN;
+    const double norm = sqrt(squared_norm);
+    if (!isfinite(norm)) return NAN;
+    if (clipped_out) *clipped_out = false;
+    if (max_norm > 0.0f && norm > (double)max_norm) {
+        const double scale = (double)max_norm / norm;
+        for (size_t tensor = 0; tensor < sizeof(tensors) / sizeof(tensors[0]); ++tensor)
+            for (size_t i = 0; i < counts[tensor]; ++i)
+                tensors[tensor][i] = (float)((double)tensors[tensor][i] * scale);
+        if (clipped_out) *clipped_out = true;
+    }
+    return norm;
+}
+
 bool gradients_init(Gradients* g, Arena* arena, const Model* model) {
     if (!g || !arena || !arena->base || arena->used > arena->size ||
         !model_validate(model))

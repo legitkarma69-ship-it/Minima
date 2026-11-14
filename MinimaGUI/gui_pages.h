@@ -29,6 +29,8 @@ typedef struct {
     HWND* max_tokens;
     HWND* lr_schedule;
     HWND* tokenizer_sampling;
+    HWND* corpus_mix;
+    HWND* grad_clip;
     HWND* total_steps;
     HWND* status;
     HWND* graph;

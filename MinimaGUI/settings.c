@@ -8,23 +8,23 @@
 #define _countof(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
-static const wchar_t* const g_edit_keys[23] = {
+static const wchar_t* const g_edit_keys[24] = {
     L"steps", L"vocab", L"dim", L"layers", L"heads", L"ffn", L"context",
     L"batch", L"sequence", L"learning_rate", L"warmup", L"total_steps",
     L"log_interval", L"validation_interval", L"validation_batches",
     L"checkpoint_interval", L"seed", L"tokenizer_bytes", L"temperature",
-    L"top_k", L"top_p", L"repetition", L"max_tokens"
+    L"top_k", L"top_p", L"repetition", L"max_tokens", L"grad_clip"
 };
-static const wchar_t* const g_edit_defaults[23] = {
-    L"2000", L"2048", L"64", L"2", L"2", L"128", L"64", L"4", L"32",
-    L"0.0003", L"100", L"20000", L"1000", L"1000", L"16", L"1000", L"1234",
-    L"1048576", L"0.8", L"40", L"0.9", L"1.1", L"32"
+static const wchar_t* const g_edit_defaults[24] = {
+    L"10000", L"2048", L"64", L"2", L"2", L"128", L"64", L"4", L"64",
+    L"0.0003", L"2500", L"50000", L"1000", L"1000", L"16", L"1000", L"1234",
+    L"1048576", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0"
 };
-static const wchar_t* const g_combo_keys[2] = {
-    L"lr_schedule", L"tokenizer_sampling"
+static const wchar_t* const g_combo_keys[3] = {
+    L"lr_schedule", L"tokenizer_sampling", L"corpus_mix"
 };
-static const wchar_t* const g_combo_defaults[2] = {
-    L"cosine", L"spread"
+static const wchar_t* const g_combo_defaults[3] = {
+    L"cosine", L"spread", L"sqrt"
 };
 
 static void load_edit_setting(const wchar_t* path, const wchar_t* key,
@@ -88,11 +88,11 @@ static void save_combo_setting(const wchar_t* path, const wchar_t* key, HWND con
 
 void minima_settings_load(const MinimaSettingsContext* context) {
     if (!context || !context->path || !context->path[0]) return;
-    for (int i = 0; i < 23; ++i)
+    for (int i = 0; i < 24; ++i)
         load_edit_setting(context->path, g_edit_keys[i],
             context->edit_controls[i], g_edit_defaults[i]);
     migrate_long_run_intervals(context);
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 3; ++i)
         load_combo_setting(context->path, g_combo_keys[i],
             context->combo_controls[i], g_combo_defaults[i]);
 
@@ -134,9 +134,9 @@ void minima_settings_load(const MinimaSettingsContext* context) {
 
 void minima_settings_reset_defaults(const MinimaSettingsContext* context) {
     if (!context) return;
-    for (int i = 0; i < 23; ++i)
+    for (int i = 0; i < 24; ++i)
         SetWindowTextW(context->edit_controls[i], g_edit_defaults[i]);
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 3; ++i) {
         LRESULT index = SendMessageW(context->combo_controls[i],
             CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)g_combo_defaults[i]);
         if (index >= 0)
@@ -156,9 +156,9 @@ void minima_settings_reset_defaults(const MinimaSettingsContext* context) {
 
 void minima_settings_save(const MinimaSettingsContext* context) {
     if (!context || !context->path || !context->path[0]) return;
-    for (int i = 0; i < 23; ++i)
+    for (int i = 0; i < 24; ++i)
         save_edit_setting(context->path, g_edit_keys[i], context->edit_controls[i]);
-    for (int i = 0; i < 2; ++i)
+    for (int i = 0; i < 3; ++i)
         save_combo_setting(context->path, g_combo_keys[i], context->combo_controls[i]);
 
     WritePrivateProfileStringW(L"UI", L"advanced_expanded",

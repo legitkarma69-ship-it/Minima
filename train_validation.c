@@ -45,8 +45,17 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
         return validation_fail(reason_out, "log, validation, and checkpoint intervals must be positive");
     if (options.validation_batches <= 0)
         return validation_fail(reason_out, "validation batch count must be positive");
+    if (options.corpus_mix != CORPUS_MIX_PROPORTIONAL &&
+        options.corpus_mix != CORPUS_MIX_SQRT &&
+        options.corpus_mix != CORPUS_MIX_EQUAL)
+        return validation_fail(reason_out, "corpus mixture mode is invalid");
+    if (options.corpus_source_count > TRAIN_MAX_SOURCES ||
+        (options.corpus_source_count > 0 && !options.corpus_sources))
+        return validation_fail(reason_out, "corpus source metadata is invalid");
     if (options.batch_size <= 0 || options.sequence_length <= 0)
         return validation_fail(reason_out, "batch size and sequence length must be positive");
+    if (!isfinite(options.grad_clip_norm) || options.grad_clip_norm < 0.0f)
+        return validation_fail(reason_out, "gradient clipping norm must be finite and non-negative");
 
     if (!model_validate(model) ||
         options.sequence_length > model->max_seq)
@@ -101,11 +110,36 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
         batch_tokens > SIZE_MAX / (size_t)model->vocab_size / sizeof(float) ||
         batch_tokens > SIZE_MAX / sizeof(uint16_t))
         return validation_fail(reason_out, "training scratch dimensions overflow");
-    if (train_tokens < (int)batch_tokens + 1 ||
-        validation_tokens < (int)batch_tokens + 1)
-        return validation_fail(reason_out, "training and validation splits must each contain at least batch_size * sequence_length + 1 tokens");
+    const int minimum_split_tokens = options.corpus_source_count > 0
+        ? options.sequence_length + 1 : (int)batch_tokens + 1;
+    if (train_tokens < minimum_split_tokens ||
+        validation_tokens < minimum_split_tokens)
+        return validation_fail(reason_out, "training and validation data do not contain enough tokens for the configured sequence windows");
     if ((int64_t)train_tokens + validation_tokens > INT_MAX)
         return validation_fail(reason_out, "combined training and validation token count overflows supported indexing");
+
+    if (options.corpus_source_count > 0) {
+        int64_t source_train_total = 0;
+        int64_t source_validation_total = 0;
+        const int minimum_source_tokens = options.sequence_length + 1;
+        for (size_t i = 0; i < options.corpus_source_count; ++i) {
+            const TrainSourceSpan* source = &options.corpus_sources[i];
+            if (source->train_start < 0 || source->validation_start < 0 ||
+                source->train_tokens < minimum_source_tokens ||
+                source->validation_tokens < minimum_source_tokens)
+                return validation_fail(reason_out, "each corpus source must contain valid train and held-out windows");
+            if ((int64_t)source->train_start + source->train_tokens >
+                    (int64_t)train_tokens + validation_tokens ||
+                (int64_t)source->validation_start + source->validation_tokens >
+                    (int64_t)train_tokens + validation_tokens)
+                return validation_fail(reason_out, "corpus source range exceeds the token array");
+            source_train_total += source->train_tokens;
+            source_validation_total += source->validation_tokens;
+        }
+        if (source_train_total != train_tokens ||
+            source_validation_total != validation_tokens)
+            return validation_fail(reason_out, "corpus source ranges do not match aggregate split sizes");
+    }
 
     if ((size_t)options.validation_batches >
         SIZE_MAX / (size_t)options.batch_size)
