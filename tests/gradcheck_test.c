@@ -73,6 +73,36 @@ static bool gradients_match_snapshot(const Gradients* g, const Model* model,
         offset * sizeof(float) == model->weight_bytes;
 }
 
+static int test_cross_entropy_in_place(void) {
+    enum { ROWS = 5, VOCAB = 11, ELEMENTS = ROWS * VOCAB };
+    float separate_logits[ELEMENTS];
+    float in_place_logits[ELEMENTS];
+    float separate_gradients[ELEMENTS];
+    uint16_t targets[ROWS];
+
+    for (int i = 0; i < ELEMENTS; ++i) {
+        const int centered = (i * 17 + 5) % 29;
+        separate_logits[i] = (float)(centered - 14) * 0.1375f;
+    }
+    for (int i = 0; i < ROWS; ++i)
+        targets[i] = (uint16_t)((i * 7 + 3) % VOCAB);
+    memcpy(in_place_logits, separate_logits, sizeof(separate_logits));
+
+    const float separate_loss = loss_cross_entropy(separate_logits, targets,
+        separate_gradients, 1, ROWS, VOCAB);
+    const float in_place_loss = loss_cross_entropy(in_place_logits, targets,
+        in_place_logits, 1, ROWS, VOCAB);
+
+    CHECK(isfinite(separate_loss));
+    CHECK(isfinite(in_place_loss));
+    CHECK(separate_loss == in_place_loss);
+    CHECK(memcmp(separate_logits, in_place_logits, sizeof(separate_logits)) == 0);
+    CHECK(memcmp(separate_gradients, in_place_logits,
+        sizeof(separate_gradients)) == 0);
+    puts("  cross-entropy exact in-place alias: PASS");
+    return 0;
+}
+
 static int run_case(uint64_t seed) {
     const ModelConfig config = { 2048, 64, 2, 2, 128, 64 };
     Arena model_arena, gradient_arena, temp_arena;
@@ -144,6 +174,7 @@ static int run_case(uint64_t seed) {
 }
 
 int main(void) {
+    CHECK(test_cross_entropy_in_place() == 0);
     CHECK(run_case(1234) == 0);
     CHECK(run_case(5678) == 0);
     CHECK(run_case(98765) == 0);
