@@ -28,17 +28,17 @@
 #endif
 
 #define DEFAULT_BATCH_SIZE 4
-#define DEFAULT_SEQUENCE_LENGTH 64
+#define DEFAULT_SEQUENCE_LENGTH 128
 #define DEFAULT_STEPS 10000
-#define DEFAULT_TOTAL_STEPS 50000
-#define DEFAULT_LR 3e-4f
+#define DEFAULT_TOTAL_STEPS 100000
+#define DEFAULT_LR 2e-4f
 #define DEFAULT_LION_LR 3e-5f
 #define DEFAULT_LION_WEIGHT_DECAY 0.1f
-#define DEFAULT_WARMUP_STEPS 2500
+#define DEFAULT_WARMUP_STEPS 3000
 #define DEFAULT_LOG_INTERVAL 1000
 #define DEFAULT_VALIDATION_BATCHES 16
 #define DEFAULT_CHECKPOINT_INTERVAL 1000
-#define DEFAULT_TOKENIZER_SAMPLE_BYTES (1024u * 1024u)
+#define DEFAULT_TOKENIZER_SAMPLE_BYTES (4u * 1024u * 1024u)
 
 typedef struct {
     float learning_rate;
@@ -96,7 +96,7 @@ static uint64_t hash_bytes(uint64_t hash, const void* data, size_t length) {
 static void print_usage(const char* exe) {
     printf("Usage: %s [options] [corpus.txt ...]\n", exe);
     printf("  --resume --steps N --total-steps N --lr FLOAT --warmup N --log-interval N\n");
-    printf("  Defaults: 10,000 steps in a 50,000-step schedule; warmup 2,500\n");
+    printf("  Defaults: 10,000 steps in a 100,000-step schedule; warmup 3,000\n");
     printf("  --validation-batches N --validation-interval N --checkpoint-interval N --seed N\n");
     printf("  --tokenizer-sample-bytes N --vocab-size N --dim N --layers N\n");
     printf("  --heads N --ffn-dim N --max-seq N --batch-size N --sequence-length N\n");
@@ -180,7 +180,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=4194304; }
             if (strcmp(opt,"--threads")==0) { lo=1; hi=256; }
-            if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=8192; }
+            if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=MODEL_MAX_VOCAB_SIZE; }
             if (strcmp(opt,"--dim")==0) { lo=1; hi=512; }
             if (strcmp(opt,"--layers")==0) { lo=1; hi=16; }
             if (strcmp(opt,"--heads")==0) { lo=1; hi=32; }
@@ -486,7 +486,7 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------
     // 3. Load or train tokenizer
     // ------------------------------------------------------------------
-    Tokenizer tok;
+    static Tokenizer tok;
     if (resume || options.use_existing_tokenizer) {
         if (!tokenizer_load(&tok, &arena, "minima.bpe"))
             die(resume ? "resume requested, but minima.bpe could not be loaded" :
