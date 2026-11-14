@@ -75,6 +75,7 @@ static bool gradients_match_snapshot(const Gradients* g, const Model* model,
 
 static int test_cross_entropy_in_place(void) {
     enum { ROWS = 5, VOCAB = 11, ELEMENTS = ROWS * VOCAB };
+    float original_logits[ELEMENTS];
     float separate_logits[ELEMENTS];
     float in_place_logits[ELEMENTS];
     float separate_gradients[ELEMENTS];
@@ -82,11 +83,12 @@ static int test_cross_entropy_in_place(void) {
 
     for (int i = 0; i < ELEMENTS; ++i) {
         const int centered = (i * 17 + 5) % 29;
-        separate_logits[i] = (float)(centered - 14) * 0.1375f;
+        original_logits[i] = (float)(centered - 14) * 0.1375f;
     }
     for (int i = 0; i < ROWS; ++i)
         targets[i] = (uint16_t)((i * 7 + 3) % VOCAB);
-    memcpy(in_place_logits, separate_logits, sizeof(separate_logits));
+    memcpy(separate_logits, original_logits, sizeof(original_logits));
+    memcpy(in_place_logits, original_logits, sizeof(original_logits));
 
     const float separate_loss = loss_cross_entropy(separate_logits, targets,
         separate_gradients, 1, ROWS, VOCAB);
@@ -96,7 +98,7 @@ static int test_cross_entropy_in_place(void) {
     CHECK(isfinite(separate_loss));
     CHECK(isfinite(in_place_loss));
     CHECK(separate_loss == in_place_loss);
-    CHECK(memcmp(separate_logits, in_place_logits, sizeof(separate_logits)) == 0);
+    CHECK(memcmp(separate_logits, original_logits, sizeof(separate_logits)) == 0);
     CHECK(memcmp(separate_gradients, in_place_logits,
         sizeof(separate_gradients)) == 0);
     puts("  cross-entropy exact in-place alias: PASS");
