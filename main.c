@@ -730,10 +730,10 @@ int main(int argc, char** argv) {
         (optimizer_type == OPTIMIZER_LION ? 1.0 : 2.0);
     const double activation_mib = (double)activation_bytes / (1024.0 * 1024.0);
     printf("Estimated training working set: weights %.1f + gradients %.1f + "
-        "optimizer %.1f + activations/logits %.1f = %.1f MiB\\n",
+        "optimizer %.1f + activations/logits %.1f = %.1f MiB\n",
         weight_mib, gradient_mib, optimizer_mib, activation_mib,
         weight_mib + gradient_mib + optimizer_mib + activation_mib);
-    printf("  Excludes tokenizer workspace, mapped corpus token IDs, and process/runtime overhead.\\n");
+    printf("  Excludes tokenizer workspace, mapped corpus token IDs, and process/runtime overhead.\n");
     // ------------------------------------------------------------------
     // 6. Numerical gradient check
     // ------------------------------------------------------------------
