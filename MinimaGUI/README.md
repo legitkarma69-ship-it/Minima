@@ -65,6 +65,7 @@ Chat requires `minima.model` and `minima.bpe`. Set the model configuration contr
 - Stop training creates `minima.stop`; the engine finishes its current optimizer step, evaluates, saves a checkpoint, and exits.
 - Save checkpoint creates `minima.save`; the engine saves at the next optimizer-step boundary.
 - Automatic checkpoints are written at the configured interval and at the end of a training segment.
+- Long-run progress, validation, and checkpoint intervals default to 1,000 steps. Auto settings scale them with the planned run length, and the Advanced page keeps each interval editable.
 - `minima_metrics.csv`, `minima_chat.txt`, and signal files are stored beside the executables.
 
 A Windows x64 GitHub Actions workflow builds both executables and publishes them as a downloadable artifact for each successful build.

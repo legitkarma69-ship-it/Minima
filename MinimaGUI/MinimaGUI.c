@@ -564,7 +564,9 @@ static void apply_auto_settings(void) {
     }
     long steps=(long)raw_steps; if((long double)steps<raw_steps)steps++;
     long warmup=steps/100; if(warmup<10)warmup=10; if(warmup>500)warmup=500;
-    long interval=steps/100; if(interval<25)interval=25; if(interval>1000)interval=1000;
+    long interval=steps/50;
+    if(interval<1000)interval=1000;
+    if(interval>10000)interval=10000;
     unsigned long long sample=corpus_bytes/20; if(sample<65536ULL)sample=65536ULL; if(sample>1048576ULL)sample=1048576ULL;
     wchar_t value[64];
     _snwprintf_s(value,_countof(value),_TRUNCATE,L"%ld",steps); SetWindowTextW(g_steps,value); SetWindowTextW(g_total_steps,value);
@@ -844,6 +846,7 @@ static void create_controls(HWND hwnd) {
         SendMessageW(g_tooltip, TTM_SETDELAYTIME, TTDT_INITIAL, 500);
         add_tooltip(g_steps, L"Number of additional optimizer updates in this run.");
         add_tooltip(g_total_steps, L"Global learning-rate schedule horizon for a fresh run. Resume restores the horizon stored in the checkpoint.");
+        add_tooltip(g_log_interval, L"Optimizer steps between progress summaries. Long runs default to 1,000 steps; you can change this value at any time before training.");
         add_tooltip(g_batch_size, L"Number of independent training sequences in each update.");
         add_tooltip(g_sequence_length, L"Number of tokens processed per sequence. Must not exceed model context length.");
         add_tooltip(g_lr, L"Base learning rate. The cosine or constant schedule is applied to this value.");

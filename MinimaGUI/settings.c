@@ -17,7 +17,7 @@ static const wchar_t* const g_edit_keys[23] = {
 };
 static const wchar_t* const g_edit_defaults[23] = {
     L"2000", L"2048", L"64", L"2", L"2", L"128", L"64", L"4", L"32",
-    L"0.0003", L"100", L"20000", L"100", L"100", L"16", L"100", L"1234",
+    L"0.0003", L"100", L"20000", L"1000", L"1000", L"16", L"1000", L"1234",
     L"1048576", L"0.8", L"40", L"0.9", L"1.1", L"32"
 };
 static const wchar_t* const g_combo_keys[2] = {
@@ -33,6 +33,33 @@ static void load_edit_setting(const wchar_t* path, const wchar_t* key,
     GetPrivateProfileStringW(L"Training", key, fallback, value,
         (DWORD)_countof(value), path);
     SetWindowTextW(control, value);
+}
+
+static BOOL read_positive_edit_value(HWND control, long* value_out) {
+    wchar_t text[64], *end = NULL;
+    GetWindowTextW(control, text, (int)_countof(text));
+    if (!text[0]) return FALSE;
+    const long value = wcstol(text, &end, 10);
+    if (!end || *end || value < 1) return FALSE;
+    *value_out = value;
+    return TRUE;
+}
+
+static void migrate_long_run_intervals(const MinimaSettingsContext* context) {
+    long run_steps = 0, schedule_steps = 0;
+    (void)read_positive_edit_value(context->edit_controls[0], &run_steps);
+    (void)read_positive_edit_value(context->edit_controls[11], &schedule_steps);
+    if (run_steps < 50000 && schedule_steps < 50000) return;
+
+    /* Replace the old spammy default, while preserving any custom interval. */
+    const int interval_fields[] = { 12, 13, 15 };
+    for (int i = 0; i < (int)_countof(interval_fields); ++i) {
+        long interval = 0;
+        const int field = interval_fields[i];
+        if (read_positive_edit_value(context->edit_controls[field], &interval) &&
+            interval == 100)
+            SetWindowTextW(context->edit_controls[field], L"1000");
+    }
 }
 
 static void save_edit_setting(const wchar_t* path, const wchar_t* key, HWND control) {
@@ -64,6 +91,7 @@ void minima_settings_load(const MinimaSettingsContext* context) {
     for (int i = 0; i < 23; ++i)
         load_edit_setting(context->path, g_edit_keys[i],
             context->edit_controls[i], g_edit_defaults[i]);
+    migrate_long_run_intervals(context);
     for (int i = 0; i < 2; ++i)
         load_combo_setting(context->path, g_combo_keys[i],
             context->combo_controls[i], g_combo_defaults[i]);

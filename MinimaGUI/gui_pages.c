@@ -124,13 +124,13 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     g_warmup=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,parent,NULL,NULL,NULL);
 
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,parent,NULL,NULL,NULL));
-    g_log_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_log_interval);
+    g_log_interval=CreateWindowW(L"EDIT",L"1000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_log_interval);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Validate every",WS_CHILD|WS_VISIBLE,132,264,90,18,parent,NULL,NULL,NULL));
-    g_validation_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,261,45,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_validation_interval);
+    g_validation_interval=CreateWindowW(L"EDIT",L"1000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,224,261,45,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_validation_interval);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Val batches",WS_CHILD|WS_VISIBLE,276,264,68,18,parent,NULL,NULL,NULL));
     g_validation_batches=CreateWindowW(L"EDIT",L"16",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,346,261,40,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_validation_batches);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Save every",WS_CHILD|WS_VISIBLE,392,264,65,18,parent,NULL,NULL,NULL));
-    g_checkpoint_interval=CreateWindowW(L"EDIT",L"100",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,261,42,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_checkpoint_interval);
+    g_checkpoint_interval=CreateWindowW(L"EDIT",L"1000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,459,261,42,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_checkpoint_interval);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Seed (fresh)",WS_CHILD|WS_VISIBLE,507,264,55,18,parent,NULL,NULL,NULL));
     g_seed=CreateWindowW(L"EDIT",L"1234",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,542,261,55,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_seed);
 
