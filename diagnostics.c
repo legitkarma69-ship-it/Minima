@@ -357,12 +357,12 @@ static GenerationStats generation_stats(const uint16_t* ids, int start, int coun
     memset(&stats, 0, sizeof(stats));
     if (!ids || start < 0 || count <= 0) return stats;
 
-    uint32_t histogram[8192] = {0};
+    uint32_t histogram[TOK_MAX_VOCAB] = {0};
     int unique = 0;
     int adjacent = 0;
     for (int i = 0; i < count; ++i) {
         const uint16_t id = ids[start + i];
-        if (id < 8192) {
+        if (id < TOK_MAX_VOCAB) {
             if (histogram[id] == 0) unique++;
             histogram[id]++;
         }
@@ -372,7 +372,7 @@ static GenerationStats generation_stats(const uint16_t* ids, int start, int coun
     stats.adjacent_repeat_rate = count > 1
         ? (double)adjacent / (double)(count - 1) : 0.0;
 
-    for (int id = 0; id < 8192; ++id) {
+    for (int id = 0; id < TOK_MAX_VOCAB; ++id) {
         if (histogram[id]) {
             const double p = (double)histogram[id] / (double)count;
             stats.entropy_bits -= p * (log(p) / log(2.0));
