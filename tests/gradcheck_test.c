@@ -55,15 +55,15 @@ static bool snapshot_gradients(const Gradients* g, const Model* model,
 
 static bool gradients_match_snapshot(const Gradients* g, const Model* model,
     const float* snapshot) {
-    size_t counts[10];
+    size_t counts[9];
     const float* tensors[] = {
-        g->tok_emb, g->pos_emb, g->attn_qkv, g->attn_proj,
-        g->ffn_up, g->ffn_gate, g->ffn_down,
-        g->rms1_scale, g->rms2_scale, g->rms_final_scale
+        g->tok_emb, g->attn_qkv, g->attn_proj, g->ffn_up,
+        g->ffn_gate, g->ffn_down, g->rms1_scale,
+        g->rms2_scale, g->rms_final_scale
     };
     gradient_counts(model, counts);
     size_t offset = 0;
-    for (size_t i = 0; i < 10; i++) {
+    for (size_t i = 0; i < 9; i++) {
         const size_t bytes = counts[i] * sizeof(float);
         if (memcmp(snapshot + offset, tensors[i], bytes) != 0)
             return false;
