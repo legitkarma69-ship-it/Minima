@@ -29,11 +29,13 @@ int main(void) {
     model.dim = 8;
     model.n_layers = 1;
     model.n_heads = 2;
+    model.n_kv_heads = 1;
     model.head_dim = 4;
+    model.kv_dim = 4;
+    model.qkv_dim = 16;
     model.ffn_dim = 16;
     model.max_seq = 32;
     model.tok_emb = model_storage;
-    model.pos_emb = model_storage;
     model.attn_qkv = model_storage;
     model.attn_proj = model_storage;
     model.ffn_up = model_storage;
@@ -43,7 +45,7 @@ int main(void) {
     model.rms2_scale = model_storage;
     model.rms_final_scale = model_storage;
     const size_t expected_params =
-        260u * 8u + 32u * 8u + 3u * 8u * 8u + 8u * 8u +
+        260u * 8u + 16u * 8u + 8u * 8u +
         2u * 16u * 8u + 8u * 16u + 2u * 8u + 8u;
     model.weight_bytes = expected_params * sizeof(float);
 
@@ -53,12 +55,14 @@ int main(void) {
     grads.dim = model.dim;
     grads.n_layers = model.n_layers;
     grads.n_heads = model.n_heads;
+    grads.n_kv_heads = model.n_kv_heads;
     grads.head_dim = model.head_dim;
+    grads.kv_dim = model.kv_dim;
+    grads.qkv_dim = model.qkv_dim;
     grads.ffn_dim = model.ffn_dim;
     grads.max_seq = model.max_seq;
     grads.weight_bytes = model.weight_bytes;
     grads.tok_emb = gradient_storage;
-    grads.pos_emb = gradient_storage;
     grads.attn_qkv = gradient_storage;
     grads.attn_proj = gradient_storage;
     grads.ffn_up = gradient_storage;
@@ -81,11 +85,11 @@ int main(void) {
     opt.schedule_warmup_steps = 10;
     opt.schedule_type = 0;
     opt.n_params = expected_params;
-    opt.m_tok_emb = opt.m_pos_emb = opt.m_attn_qkv = opt.m_attn_proj =
+    opt.m_tok_emb = opt.m_attn_qkv = opt.m_attn_proj =
         opt.m_ffn_up = opt.m_ffn_gate = opt.m_ffn_down =
         opt.m_rms1_scale = opt.m_rms2_scale = opt.m_rms_final_scale =
         first_moment;
-    opt.v_tok_emb = opt.v_pos_emb = opt.v_attn_qkv = opt.v_attn_proj =
+    opt.v_tok_emb = opt.v_attn_qkv = opt.v_attn_proj =
         opt.v_ffn_up = opt.v_ffn_gate = opt.v_ffn_down =
         opt.v_rms1_scale = opt.v_rms2_scale = opt.v_rms_final_scale =
         second_moment;
