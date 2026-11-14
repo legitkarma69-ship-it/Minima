@@ -521,8 +521,10 @@ int main(int argc, char** argv) {
             sample_len, tokenizer_sample_segment_ends,
             tokenizer_sample_segment_count, options.model.vocab_size))
             die("tokenizer_train failed");
+        printf("Tokenizer preflight: valid tokenizer produced %d / %d requested vocabulary entries.\\n",
+            tok.vocab_size, options.model.vocab_size);
         if (tok.vocab_size != options.model.vocab_size)
-            die("BPE stopped at vocabulary %d before the configured model vocabulary %d; the sample may not contain enough repeated pairs or eligible merges",
+            die("valid tokenizer did not reach the exact configured vocabulary target (%d / %d); this run treats --vocab-size as a hard requirement. Increase or diversify the tokenizer sample, or lower --vocab-size",
                 tok.vocab_size, options.model.vocab_size);
         if (!tokenizer_save(&tok, "minima.bpe"))
             die("failed to save tokenizer to minima.bpe");
