@@ -1405,6 +1405,7 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) return false;
 
+    Tokenizer* loaded = NULL;
     uint32_t magic = 0;
     int vocab_size = 0;
     int n_merges = 0;
@@ -1417,10 +1418,10 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
         n_merges > vocab_size - 260)
         goto fail;
 
-    Tokenizer loaded;
-    memset(&loaded, 0, sizeof(loaded));
-    loaded.vocab_size = vocab_size;
-    loaded.n_merges = n_merges;
+    loaded = (Tokenizer*)calloc(1, sizeof(*loaded));
+    if (!loaded) goto fail;
+    loaded->vocab_size = vocab_size;
+    loaded->n_merges = n_merges;
 
     for (int i = 0; i < vocab_size; i++) {
         uint16_t len = 0;
@@ -1431,63 +1432,66 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
         if (!s || fread(s, 1, len, f) != len)
             goto fail;
         s[len] = 0;
-        loaded.token_str[i] = s;
-        loaded.token_len[i] = len;
+        loaded->token_str[i] = s;
+        loaded->token_len[i] = len;
     }
 
     if (n_merges > 0 &&
-        fread(loaded.merges, sizeof(Merge), (size_t)n_merges, f) !=
+        fread(loaded->merges, sizeof(Merge), (size_t)n_merges, f) !=
             (size_t)n_merges)
         goto fail;
 
     {
         static const char* reserved[4] = { "<bos>", "<eos>", "<pad>", "<unk>" };
         for (int i = 0; i < 4; i++) {
-            if (loaded.token_len[i] != 5 ||
-                memcmp(loaded.token_str[i], reserved[i], 5) != 0)
+            if (loaded->token_len[i] != 5 ||
+                memcmp(loaded->token_str[i], reserved[i], 5) != 0)
                 goto fail;
         }
         for (int b = 0; b < 256; b++) {
             const int id = TOK_BYTE_START + b;
-            if (loaded.token_len[id] != 1 ||
-                (uint8_t)loaded.token_str[id][0] != (uint8_t)b)
+            if (loaded->token_len[id] != 1 ||
+                (uint8_t)loaded->token_str[id][0] != (uint8_t)b)
                 goto fail;
         }
     }
 
     for (int i = 0; i < n_merges; i++) {
         const uint16_t new_id = (uint16_t)(260 + i);
-        const uint16_t left = loaded.merges[i].left;
-        const uint16_t right = loaded.merges[i].right;
+        const uint16_t left = loaded->merges[i].left;
+        const uint16_t right = loaded->merges[i].right;
         if (left >= new_id || right >= new_id)
             goto fail;
-        const int left_len = loaded.token_len[left];
-        const int right_len = loaded.token_len[right];
+        const int left_len = loaded->token_len[left];
+        const int right_len = loaded->token_len[right];
         if (left_len <= 0 || right_len <= 0 ||
             left_len > TOK_MAX_TOKEN_LEN - right_len ||
-            loaded.token_len[new_id] != left_len + right_len ||
-            memcmp(loaded.token_str[new_id], loaded.token_str[left],
+            loaded->token_len[new_id] != left_len + right_len ||
+            memcmp(loaded->token_str[new_id], loaded->token_str[left],
                 (size_t)left_len) != 0 ||
-            memcmp(loaded.token_str[new_id] + left_len,
-                loaded.token_str[right], (size_t)right_len) != 0)
+            memcmp(loaded->token_str[new_id] + left_len,
+                loaded->token_str[right], (size_t)right_len) != 0)
             goto fail;
     }
 
-    if (!tokenizer_build_merge_rank_index(&loaded, arena))
+    if (!tokenizer_build_merge_rank_index(loaded, arena))
         goto fail;
 
     if (fgetc(f) != EOF || ferror(f))
         goto fail;
     if (fclose(f) != 0) {
         arena->used = arena_used_before;
+        free(loaded);
         return false;
     }
-    *tok = loaded;
+    *tok = *loaded;
+    free(loaded);
     return true;
 
 fail:
     fclose(f);
     arena->used = arena_used_before;
+    free(loaded);
     return false;
 }
 
