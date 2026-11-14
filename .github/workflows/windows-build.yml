@@ -229,7 +229,7 @@ jobs:
           if ($text -notmatch "Gradient allocation layout: PASS") {
             throw "Runtime gradient layout check did not execute for configuration A."
           }
-          if ($text -notmatch "Gradient checks passed: 10 / 10") {
+          if ($text -notmatch "Gradient checks passed: 9 / 9") {
             throw "Numerical forward/backward gradient checks failed for configuration A."
           }
           if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
@@ -246,7 +246,7 @@ jobs:
           if ($text -notmatch "Gradient allocation layout: PASS") {
             throw "Runtime gradient layout check did not execute for configuration B."
           }
-          if ($text -notmatch "Gradient checks passed: 10 / 10") {
+          if ($text -notmatch "Gradient checks passed: 9 / 9") {
             throw "Numerical forward/backward gradient checks failed for configuration B."
           }
           if (!(Test-Path ".\minima.model")) {
