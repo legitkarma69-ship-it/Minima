@@ -54,17 +54,11 @@ Empty or missing default files are skipped. If neither contains text, the progra
 
 There is no arbitrary 5 MiB input cap. The loader attempts to read all supplied text, subject to available memory and the current implementation limits: the permanent arena reserves 8 GiB of virtual address space on Windows and commits pages only as needed, and the tokenizer uses integer byte/token counts with a maximum input length of INT_MAX bytes (approximately 2 GiB). The 8 GiB reservation does not mean 8 GiB of RAM is consumed at startup; Windows backs pages as the allocator uses them. Actual capacity is still limited by available commit charge/RAM, address space, and the additional memory needed for token IDs, tokenizer data, and model state. The Windows build should target x64; a 32-bit process cannot reserve an 8 GiB region. If allocation fails, loading or training stops with an error rather than silently truncating the corpus.
 
-BPE learns its vocabulary from an evenly distributed 256 KiB sample taken only from the training portion, regardless of total corpus size. The tokenizer then encodes the entire corpus. The final 5% of tokens are held out for validation and are never sampled for gradient updates. Training uses the first 95% of tokens.
+BPE learns its vocabulary from an evenly distributed 4 MiB sample taken only from the training portion, regardless of total corpus size. The tokenizer then encodes the entire corpus. The final 5% of tokens are held out for validation and are never sampled for gradient updates. Training uses the first 95% of tokens.
 
 ## Training output and checkpoints
 
-The default experiment has no fixed plaintext-size cap and runs 2,000 optimizer
-steps with batch size 4 and sequence length 32. The default BPE vocabulary target
-is 2,048 entries (including the four reserved tokens and 256 byte tokens). It uses 100 warmup steps followed
-by cosine learning-rate decay from a base rate of 3e-4. Training loss is averaged
-and validation loss is evaluated every 100 steps over 16 fixed, evenly spaced
-validation batches. This is still a small experimental model, not a claim that
-2,000 steps produce a generally useful language model.
+The default experiment has no fixed plaintext-size cap and targets a 5.74-million-parameter model: a 30,000-entry BPE vocabulary, dimension 128, 8 transformer layers, 4 attention heads, FFN dimension 512, and context length 128. It uses batch size 4, sequence length 128, a base learning rate of 2e-4, 3,000 warmup steps, and a 100,000-step cosine schedule. A normal invocation performs 10,000 steps, so long runs can be split into resumable segments. Validation and checkpoint intervals default to 1,000 steps. The vocabulary includes four reserved tokens and 256 raw-byte tokens; the remaining entries are learned BPE merges.
 
 After training, the program writes two files in its working directory:
 
@@ -148,7 +142,7 @@ corpus size alone.
 The training forward/backward attention kernels use a maximum sequence length of
 512 because their per-query score workspaces are currently fixed at that size.
 The inference path additionally requires dimension <= 512, FFN dimension <=
-1024, and vocabulary size <= 8192. These limits are checked before those
+1024, and vocabulary size <= 32768. These limits are checked before those
 buffers are used; increasing the model configuration beyond them requires
 replacing the fixed inference workspaces with arena-backed buffers.
 
