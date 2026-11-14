@@ -20,8 +20,7 @@ static int check_gradient_tensors(const Gradients* g, const Model* model) {
     const size_t ffn = (size_t)model->ffn_dim;
     const size_t counts[] = {
         (size_t)model->vocab_size * dim,
-        (size_t)model->max_seq * dim,
-        layers * 3 * dim * dim,
+        layers * (size_t)model->qkv_dim * dim,
         layers * dim * dim,
         layers * ffn * dim,
         layers * ffn * dim,
@@ -31,9 +30,9 @@ static int check_gradient_tensors(const Gradients* g, const Model* model) {
         dim
     };
     const float* tensors[] = {
-        g->tok_emb, g->pos_emb, g->attn_qkv, g->attn_proj,
-        g->ffn_up, g->ffn_gate, g->ffn_down,
-        g->rms1_scale, g->rms2_scale, g->rms_final_scale
+        g->tok_emb, g->attn_qkv, g->attn_proj, g->ffn_up,
+        g->ffn_gate, g->ffn_down, g->rms1_scale,
+        g->rms2_scale, g->rms_final_scale
     };
     for (size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++)
         if (!all_zero(tensors[i], counts[i])) return 0;
