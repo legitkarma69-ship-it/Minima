@@ -300,7 +300,7 @@ jobs:
             $chatInput,
             [System.Text.UTF8Encoding]::new($false)
           )
-          $command = 'type minima_generation_lab_input.txt | x64\Release\Minima.exe --chat --resume --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --max-seq 72 --max-new-tokens 8'
+          $command = 'type minima_generation_lab_input.txt | x64\Release\Minima.exe --chat --resume --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --max-seq 72 --sequence-length 8 --max-new-tokens 8'
           $output = & cmd.exe /d /s /c $command 2>&1
           $output | ForEach-Object { Write-Host $_ }
           Remove-Item "minima_generation_lab_input.txt" -ErrorAction SilentlyContinue
@@ -324,7 +324,7 @@ jobs:
             $chatInput,
             [System.Text.UTF8Encoding]::new($false)
           )
-          $command = 'type minima_role_chat_input.txt | x64\Release\Minima.exe --chat --resume --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --max-seq 72 --max-new-tokens 8'
+          $command = 'type minima_role_chat_input.txt | x64\Release\Minima.exe --chat --resume --vocab-size 300 --batch-size 1 --dim 80 --layers 2 --heads 5 --ffn-dim 160 --max-seq 72 --sequence-length 8 --max-new-tokens 8'
           $output = & cmd.exe /d /s /c $command 2>&1
           $output | ForEach-Object { Write-Host $_ }
           Remove-Item "minima_role_chat_input.txt" -ErrorAction SilentlyContinue
