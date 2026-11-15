@@ -194,7 +194,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 | E1.5 | Expose the existing CLI thread-count selector in the GUI. | [x] Implemented; 0 selects the runtime default. |
 | E1.6 | Live RAM, CPU, and peak-resource monitoring with configurable warning thresholds. | [x] Live process-group CPU, working-set and private-commit readings; per-run CPU/working-set peaks; configurable one-warning-per-run thresholds. |
 | E1.7 | Resource profiles: Eco, Balanced, Performance, Training, and Chat. | [x] Five persisted presets set CPU cap, Windows committed-memory cap, arena budget, OpenMP thread count, and Windows job priority; manual overrides switch back to Custom. |
-| E1.8 | Persistent status bar showing mode, RAM used/limit, CPU used/limit, thread count, and tokens/second. | [~] Resource readings and configurable limits are visible in the Monitor panel; a persistent cross-page status bar and tokens/second remain. |
+| E1.8 | Persistent status bar showing mode, RAM used/limit, CPU used/limit, thread count, and tokens/second. | [x] A cross-tab status bar reports mode, CPU use/cap, committed RAM use/cap, thread count, and training/chat tokens per second. |
 
 ### 5.2 Configuration surface
 
