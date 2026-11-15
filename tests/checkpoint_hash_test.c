@@ -61,9 +61,22 @@ int main(void) {
     Rng rng;
     rng_seed(&rng, 5678);
 
-    /* Zero is a valid 64-bit tokenizer fingerprint, not an invalid state. */
+    /* Zero is a valid 64-bit tokenizer fingerprint, not an invalid state.
+       Fresh-run optimizer hyperparameters must survive checkpoint restore. */
+    opt.beta1 = 0.77f;
+    opt.beta2 = 0.88f;
+    opt.eps = 2e-7f;
+    opt.weight_decay = 0.037f;
     CHECK(checkpoint_save(path, &model, &opt, &rng, UINT64_C(0)));
+    opt.beta1 = 0.1f;
+    opt.beta2 = 0.2f;
+    opt.eps = 1e-4f;
+    opt.weight_decay = 0.5f;
     CHECK(checkpoint_load(path, &model, &opt, &rng, UINT64_C(0)));
+    CHECK(fabsf(opt.beta1 - 0.77f) < 1e-7f);
+    CHECK(fabsf(opt.beta2 - 0.88f) < 1e-7f);
+    CHECK(fabsf(opt.eps - 2e-7f) < 1e-12f);
+    CHECK(fabsf(opt.weight_decay - 0.037f) < 1e-7f);
     CHECK(!checkpoint_load(path, &model, &opt, &rng, UINT64_C(1)));
 
     FILE* file = fopen(path, "rb");
