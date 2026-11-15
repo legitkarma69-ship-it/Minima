@@ -110,6 +110,7 @@ static void print_usage(const char* exe) {
     printf("  --grad-clip FLOAT (global gradient norm; 0 disables clipping)\n");
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
+    printf("  --stop-file PATH --pause-file PATH --save-file PATH (cooperative training controls)\n");
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
     printf("  --use-existing-tokenizer (fresh model using a previously rebuilt minima.bpe)\n");
     printf("  --diagnostics-only --help\n");
