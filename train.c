@@ -358,13 +358,15 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
                 ? (double)completed_steps / active_seconds : 0.0;
             const double tokens_per_second = steps_per_second *
                 options.batch_size * options.sequence_length;
+            const double tokens_processed = (double)completed_steps *
+                options.batch_size * options.sequence_length;
             const int remaining_steps = options.steps - (local_step + 1);
             const double eta_seconds = steps_per_second > 0.0
                 ? (double)remaining_steps / steps_per_second : 0.0;
-            printf("%5lld | %10.4f | %10.4f | %.7f | grad %.3f/%.3f clipped %d/%d | %.2f steps/s %.0f tok/s ETA %.0f s\n",
+            printf("%5lld | %10.4f | %10.4f | %.7f | grad %.3f/%.3f clipped %d/%d | %.0f tokens %.2f steps/s %.0f tok/s ETA %.0f s\n",
                 (long long)opt->step,(float)average_train_loss,validation_loss,
                 opt->lr,mean_gradient_norm,gradient_norm_max,clipped_steps,
-                gradient_norm_count,steps_per_second,tokens_per_second,eta_seconds);
+                gradient_norm_count,tokens_processed,steps_per_second,tokens_per_second,eta_seconds);
             fprintf(metrics,"%lld,%.7f,%.7f,%.9g,%.7f,%.7f,%.3f\n",
                 (long long)opt->step,(float)average_train_loss,validation_loss,opt->lr,
                 expf((float)average_train_loss),expf(validation_loss),elapsed);
