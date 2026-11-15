@@ -255,7 +255,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     OPT_ARRAYS(STAGE_OPT_MOMENTS);
 
     FILE* f = fopen(path, "rb");
-    if (!f) { arena_budget_free(staging); return false; }
+    if (!f) { arena_budget_arena_budget_free(staging); return false; }
 
     char magic[8];
     uint32_t version = 0, dims[6] = { 0 };
@@ -325,7 +325,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     for (size_t i = 0; i < staged_floats; ++i)
         if (!isfinite(staging[i])) goto fail;
 
-    if (fclose(f) != 0) { free(staging); return false; }
+    if (fclose(f) != 0) { arena_budget_free(staging); return false; }
 
     // Commit only after the entire file has been read and validated.
     m = &staged_model;
@@ -343,11 +343,11 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     opt->schedule_warmup_steps = schedule_warmup_steps;
     opt->schedule_type = schedule_type;
     opt->type = (OptimizerType)saved_optimizer_type;
-    free(staging);
+    arena_budget_free(staging);
     return true;
 
 fail:
     fclose(f);
-    free(staging);
+    arena_budget_free(staging);
     return false;
 }
