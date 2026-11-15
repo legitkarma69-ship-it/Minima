@@ -7,6 +7,32 @@
     fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); \
     return 1; } } while (0)
 
+static void configure_sampling_fixture(Model* model) {
+    const size_t dim = (size_t)model->dim;
+    const size_t layers = (size_t)model->n_layers;
+    memset(model->tok_emb, 0,
+        (size_t)model->vocab_size * dim * sizeof(float));
+    memset(model->attn_qkv, 0,
+        layers * (size_t)model->qkv_dim * dim * sizeof(float));
+    memset(model->attn_proj, 0,
+        layers * dim * dim * sizeof(float));
+    memset(model->ffn_up, 0,
+        layers * (size_t)model->ffn_dim * dim * sizeof(float));
+    memset(model->ffn_gate, 0,
+        layers * (size_t)model->ffn_dim * dim * sizeof(float));
+    memset(model->ffn_down, 0,
+        layers * dim * (size_t)model->ffn_dim * sizeof(float));
+    for (size_t i = 0; i < layers * dim; ++i) {
+        model->rms1_scale[i] = 1.0f;
+        model->rms2_scale[i] = 1.0f;
+    }
+    for (size_t i = 0; i < dim; ++i) model->rms_final_scale[i] = 1.0f;
+    /* With zero transformer blocks, the final logits are analytically known:
+       token 4 ranks first, token 5 second, and all other tokens tie at zero. */
+    model->tok_emb[4 * dim] = 1.0f;
+    model->tok_emb[5 * dim] = 0.5f;
+}
+
 int main(void) {
     static Tokenizer tokenizer;
     Arena model_arena, tokenizer_arena, cache_arena;
@@ -96,9 +122,103 @@ int main(void) {
             CHECK(output[i] != output[j]);
     }
 
+    /* Verify sampling controls against a deterministic, hand-shaped model. */
+    configure_sampling_fixture(&model);
+    const uint16_t repeated_prompt[2] = { 4, 4 };
+    GenerationOptions fixture = {
+        .temperature = 1.0f, .top_p = 1.0f, .repetition_penalty = 1.0f,
+        .min_p = 0.0f, .frequency_penalty = 0.0f, .presence_penalty = 0.0f,
+        .top_k = 1, .max_new_tokens = 1, .min_new_tokens = 0,
+        .no_repeat_ngram_size = 0, .stop_sequence_ids = NULL,
+        .stop_sequence_len = 0
+    };
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &fixture, &rng) == 3);
+    CHECK(output[2] == 4);
+
+    GenerationOptions adjusted = fixture;
+    adjusted.repetition_penalty = 3.0f;
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 3);
+    CHECK(output[2] == 5);
+
+    adjusted = fixture;
+    adjusted.presence_penalty = 2.0f;
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 3);
+    CHECK(output[2] == 5);
+
+    adjusted = fixture;
+    adjusted.frequency_penalty = 1.0f; /* token 4 appears twice in the prompt */
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 3);
+    CHECK(output[2] == 5);
+
+    adjusted = fixture;
+    adjusted.top_k = 256;
+    adjusted.top_p = 0.01f;
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 3);
+    CHECK(output[2] == 4);
+
+    adjusted = fixture;
+    adjusted.top_k = 256;
+    adjusted.min_p = 1.0f;
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 3);
+    CHECK(output[2] == 4);
+
+    /* Minimum-new-token gating delays a one-token stop sequence. */
+    const uint16_t stop_a = 4;
+    adjusted = fixture;
+    adjusted.max_new_tokens = 3;
+    adjusted.stop_sequence_ids = &stop_a;
+    adjusted.stop_sequence_len = 1;
+    adjusted.min_new_tokens = 2;
+    rng_seed(&rng, 10);
+    const int delayed_stop = generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng);
+    CHECK(delayed_stop == 3 && output[2] == 4);
+
+    /* Multi-token stop sequences are removed as a complete suffix. */
+    const uint16_t stop_aa[2] = { 4, 4 };
+    adjusted.stop_sequence_ids = stop_aa;
+    adjusted.stop_sequence_len = 2;
+    adjusted.min_new_tokens = 0;
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 2);
+
+    /* No-repeat unigrams ban prompt tokens, but preserve a valid alternative. */
+    adjusted = fixture;
+    adjusted.no_repeat_ngram_size = 1;
+    rng_seed(&rng, 10);
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 3);
+    CHECK(output[2] == 5);
+
+    /* Invalid ranges and out-of-vocabulary stop IDs are rejected. */
+    adjusted = fixture;
+    adjusted.min_new_tokens = 2;
+    adjusted.max_new_tokens = 1;
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 0);
+    const uint16_t invalid_stop = 260;
+    adjusted = fixture;
+    adjusted.stop_sequence_ids = &invalid_stop;
+    adjusted.stop_sequence_len = 1;
+    CHECK(generate_with_options(&model, &tokenizer, &cache,
+        repeated_prompt, 2, output, 32, &adjusted, &rng) == 0);
+
     arena_free(&cache_arena);
     arena_free(&tokenizer_arena);
     arena_free(&model_arena);
-    puts("Reserved-token generation tests passed.");
+    puts("Generation sampling and reserved-token tests passed.");
     return 0;
 }
