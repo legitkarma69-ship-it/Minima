@@ -139,7 +139,7 @@ void* arena_alloc(Arena* a, size_t n) {
         if (commit_bytes > 0) {
             if (!budget_reserve(a->budget, commit_bytes, false)) {
                 fprintf(stderr,
-                    "Engine memory budget reached: arena request needs %.2f MiB; %.2f MiB arena + %.2f MiB tracked heap is committed against a %.2f MiB limit.\\n",
+                    "Engine memory budget reached: arena request needs %.2f MiB; %.2f MiB arena + %.2f MiB tracked heap is committed against a %.2f MiB limit.\n",
                     (double)commit_bytes / (1024.0 * 1024.0),
                     (double)a->budget->committed / (1024.0 * 1024.0),
                     (double)a->budget->external_committed / (1024.0 * 1024.0),
@@ -150,7 +150,7 @@ void* arena_alloc(Arena* a, size_t n) {
                 commit_bytes, MEM_COMMIT, PAGE_READWRITE);
             if (!committed) {
                 budget_release(a->budget, commit_bytes, false);
-                fprintf(stderr, "Arena page commitment failed (Windows error %lu).\\n",
+                fprintf(stderr, "Arena page commitment failed (Windows error %lu).\n",
                     (unsigned long)GetLastError());
                 return NULL;
             }
