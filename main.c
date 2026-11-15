@@ -775,7 +775,7 @@ int main(int argc, char** argv) {
             (long long)opt.schedule_warmup_steps, (long long)opt.schedule_total_steps);
     }
 
-    printf("Effective optimizer settings: beta1=%.7g beta2=%.7g epsilon=%.7g weight_decay=%.7g\\n",
+    printf("Effective optimizer settings: beta1=%.7g beta2=%.7g epsilon=%.7g weight_decay=%.7g\n",
         opt.beta1, opt.beta2, opt.eps, opt.weight_decay);
 
     if (options.chat_mode) {
