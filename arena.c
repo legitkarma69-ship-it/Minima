@@ -57,7 +57,11 @@ size_t arena_budget_total_committed(const ArenaBudget* budget) {
 void* arena_budget_malloc(ArenaBudget* budget, size_t size) {
     if (size == 0) size = 1;
     if (size > SIZE_MAX - sizeof(BudgetAllocationHeader)) return NULL;
-    if (!budget_reserve(budget, size, true)) return NULL;
+    if (!budget_reserve(budget, size, true)) {
+        fprintf(stderr, "Engine memory budget reached: tracked heap request needs %.2f MiB. Increase --memory-budget-gb or reduce the model/tokenizer workload.\\n",
+            (double)size / (1024.0 * 1024.0));
+        return NULL;
+    }
     BudgetAllocationHeader* header =
         (BudgetAllocationHeader*)malloc(sizeof(BudgetAllocationHeader) + size);
     if (!header) { budget_release(budget, size, true); return NULL; }
