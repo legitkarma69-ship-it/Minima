@@ -122,7 +122,7 @@ Held-out behavioral evaluation lives in `data/evaluation/`, separate from `books
 - Score both the conclusion and the explanation. Equivalent wording is acceptable; exact-string matching is not a reliable measure of reasoning.
 - Add paraphrased variants and new examples over time. Do not optimize against a tiny fixed list at the expense of generalization.
 
-The first benchmark is intentionally small. It establishes a repeatable starting point before any reasoning-focused training data is introduced.
+The first benchmark is intentionally small. It establishes a repeatable starting point before any reasoning-focused training data is introduced. See `data/evaluation/RUNNING.md` for the command-line runner and baseline procedure.
 
 ## Tokenizer maintenance
 
