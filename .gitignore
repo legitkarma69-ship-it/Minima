@@ -364,3 +364,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# Held-out reasoning evaluation outputs (never training data)
+logic_results*.jsonl
