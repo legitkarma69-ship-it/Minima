@@ -319,8 +319,11 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
             .stop_sequence_ids = stop_ids_len > 0 ? stop_ids : NULL,
             .stop_sequence_len = stop_ids_len
         };
+        const clock_t generation_started = clock();
         int total = generate_with_options(model, tok, cache, prompt, prompt_len,
             output, 512, &generation_options, &rng);
+        const double generation_seconds =
+            (double)(clock() - generation_started) / (double)CLOCKS_PER_SEC;
 
         if (total <= prompt_len) {
             puts(is_test ? "TEST: [generation failed]" :
@@ -339,6 +342,10 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
 
         if (!is_test) strip_generated_next_role(decoded);
         printf("%s: %s\n", is_test ? "TEST" : "BOT", decoded);
+        const int generated_tokens = total - prompt_len;
+        if (generated_tokens > 0 && generation_seconds > 0.0)
+            printf("CHAT_STATS: %.0f tok/s (%d tokens)\n",
+                (double)generated_tokens / generation_seconds, generated_tokens);
 
         if (is_test) {
             /* A lab test is isolated and does not alter conversational history. */
