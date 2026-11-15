@@ -79,6 +79,9 @@ static bool source_plan_init(SourcePlan* plan, const TrainSourceSpan* sources,
         const double available_windows = (double)(sample_length - seq_len);
         double weight = mode == CORPUS_MIX_EQUAL ? 1.0 :
             (mode == CORPUS_MIX_SQRT ? sqrt(available_windows) : available_windows);
+        const double source_multiplier = sources[i].weight > 0.0 &&
+            isfinite(sources[i].weight) ? sources[i].weight : 1.0;
+        weight *= source_multiplier;
         if (!(weight > 0.0) || !isfinite(weight)) continue;
         plan->total_weight += weight;
         plan->choices[plan->count++] = (SourceChoice){
@@ -246,6 +249,8 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
         printf("  %s: %.1f%% (~%.1f source passes this segment)\n",
             source->name ? source->name : "corpus", 100.0 * share,
             estimated_passes);
+        if (source->weight > 0.0 && source->weight != 1.0)
+            printf("    source multiplier: %.3f\n", source->weight);
     }
     printf("Estimated activations + logits scratch: %.2f MiB; KV cache: %.2f MiB\n",
         (double)options.activation_bytes/(1024.0*1024.0),
