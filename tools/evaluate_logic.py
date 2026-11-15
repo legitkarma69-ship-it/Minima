@@ -115,26 +115,8 @@ def run(args: argparse.Namespace) -> int:
     for option, value in model_options:
         if value is not None:
             command.extend((option, str(value)))
-    print(f"Loading checkpoint once for {len(cases)} isolated test prompts...")
-    completed = subprocess.run(
-        command, cwd=workdir,
-        input=build_chat_input(cases, args.max_new_tokens),
-        text=True, encoding="utf-8", errors="replace",
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        timeout=args.timeout, check=False,
-    )
-    if completed.returncode != 0:
-        if completed.stdout:
-            print(completed.stdout, file=sys.stderr)
-        if completed.stderr:
-            print(completed.stderr, file=sys.stderr)
-        raise RuntimeError(f"Minima exited with status {completed.returncode}")
-    responses = parse_chat_responses(completed.stdout)
-    if len(responses) != len(cases):
-        raise RuntimeError(
-            f"Expected {len(cases)} TEST responses, received {len(responses)}.\n"
-            f"Minima output tail:\n{completed.stdout[-4000:]}"
-        )
+    print(f"Loading checkpoint once for {len(cases)} isolated test prompts...", flush=True)
+
     timestamp = datetime.now(timezone.utc).isoformat()
     decoding = {
         "temperature": 1.0, "top_k": 1, "top_p": 1.0,
@@ -144,32 +126,86 @@ def run(args: argparse.Namespace) -> int:
     model_hash = sha256_file(model_path)
     tokenizer_hash = sha256_file(tokenizer_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", encoding="utf-8", newline="\n") as stream:
-        for case, response in zip(cases, responses):
-            record = {
-                "run_utc": timestamp,
-                "checkpoint_sha256": model_hash,
-                "tokenizer_sha256": tokenizer_hash,
-                "decoding": decoding,
-                "id": case["id"],
-                "category": case["category"],
-                "difficulty": case["difficulty"],
-                "prompt": case["prompt"],
-                "generated_answer": response,
-                "reference_answer": case["reference_answer"],
-                "scoring_notes": case["scoring_notes"],
-            }
-            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
-    failed = sum(not response or response in ("[generation failed]", "[input encoding failed]") for response in responses)
-    print(f"Completed: {len(responses) - failed}/{len(cases)} generated responses")
-    print("Decoding: greedy, top-k=1, max_new_tokens=" + str(args.max_new_tokens))
-    print("Checkpoint SHA-256: " + model_hash)
-    print("Tokenizer SHA-256:  " + tokenizer_hash)
-    print("Results: " + str(output))
+    failed = 0
+    completed_count = 0
+    with output.open("w", encoding="utf-8", newline="\\n") as stream:
+        process = subprocess.Popen(
+            command, cwd=workdir, stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+        )
+        try:
+            assert process.stdin is not None and process.stdout is not None
+            for index, case in enumerate(cases, 1):
+                process.stdin.write(f"/clear\\n{case['prompt']}\\n")
+                process.stdin.flush()
+                current: list[str] | None = None
+                response: str | None = None
+                while True:
+                    line = process.stdout.readline()
+                    if line == "":
+                        raise RuntimeError(
+                            f"Minima ended while answering {case['id']}. "
+                            f"Exit status: {process.poll()}"
+                        )
+                    clean = line.rstrip("\\r\\n")
+                    if current is None:
+                        if clean.startswith("BOT: "):
+                            current = [clean[len("BOT: "):]]
+                    elif clean == "CHAT_READY":
+                        response = "\\n".join(current).strip()
+                        break
+                    else:
+                        current.append(clean)
+
+                if not response or response in ("[generation failed]", "[input encoding failed]"):
+                    failed += 1
+                record = {
+                    "run_utc": timestamp,
+                    "checkpoint_sha256": model_hash,
+                    "tokenizer_sha256": tokenizer_hash,
+                    "decoding": decoding,
+                    "id": case["id"],
+                    "category": case["category"],
+                    "difficulty": case["difficulty"],
+                    "prompt": case["prompt"],
+                    "generated_answer": response,
+                    "reference_answer": case["reference_answer"],
+                    "scoring_notes": case["scoring_notes"],
+                }
+                stream.write(json.dumps(record, ensure_ascii=False) + "\\n")
+                stream.flush()
+                completed_count += 1
+                print(f"\\n[{index}/{len(cases)}] {case['id']} ({case['category']})",
+                      flush=True)
+                print("Question: " + case["prompt"], flush=True)
+                print("Answer: " + (response or "[empty response]") + "\\n", flush=True)
+
+            process.stdin.write("/quit\\n")
+            process.stdin.flush()
+            process.stdin.close()
+            return_code = process.wait(timeout=args.timeout)
+            if return_code != 0:
+                raise RuntimeError(f"Minima exited with status {return_code}")
+        except Exception:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            raise
+
+    print(f"Completed: {completed_count - failed}/{len(cases)} usable responses", flush=True)
+    print("Decoding: greedy, top-k=1, max_new_tokens=" + str(args.max_new_tokens), flush=True)
+    print("Checkpoint SHA-256: " + model_hash, flush=True)
+    print("Tokenizer SHA-256:  " + tokenizer_hash, flush=True)
+    print("Results: " + str(output), flush=True)
     if failed:
-        print(f"Warning: {failed} case(s) did not produce a usable response.")
+        print(f"Warning: {failed} case(s) did not produce a usable response.", flush=True)
         return 1
-    print("No scores were assigned. Review and score the answers using the rubric.")
+    print("No scores were assigned. Review and score the answers using the rubric.", flush=True)
     return 0
 
 def parse_args() -> argparse.Namespace:
