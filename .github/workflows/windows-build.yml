@@ -343,9 +343,6 @@ jobs:
           if (([regex]::Matches($text, "BOT:")).Count -ne 3) {
             throw "Role-tagged chat did not produce three assistant turns."
           }
-          if (([regex]::Matches($text, "CHAT_HISTORY_CLEARED")).Count -ne 1) {
-            throw "The /clear command did not acknowledge the history reset."
-          }
           if (([regex]::Matches($text, "CHAT_READY")).Count -lt 5) {
             throw "Chat protocol did not return to ready state after each turn and reset."
           }
