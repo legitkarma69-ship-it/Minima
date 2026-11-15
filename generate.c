@@ -488,6 +488,8 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
             ++keep;
         }
         n = keep;
+        sum = 0.0f;
+        for (int i = 0; i < n; ++i) sum += probs[i];
     }
     if (top_p < 1.0f) {
         float cumulative = 0.0f;
