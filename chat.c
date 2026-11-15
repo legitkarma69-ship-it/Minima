@@ -140,6 +140,15 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
         if (strcmp(line, "/quit") == 0 || strcmp(line, "/exit") == 0)
             break;
 
+        if (strcmp(line, "/clear") == 0 || strcmp(line, "/reset") == 0) {
+            history[0] = '\0';
+            active_options = *options;
+            test_pending = false;
+            puts("CHAT_HISTORY_CLEARED");
+            puts("CHAT_READY");
+            continue;
+        }
+
         if (strncmp(line, "/test ", 6) == 0) {
             ChatOptions requested = *options;
             if (!parse_test_settings(line, &requested)) {
