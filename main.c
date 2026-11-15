@@ -54,6 +54,7 @@ typedef struct {
     int memory_budget_gb;
     const char* metrics_path;
     const char* stop_file;
+    const char* pause_file;
     const char* save_file;
     float temperature, top_p, repetition_penalty;
     int top_k, max_new_tokens;
@@ -129,7 +130,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
     o->threads=0; o->memory_budget_gb=0;
-    o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->save_file=NULL;
+    o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->pause_file=NULL; o->save_file=NULL;
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
@@ -274,11 +275,12 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             o->weight_decay=parse_float_value("--weight-decay",argv[i],0.0f,1.0f);
             o->weight_decay_explicit=true;
         }
-        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--save-file") == 0) {
+        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--pause-file") == 0 || strcmp(argv[i], "--save-file") == 0) {
             const char* option=argv[i];
             if (++i >= argc || !argv[i][0]) die("%s requires a path",option);
             if (strcmp(option,"--metrics")==0) o->metrics_path=argv[i];
             else if(strcmp(option,"--stop-file")==0)o->stop_file=argv[i];
+            else if(strcmp(option,"--pause-file")==0)o->pause_file=argv[i];
             else o->save_file=argv[i];
         }
         else if (argv[i][0] == '-') {
@@ -806,6 +808,7 @@ int main(int argc, char** argv) {
         .activation_bytes = activation_bytes,
         .metrics_path = options.metrics_path,
         .stop_file = options.stop_file,
+        .pause_file = options.pause_file,
         .save_file = options.save_file
     };
     train_run(&model, &opt, &grads, &temp, all_ids,
