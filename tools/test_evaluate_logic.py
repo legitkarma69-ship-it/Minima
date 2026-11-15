@@ -20,25 +20,25 @@ class EvaluationHarnessTests(unittest.TestCase):
             "reference_answer": "SECRET ANSWER", "scoring_notes": "SECRET NOTES",
         }]
         text = evaluate_logic.build_chat_input(cases, 32)
-        self.assertIn("Human: Does A imply B?\nAssistant:", text)
-        self.assertIn("/test 1.0 1 1.0 1.0 32", text)
+        self.assertIn("/clear\nDoes A imply B?\n", text)
+        self.assertNotIn("/test ", text)
         self.assertNotIn("SECRET ANSWER", text)
         self.assertNotIn("SECRET NOTES", text)
 
     def test_response_parser_preserves_multiline_answers(self):
         output = (
-            "CHAT_READY\nTEST: The answer is no.\n"
+            "CHAT_READY\nBOT: The answer is no.\n"
             "The two conditions do not overlap.\nCHAT_READY\n"
-            "TEST: Cannot be determined.\nCHAT_READY\nCHAT_CLOSED\n"
+            "BOT: Cannot be determined.\nCHAT_READY\nCHAT_CLOSED\n"
         )
-        self.assertEqual(evaluate_logic.parse_test_responses(output), [
+        self.assertEqual(evaluate_logic.parse_chat_responses(output), [
             "The answer is no.\nThe two conditions do not overlap.",
             "Cannot be determined.",
         ])
 
     def test_response_parser_rejects_incomplete_response(self):
         with self.assertRaises(ValueError):
-            evaluate_logic.parse_test_responses("TEST: unfinished")
+            evaluate_logic.parse_chat_responses("BOT: unfinished")
 
 if __name__ == "__main__":
     unittest.main()
