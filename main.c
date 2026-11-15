@@ -43,6 +43,7 @@
 typedef struct {
     float learning_rate;
     float weight_decay;
+    float beta1, beta2, epsilon;
     float grad_clip_norm;
     int total_steps;
     bool total_steps_explicit;
@@ -67,6 +68,7 @@ typedef struct {
     bool optimizer_explicit;
     bool learning_rate_explicit;
     bool weight_decay_explicit;
+    bool beta1_explicit, beta2_explicit, epsilon_explicit;
     bool tokenizer_spread;
     bool tokenizer_only;
     bool use_existing_tokenizer;
@@ -106,7 +108,7 @@ static void print_usage(const char* exe) {
     printf("  --lr-schedule cosine|constant --tokenizer-sampling spread|prefix\n");
     printf("  --corpus-mix proportional|sqrt|equal (default: sqrt)\n");
     printf("  --optimizer adamw|lion (Lion uses less optimizer memory; tune --lr)\n");
-    printf("  --weight-decay FLOAT\n");
+    printf("  --weight-decay FLOAT --beta1 FLOAT --beta2 FLOAT --epsilon FLOAT\n");
     printf("  --memory-budget-gb N (aggregate committed arena budget; 0 disables)\n");
     printf("  --grad-clip FLOAT (global gradient norm; 0 disables clipping)\n");
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
@@ -153,6 +155,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->batch_size=DEFAULT_BATCH_SIZE; o->sequence_length=DEFAULT_SEQUENCE_LENGTH;
     o->learning_rate=DEFAULT_LR; o->warmup_steps=DEFAULT_WARMUP_STEPS;
     o->weight_decay=0.01f; o->weight_decay_explicit=false;
+    o->beta1=0.9f; o->beta2=0.95f; o->epsilon=1e-8f;
+    o->beta1_explicit=false; o->beta2_explicit=false; o->epsilon_explicit=false;
     o->grad_clip_norm=1.0f;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->validation_interval=DEFAULT_LOG_INTERVAL;
@@ -304,6 +308,22 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             o->weight_decay=parse_float_value("--weight-decay",argv[i],0.0f,1.0f);
             o->weight_decay_explicit=true;
         }
+        else if (strcmp(argv[i], "--beta1") == 0 ||
+            strcmp(argv[i], "--beta2") == 0 ||
+            strcmp(argv[i], "--epsilon") == 0) {
+            const char* option = argv[i];
+            if (++i >= argc) die("%s requires a value", option);
+            if (strcmp(option, "--beta1") == 0) {
+                o->beta1 = parse_float_value(option, argv[i], 0.0f, 0.999999f);
+                o->beta1_explicit = true;
+            } else if (strcmp(option, "--beta2") == 0) {
+                o->beta2 = parse_float_value(option, argv[i], 0.0f, 0.999999f);
+                o->beta2_explicit = true;
+            } else {
+                o->epsilon = parse_float_value(option, argv[i], 1e-12f, 1e-2f);
+                o->epsilon_explicit = true;
+            }
+        }
         else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--pause-file") == 0 || strcmp(argv[i], "--source-weights") == 0 || strcmp(argv[i], "--save-file") == 0) {
             const char* option=argv[i];
             if (++i >= argc || !argv[i][0]) die("%s requires a path",option);
@@ -328,6 +348,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     if (o->use_existing_tokenizer && (*resume || o->chat_mode || *diagnostics_only))
         die("--use-existing-tokenizer is for fresh training only");
     if (o->optimizer == OPTIMIZER_LION) {
+        if (!o->beta1_explicit) o->beta1 = 0.95f;
+        if (!o->beta2_explicit) o->beta2 = 0.98f;
         if (!o->learning_rate_explicit) o->learning_rate = DEFAULT_LION_LR;
         if (!o->weight_decay_explicit)
             o->weight_decay = DEFAULT_LION_WEIGHT_DECAY;
@@ -724,12 +746,10 @@ int main(int argc, char** argv) {
     model_summary(&model);
 
     Optim opt;
-    const float optimizer_beta1 =
-        optimizer_type == OPTIMIZER_LION ? 0.95f : 0.9f;
-    const float optimizer_beta2 =
-        optimizer_type == OPTIMIZER_LION ? 0.98f : 0.95f;
+    const float optimizer_beta1 = options.beta1;
+    const float optimizer_beta2 = options.beta2;
     if (!optim_init_type(&opt, &model, &arena, optimizer_type,
-        options.learning_rate, optimizer_beta1, optimizer_beta2, 1e-8f,
+        options.learning_rate, optimizer_beta1, optimizer_beta2, options.epsilon,
         options.weight_decay))
         die("optim_init failed");
     printf("Optimizer: %s (%.1f MiB optimizer state)\n",
