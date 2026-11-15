@@ -25,6 +25,7 @@ typedef struct {
 typedef struct {
     int      vocab_size;
     int      n_merges;
+    ArenaBudget* memory_budget; // shared runtime budget; not serialized
 
     // token id → null-terminated string (owned by arena)
     char* token_str[TOK_MAX_VOCAB];
