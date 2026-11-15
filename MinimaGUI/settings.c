@@ -8,19 +8,19 @@
 #define _countof(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
-static const wchar_t* const g_edit_keys[28] = {
+static const wchar_t* const g_edit_keys[29] = {
     L"steps", L"vocab", L"dim", L"layers", L"heads", L"ffn", L"context",
     L"batch", L"sequence", L"learning_rate", L"warmup", L"total_steps",
     L"log_interval", L"validation_interval", L"validation_batches",
     L"checkpoint_interval", L"seed", L"tokenizer_bytes", L"temperature",
     L"top_k", L"top_p", L"repetition", L"max_tokens", L"grad_clip",
-    L"weight_decay", L"threads", L"cpu_limit_percent", L"ram_limit_gb"
+    L"weight_decay", L"threads", L"cpu_limit_percent", L"ram_limit_gb", L"arena_budget_gb"
 };
-static const wchar_t* const g_edit_defaults[28] = {
+static const wchar_t* const g_edit_defaults[29] = {
     L"10000", L"30000", L"128", L"8", L"4", L"512", L"128", L"4", L"128",
     L"0.0002", L"3000", L"100000", L"1000", L"1000", L"16", L"1000", L"1234",
     L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0",
-    L"0.01", L"0", L"0", L"0"
+    L"0.01", L"0", L"0", L"0", L"0"
 };
 static const wchar_t* const g_combo_keys[4] = {
     L"lr_schedule", L"tokenizer_sampling", L"corpus_mix", L"optimizer"
@@ -90,7 +90,7 @@ static void save_combo_setting(const wchar_t* path, const wchar_t* key, HWND con
 
 void minima_settings_load(const MinimaSettingsContext* context) {
     if (!context || !context->path || !context->path[0]) return;
-    for (int i = 0; i < 28; ++i)
+    for (int i = 0; i < 29; ++i)
         load_edit_setting(context->path, g_edit_keys[i],
             context->edit_controls[i], g_edit_defaults[i]);
     migrate_long_run_intervals(context);
