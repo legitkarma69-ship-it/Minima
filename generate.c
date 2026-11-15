@@ -536,6 +536,7 @@ int generate_with_options(Model* model, Tokenizer* tok, KVCache* cache,
         options->presence_penalty > 2.0f ||
         options->no_repeat_ngram_size < 0 || options->no_repeat_ngram_size > 16 ||
         options->min_new_tokens < 0 || options->min_new_tokens > 512 ||
+        options->min_new_tokens > options->max_new_tokens ||
         options->stop_sequence_len < 0 || options->stop_sequence_len > 1024 ||
         (options->stop_sequence_len > 0 && !options->stop_sequence_ids) ||
         model->dim <= 0 || model->dim > 512 || model->ffn_dim <= 0 ||
