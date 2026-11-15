@@ -210,7 +210,8 @@ static DWORD selected_resource_priority(void) {
     wchar_t profile[32];
     GetWindowTextW(g_resource_profile, profile, (int)_countof(profile));
     if (wcscmp(profile, L"Eco") == 0) return BELOW_NORMAL_PRIORITY_CLASS;
-    if (wcscmp(profile, L"Performance") == 0) return ABOVE_NORMAL_PRIORITY_CLASS;
+    if (wcscmp(profile, L"Performance") == 0 || wcscmp(profile, L"Training") == 0)
+        return ABOVE_NORMAL_PRIORITY_CLASS;
     return NORMAL_PRIORITY_CLASS;
 }
 
@@ -233,7 +234,17 @@ static void apply_resource_profile(void) {
         SetWindowTextW(g_cpu_limit, L"100");
         SetWindowTextW(g_ram_limit, L"12");
         SetWindowTextW(g_arena_budget, L"10");
+        SetWindowTextW(g_threads, L"16");
+    } else if (wcscmp(profile, L"Training") == 0) {
+        SetWindowTextW(g_cpu_limit, L"85");
+        SetWindowTextW(g_ram_limit, L"10");
+        SetWindowTextW(g_arena_budget, L"8");
         SetWindowTextW(g_threads, L"8");
+    } else if (wcscmp(profile, L"Chat") == 0) {
+        SetWindowTextW(g_cpu_limit, L"50");
+        SetWindowTextW(g_ram_limit, L"4");
+        SetWindowTextW(g_arena_budget, L"3");
+        SetWindowTextW(g_threads, L"4");
     }
     g_applying_resource_profile = FALSE;
 }
@@ -1304,6 +1315,8 @@ static void create_controls(HWND hwnd) {
     SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Eco");
     SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Balanced");
     SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Performance");
+    SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Training");
+    SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Chat");
     SendMessageW(g_resource_profile, CB_SETCURSEL, 0, 0);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
