@@ -175,8 +175,8 @@ void gui_layout_layout_controls(HWND hwnd) {
             output_top+scale_px(4),scale_px(140),scale_px(18),TRUE);
     if(g_chat_display)MoveWindow(g_chat_display,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
-    const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==3?pad+scale_px(270):pad,chat_y,inner-scale_px(500),scale_px(180),TRUE);
+    const int chat_y=height-bottom_h-scale_px(72);
+    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==3?pad+scale_px(270):pad,chat_y,inner-scale_px(500),scale_px(42),TRUE);
     if(g_active_page==3) {
         MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
         MoveWindow(g_eval_button,pad+scale_px(112),chat_y,scale_px(150),scale_px(28),TRUE);
