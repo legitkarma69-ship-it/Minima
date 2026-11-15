@@ -48,6 +48,7 @@ static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
+static BOOL g_chat_response_active;
 static BOOL g_chat_send_when_ready;
 static volatile LONG g_running;
 static BOOL g_close_when_done;
@@ -1070,6 +1071,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         break;
     case WM_CHAT_READY:
+        g_chat_response_active = FALSE;
         minima_gui_set_chat_send_ready(GetDlgItem(hwnd,IDC_CHAT_SEND),
             g_chat_mode, InterlockedCompareExchange(&g_running,0,0) != 0);
         EnableWindow(g_chat_test,
@@ -1086,9 +1088,14 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APPEND_LOG: {
         const wchar_t* line = (const wchar_t*)lp;
         append_log(line);
-        if (g_chat_mode && line && wcsncmp(line, L"BOT: ", 5) == 0) {
-            append_chat_text(L"Minima: ");
-            append_chat_text(line + 5);
+        if (g_chat_mode && line) {
+            if (wcsncmp(line, L"BOT: ", 5) == 0) {
+                g_chat_response_active = TRUE;
+                append_chat_text(L"Minima: ");
+                append_chat_text(line + 5);
+            } else if (g_chat_response_active) {
+                append_chat_text(line);
+            }
         }
         free((void*)lp);
         return 0;
