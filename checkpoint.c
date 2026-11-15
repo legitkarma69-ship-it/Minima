@@ -78,6 +78,62 @@ static size_t model_parameter_count(const Model* m) {
       (o)->v_ffn_up && (o)->v_ffn_gate && (o)->v_ffn_down && \
       (o)->v_rms1_scale && (o)->v_rms2_scale && (o)->v_rms_final_scale))
 
+bool checkpoint_archive_previous(const char* path, int keep_count) {
+    if (!path || !path[0] || keep_count < 0 || keep_count > 20)
+        return false;
+    if (keep_count == 0) return true;
+
+    const DWORD attributes = GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) return false;
+
+    char temporary[MAX_PATH];
+    if (_snprintf_s(temporary, _countof(temporary), _TRUNCATE,
+        "%s.archive.tmp", path) < 0)
+        return false;
+    if (!CopyFileA(path, temporary, FALSE)) return false;
+
+    for (int index = keep_count; index >= 2; --index) {
+        char source[MAX_PATH], destination[MAX_PATH];
+        if (_snprintf_s(source, _countof(source), _TRUNCATE,
+                "%s.prev.%d", path, index - 1) < 0 ||
+            _snprintf_s(destination, _countof(destination), _TRUNCATE,
+                "%s.prev.%d", path, index) < 0) {
+            DeleteFileA(temporary);
+            return false;
+        }
+        const DWORD source_attributes = GetFileAttributesA(source);
+        if (source_attributes == INVALID_FILE_ATTRIBUTES) {
+            const DWORD error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+                continue;
+            DeleteFileA(temporary);
+            return false;
+        }
+        if (!MoveFileExA(source, destination,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileA(temporary);
+            return false;
+        }
+    }
+
+    char newest[MAX_PATH];
+    if (_snprintf_s(newest, _countof(newest), _TRUNCATE,
+            "%s.prev.1", path) < 0) {
+        DeleteFileA(temporary);
+        return false;
+    }
+    if (!MoveFileExA(temporary, newest,
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileA(temporary);
+        return false;
+    }
+    return true;
+}
+
 bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     const Rng* rng, uint64_t tokenizer_hash) {
     const Model* m = model;
