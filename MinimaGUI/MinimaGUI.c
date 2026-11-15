@@ -613,7 +613,9 @@ static void start_logic_evaluation(void) {
     append_log(L"\r\n--- Starting 24-question logic evaluation (greedy decoding) ---\r\n");
     g_thread = minima_engine_start_reader(rd, g_window, g_process, WM_APPEND_LOG, WM_ENGINE_EXIT, WM_CHAT_READY);
     if (!g_thread) {
-        TerminateProcess(g_process, 1); CloseHandle(g_process); g_process = NULL; CloseHandle(rd);
+        if (g_eval_job) { CloseHandle(g_eval_job); g_eval_job = NULL; }
+        else TerminateProcess(g_process, 1);
+        CloseHandle(g_process); g_process = NULL; CloseHandle(rd);
         g_evaluation_mode = FALSE; set_running(FALSE);
         MessageBoxW(g_window, L"Could not create evaluation output-reader thread.", L"ProjectMinima", MB_ICONERROR);
     }
