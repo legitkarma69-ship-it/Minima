@@ -370,6 +370,9 @@ static int parse_arguments(int argc, char** argv, bool* resume,
         die("--retrain-tokenizer-only cannot be combined with resume, chat, diagnostics-only, or --use-existing-tokenizer");
     if (o->use_existing_tokenizer && (*resume || o->chat_mode || *diagnostics_only))
         die("--use-existing-tokenizer is for fresh training only");
+    if (o->min_new_tokens > o->max_new_tokens)
+        die("--min-new-tokens cannot exceed --max-new-tokens");
+
     if (o->optimizer == OPTIMIZER_LION) {
         if (!o->beta1_explicit) o->beta1 = 0.95f;
         if (!o->beta2_explicit) o->beta2 = 0.98f;
