@@ -30,6 +30,14 @@ To change the response budget:
 python tools/evaluate_logic.py --max-new-tokens 64
 ```
 
+If the checkpoint was trained with non-default model dimensions, pass the matching settings. For example:
+
+```powershell
+python tools/evaluate_logic.py --vocab-size 2048 --dim 64 --layers 2 --heads 2 --ffn-dim 128 --max-seq 64
+```
+
+Only use values that match the checkpoint. The runner does not infer architecture settings from the weights.
+
 ## What the runner does
 
 - Loads the checkpoint and tokenizer once.
