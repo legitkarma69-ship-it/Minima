@@ -318,7 +318,7 @@ jobs:
       - name: Verify isolated Generation Lab sampling override
         shell: pwsh
         run: |
-          $chatInput = "/test 0.8 40 0.9 1.1 8`r`nThe quick brown fox`r`n/quit`r`n"
+          $chatInput = "/test 0.8 40 0.9 1.1 8 0.1 0.2 -0.1 2 1 42 STOP`r`nThe quick brown fox`r`n/quit`r`n"
           [System.IO.File]::WriteAllText(
             "minima_generation_lab_input.txt",
             $chatInput,
