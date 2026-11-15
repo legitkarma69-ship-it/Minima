@@ -49,6 +49,9 @@ typedef struct {
     HWND* cpu_warning;
     HWND* ram_warning;
     HWND* source_weights;
+    HWND* beta1;
+    HWND* beta2;
+    HWND* epsilon;
 } GuiPageControls;
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
