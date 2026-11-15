@@ -23,6 +23,7 @@ The engine working directory is the executable directory. Keep the `data` folder
 - Configure batch size and training sequence length.
 - Configure learning rate, warmup, and cosine or constant learning-rate schedule.
 - Choose AdamW or Lion for fresh runs, configure weight decay, and set OpenMP worker threads (0 selects the runtime default). Resume automatically retains the optimizer type stored in the checkpoint; weight decay and thread count remain configurable.
+- Set a Windows Job Object hard CPU cap (0 disables it; 1-100 is a percentage of total logical-processor capacity) and a hard process-group RAM cap in GiB (0 disables it; 1-64 GiB). Limits are applied before the engine starts, including chat and tokenizer rebuilds. The 24-question evaluation process tree receives the same limits.
 - Configure training-log interval, validation interval, validation batch count, and checkpoint interval independently.
 - Choose the random seed.
 - Configure tokenizer sample byte limit (4 MiB maximum) and either evenly spread sampling or prefix sampling.
@@ -33,6 +34,8 @@ Runtime model limits are validated by the engine: vocabulary 260-32768, dimensio
 Changing vocabulary or model architecture makes an existing checkpoint incompatible. Resume and chat must use the same model configuration and tokenizer as the checkpoint.
 
 ## Results and monitoring
+
+The Monitor panel displays live process CPU utilization (normalized to total logical-processor capacity), working-set RAM, and private committed RAM. CPU and RAM caps are applied by Windows Job Objects. The RAM cap is a hard job-wide limit, not a graceful engine allocation budget; setting it too low can cause allocations to fail. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
 
 The GUI displays engine output, including:
 
@@ -78,6 +81,7 @@ Chat requires `minima.model` and `minima.bpe`. Set the model configuration contr
 - Automatic checkpoints are written at the configured interval and at the end of a training segment.
 - Long-run progress, validation, and checkpoint intervals default to 1,000 steps. Auto settings scale them with the planned run length, and the Advanced page keeps each interval editable.
 - `minima_metrics.csv`, `minima_chat.txt`, and signal files are stored beside the executables.
+- Resource limits are persisted in `minima_gui.ini`. The CPU cap and RAM cap are applied to each newly launched engine/evaluation process group; changing the fields does not alter an already-running job.
 
 A Windows x64 GitHub Actions workflow builds both executables and publishes them as a downloadable artifact for each successful build.
 
