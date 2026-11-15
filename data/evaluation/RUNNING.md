@@ -15,7 +15,7 @@ The benchmark runner is `tools/evaluate_logic.py`. It uses the existing interact
 python tools/evaluate_logic.py
 ```
 
-The default executable path is `x64/Release/Minima.exe`. If your executable or checkpoint files are elsewhere:
+The default executable path is the repository's `x64/Release/Minima.exe`. The runner automatically looks for `minima.model` and `minima.bpe` in the current directory, then in its `Minima` subdirectory. If your checkpoint files are elsewhere:
 
 ```powershell
 python tools/evaluate_logic.py `
