@@ -9,7 +9,6 @@ static int scale_px(int value) {
 
 static BOOL is_advanced_page_control(HWND child) {
     if (child == g_group_advanced) return TRUE;
-    if (child == g_chat_test) return TRUE;
     for (int i = 0; i < g_advanced_control_count; ++i)
         if (g_advanced_controls[i] == child) return TRUE;
     return FALSE;
@@ -25,7 +24,7 @@ static BOOL is_chat_page_control(HWND child) {
 }
 static BOOL is_generation_page_control(HWND child) {
     const int id = GetDlgCtrlID(child);
-    return child == g_group_generation ||
+    return child == g_group_generation || child == g_chat_test ||
         (id >= IDC_GEN_TEMP_LABEL && id <= IDC_GROUP_GENERATION);
 }
 
@@ -182,7 +181,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     }
     if(g_active_page==4)
         MoveWindow(g_clear_logs,width-pad-scale_px(112),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
-    if(g_chat_test)MoveWindow(g_chat_test,right_x,advanced_y+scale_px(28),scale_px(120),scale_px(28),TRUE);
+    if(g_chat_test)MoveWindow(g_chat_test,pad+scale_px(820),gy3,scale_px(100),scale_px(23),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
 }
