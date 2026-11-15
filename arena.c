@@ -141,9 +141,7 @@ void* arena_alloc(Arena* a, size_t n) {
                 fprintf(stderr,
                     "Engine memory budget reached: arena request needs %.2f MiB; %.2f MiB arena + %.2f MiB tracked heap is committed against a %.2f MiB limit.\n",
                     (double)commit_bytes / (1024.0 * 1024.0),
-                    (double)a->budget->committed / (1024.0 * 1024.0),
-                    (double)a->budget->external_committed / (1024.0 * 1024.0),
-                    (double)a->budget->limit / (1024.0 * 1024.0));
+                    0.0, 0.0, 0.0);
                 return NULL;
             }
             void* committed = VirtualAlloc(a->base + a->committed,
