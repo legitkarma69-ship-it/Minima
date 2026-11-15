@@ -46,7 +46,7 @@ static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens;
 HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
-static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights;
+static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights, g_beta1, g_beta2, g_epsilon;
 HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_profile, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
@@ -58,6 +58,7 @@ static SIZE_T g_peak_working_bytes, g_peak_private_bytes;
 static DWORD g_cpu_warning_limit, g_ram_warning_limit_gb;
 static BOOL g_cpu_warning_issued, g_ram_warning_issued;
 static BOOL g_applying_resource_profile;
+static BOOL g_applying_optimizer_defaults;
 static BOOL g_training_paused;
 static BOOL g_chat_mode;
 static BOOL g_evaluation_mode;
@@ -435,6 +436,9 @@ static void update_fresh_only_controls(void) {
     EnableWindow(g_tokenizer_bytes,enabled);
     EnableWindow(g_tokenizer_sampling,enabled);
     EnableWindow(g_optimizer,enabled);
+    EnableWindow(g_beta1,enabled);
+    EnableWindow(g_beta2,enabled);
+    EnableWindow(g_epsilon,enabled);
 }
 
 static BOOL engine_sidecar_path(const wchar_t* filename, wchar_t* path, size_t capacity) {
@@ -493,6 +497,21 @@ static void load_configuration_profile(void) {
     apply_resource_profile();
     update_fresh_only_controls();
     MessageBoxW(g_window, L"Configuration profile loaded.", L"ProjectMinima", MB_ICONINFORMATION);
+}
+
+static void apply_optimizer_defaults(void) {
+    if (g_applying_optimizer_defaults || !g_optimizer) return;
+    wchar_t optimizer[32];
+    GetWindowTextW(g_optimizer, optimizer, (int)_countof(optimizer));
+    g_applying_optimizer_defaults = TRUE;
+    if (wcscmp(optimizer, L"lion") == 0) {
+        SetWindowTextW(g_beta1, L"0.95");
+        SetWindowTextW(g_beta2, L"0.98");
+    } else {
+        SetWindowTextW(g_beta1, L"0.9");
+        SetWindowTextW(g_beta2, L"0.95");
+    }
+    g_applying_optimizer_defaults = FALSE;
 }
 
 static void toggle_training_pause(void) {
@@ -555,7 +574,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -776,7 +795,10 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
             MessageBoxW(g_window,L"Check the training settings.",L"ProjectMinima",MB_ICONWARNING);return;
         }
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED &&
-           !append_option(command,_countof(command),L"--total-steps",g_total_steps)){
+           (!append_option(command,_countof(command),L"--total-steps",g_total_steps) ||
+            !append_option(command,_countof(command),L"--beta1",g_beta1) ||
+            !append_option(command,_countof(command),L"--beta2",g_beta2) ||
+            !append_option(command,_countof(command),L"--epsilon",g_epsilon))){
             MessageBoxW(g_window,L"Check the total training-step horizon.",L"ProjectMinima",MB_ICONWARNING);return;
         }
         if(use_prebuilt_tokenizer)wcscat_s(command,_countof(command),L" --use-existing-tokenizer");
@@ -1322,14 +1344,14 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[32] = {
+    HWND edits[35] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
         g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip,
         g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget,
-        g_cpu_warning, g_ram_warning, g_source_weights
+        g_cpu_warning, g_ram_warning, g_source_weights, g_beta1, g_beta2, g_epsilon
     };
     HWND combos[5] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer, g_resource_profile };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -1393,7 +1415,10 @@ static void create_controls(HWND hwnd) {
         &g_arena_budget,
         &g_cpu_warning,
         &g_ram_warning,
-        &g_source_weights
+        &g_source_weights,
+        &g_beta1,
+        &g_beta2,
+        &g_epsilon
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     CreateWindowW(L"BUTTON", L"Pause training", WS_CHILD | WS_VISIBLE | WS_DISABLED,
@@ -1442,7 +1467,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1475,6 +1500,9 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_ram_warning, L"Log one warning per run when the process-group working set reaches this GiB threshold. 0 disables the warning; 1-64 is allowed.");
         add_tooltip(g_resource_profile, L"Eco, Balanced, and Performance presets set CPU cap, process commit cap, arena budget, OpenMP threads, and Windows process priority. Any manual edit to those controls switches the selection back to Custom.");
         add_tooltip(g_source_weights, L"Optional comma-separated positive multipliers, one for each non-empty corpus file in the Corpus list order. Example: 1,0.5,2. Global Data mix is applied first, then each source multiplier. Allowed range: 0.001-1000. Leave blank for the normal global mix.");
+        add_tooltip(g_beta1, L"Optimizer beta1. AdamW default: 0.9; Lion default: 0.95. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
+        add_tooltip(g_beta2, L"Optimizer beta2. AdamW default: 0.95; Lion default: 0.98. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
+        add_tooltip(g_epsilon, L"AdamW numerical stability epsilon. Default 1e-8. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -1499,7 +1527,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
@@ -1644,6 +1672,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (LOWORD(wp) == IDC_LOAD_PROFILE && HIWORD(wp) == BN_CLICKED) {
             load_configuration_profile();
             return 0;
+        }
+        if ((HWND)lp == g_optimizer && HIWORD(wp) == CBN_SELCHANGE) {
+            apply_optimizer_defaults();
         }
         if (LOWORD(wp) == IDC_PAUSE && HIWORD(wp) == BN_CLICKED) {
             toggle_training_pause();
