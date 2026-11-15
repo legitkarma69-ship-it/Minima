@@ -46,7 +46,7 @@ static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens;
 HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
-static HWND g_optimizer, g_weight_decay, g_threads;
+static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights;
 HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_profile, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
@@ -555,7 +555,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_source_weights};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -802,6 +802,11 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
             MessageBoxW(g_window, L"Corpus command line is too long or contains an unsupported quote.", L"ProjectMinima", MB_ICONERROR);
             return;
         }
+    }
+    if (!chat_mode && !tokenizer_only && GetWindowTextLengthW(g_source_weights) > 0 &&
+        !append_option(command, _countof(command), L"--source-weights", g_source_weights)) {
+        MessageBoxW(g_window, L"Check the per-source corpus weights CSV.", L"ProjectMinima", MB_ICONWARNING);
+        return;
     }
 
     DWORD cpu_limit_percent = 0, ram_limit_gb = 0, arena_budget_gb = 0;
@@ -1317,14 +1322,14 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[31] = {
+    HWND edits[32] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
         g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip,
         g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget,
-        g_cpu_warning, g_ram_warning
+        g_cpu_warning, g_ram_warning, g_source_weights
     };
     HWND combos[5] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer, g_resource_profile };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -1387,7 +1392,8 @@ static void create_controls(HWND hwnd) {
         &g_threads,
         &g_arena_budget,
         &g_cpu_warning,
-        &g_ram_warning
+        &g_ram_warning,
+        &g_source_weights
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     CreateWindowW(L"BUTTON", L"Pause training", WS_CHILD | WS_VISIBLE | WS_DISABLED,
@@ -1436,7 +1442,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE) };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1468,6 +1474,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_cpu_warning, L"Log one warning per run when measured process-group CPU utilization reaches this percentage. 0 disables the warning; 1-100 is normalized to total logical-processor capacity.");
         add_tooltip(g_ram_warning, L"Log one warning per run when the process-group working set reaches this GiB threshold. 0 disables the warning; 1-64 is allowed.");
         add_tooltip(g_resource_profile, L"Eco, Balanced, and Performance presets set CPU cap, process commit cap, arena budget, OpenMP threads, and Windows process priority. Any manual edit to those controls switches the selection back to Custom.");
+        add_tooltip(g_source_weights, L"Optional comma-separated positive multipliers, one for each non-empty corpus file in the Corpus list order. Example: 1,0.5,2. Global Data mix is applied first, then each source multiplier. Allowed range: 0.001-1000. Leave blank for the normal global mix.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
