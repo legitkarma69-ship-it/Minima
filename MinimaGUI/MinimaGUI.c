@@ -58,6 +58,7 @@ static ULONGLONG g_last_cpu_100ns, g_last_cpu_tick;
 static DWORD g_last_cpu_pid;
 static double g_peak_cpu_percent;
 static SIZE_T g_peak_working_bytes, g_peak_private_bytes;
+static double g_last_tokens_per_second;
 static DWORD g_cpu_warning_limit, g_ram_warning_limit_gb;
 static BOOL g_cpu_warning_issued, g_ram_warning_issued;
 static BOOL g_applying_resource_profile;
