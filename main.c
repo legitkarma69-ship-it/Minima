@@ -55,6 +55,7 @@ typedef struct {
     const char* metrics_path;
     const char* stop_file;
     const char* pause_file;
+    const char* source_weights;
     const char* save_file;
     float temperature, top_p, repetition_penalty;
     int top_k, max_new_tokens;
@@ -111,9 +112,36 @@ static void print_usage(const char* exe) {
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
     printf("  --stop-file PATH --pause-file PATH --save-file PATH (cooperative training controls)\n");
+    printf("  --source-weights CSV (positive multipliers, one per non-empty corpus file)\n");
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
     printf("  --use-existing-tokenizer (fresh model using a previously rebuilt minima.bpe)\n");
     printf("  --diagnostics-only --help\n");
+}
+
+static bool parse_source_weights_csv(const char* csv, double* weights,
+    size_t capacity, size_t* count_out) {
+    if (!csv || !weights || !count_out || capacity == 0) return false;
+    const char* cursor = csv;
+    size_t count = 0;
+    while (*cursor) {
+        while (*cursor == ' ' || *cursor == '\t') ++cursor;
+        if (count >= capacity) return false;
+        errno = 0;
+        char* end = NULL;
+        const double value = strtod(cursor, &end);
+        if (end == cursor || errno == ERANGE || !isfinite(value) ||
+            value < 0.001 || value > 1000.0) return false;
+        cursor = end;
+        while (*cursor == ' ' || *cursor == '\t') ++cursor;
+        weights[count++] = value;
+        if (!*cursor) break;
+        if (*cursor != ',') return false;
+        ++cursor;
+        if (!*cursor) return false;
+    }
+    if (count == 0) return false;
+    *count_out = count;
+    return true;
 }
 
 static int parse_arguments(int argc, char** argv, bool* resume,
@@ -131,7 +159,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
     o->threads=0; o->memory_budget_gb=0;
-    o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->pause_file=NULL; o->save_file=NULL;
+    o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->pause_file=NULL; o->source_weights=NULL; o->save_file=NULL;
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
@@ -276,12 +304,13 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             o->weight_decay=parse_float_value("--weight-decay",argv[i],0.0f,1.0f);
             o->weight_decay_explicit=true;
         }
-        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--pause-file") == 0 || strcmp(argv[i], "--save-file") == 0) {
+        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--pause-file") == 0 || strcmp(argv[i], "--source-weights") == 0 || strcmp(argv[i], "--save-file") == 0) {
             const char* option=argv[i];
             if (++i >= argc || !argv[i][0]) die("%s requires a path",option);
             if (strcmp(option,"--metrics")==0) o->metrics_path=argv[i];
             else if(strcmp(option,"--stop-file")==0)o->stop_file=argv[i];
             else if(strcmp(option,"--pause-file")==0)o->pause_file=argv[i];
+            else if(strcmp(option,"--source-weights")==0)o->source_weights=argv[i];
             else o->save_file=argv[i];
         }
         else if (argv[i][0] == '-') {
@@ -571,6 +600,17 @@ int main(int argc, char** argv) {
     // 4. Encode each source and create source-local held-out regions
     // ------------------------------------------------------------------
     const size_t source_count = have_corpus ? loaded_corpus.source_count : 1u;
+    double source_weights[TRAIN_MAX_SOURCES];
+    for (size_t i = 0; i < TRAIN_MAX_SOURCES; ++i) source_weights[i] = 1.0;
+    if (options.source_weights) {
+        size_t parsed_weight_count = 0;
+        if (!parse_source_weights_csv(options.source_weights, source_weights,
+                TRAIN_MAX_SOURCES, &parsed_weight_count))
+            die("--source-weights must be a comma-separated list of 0.001..1000 multipliers");
+        if (parsed_weight_count != source_count)
+            die("--source-weights needs one multiplier for each non-empty corpus file (%zu expected, %zu supplied)",
+                source_count, parsed_weight_count);
+    }
     if (source_count == 0 || source_count > TRAIN_MAX_SOURCES ||
         source_count > SIZE_MAX / 2u ||
         corpus_len > SIZE_MAX - 2u * source_count)
@@ -650,6 +690,7 @@ int main(int argc, char** argv) {
         span->train_tokens = source_train_text_count + 1;
         span->validation_start = (int)validation_text_start + 1;
         span->validation_tokens = validation_text_count + 1;
+        span->weight = source_weights[source_index];
         train_tokens += span->train_tokens;
         validation_tokens += span->validation_tokens;
         token_cursor += (size_t)encoded + 2u;
