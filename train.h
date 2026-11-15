@@ -46,6 +46,7 @@ typedef struct {
     size_t activation_bytes;
     const char* metrics_path;
     const char* stop_file;
+    const char* pause_file;
     const char* save_file;
 } TrainRunOptions;
 
