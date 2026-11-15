@@ -36,7 +36,9 @@ static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
     const int page = (int)page_parameter;
     if (child == g_main_tabs) return TRUE;
     BOOL visible;
-    if (page == 0)
+    if (child == g_status_bar)
+        visible = TRUE;
+    else if (page == 0)
         visible = !is_advanced_page_control(child) &&
             !is_generation_page_control(child) && !is_chat_page_control(child) && !is_logs_page_control(child);
     else if (page == 1)
@@ -87,6 +89,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
     if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(430),TRUE);
     if(g_group_generation)MoveWindow(g_group_generation,pad,work_top,inner,scale_px(160),TRUE);
+    if(g_status_bar)MoveWindow(g_status_bar,pad,client_height-bottom-scale_px(22),inner,scale_px(18),TRUE);
     const int gy = work_top + scale_px(34);
     MoveWindow(GetDlgItem(hwnd,IDC_GEN_TEMP_LABEL),pad+scale_px(8),gy+scale_px(3),scale_px(45),scale_px(18),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_GEN_TEMP),pad+scale_px(55),gy,scale_px(55),scale_px(23),TRUE);
@@ -136,7 +139,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     for(int i=0;i<g_initial_rect_count;i++){
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
-           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_group_generation||child==g_main_tabs||child==g_corpus||
+           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_group_generation||child==g_status_bar||child==g_main_tabs||child==g_corpus||
            child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile||is_generation_page_control(child)||GetDlgCtrlID(child)==IDC_SAVE_PROFILE||GetDlgCtrlID(child)==IDC_LOAD_PROFILE)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
