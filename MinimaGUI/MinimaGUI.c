@@ -937,6 +937,9 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     wchar_t* slash = wcsrchr(working_dir, L'\\');
     if (slash) *slash = 0;
 
+    wchar_t stale_pause_path[MAX_PATH];
+    if (engine_sidecar_path(L"minima.pause", stale_pause_path, _countof(stale_pause_path)))
+        DeleteFileW(stale_pause_path);
     g_resource_job = CreateJobObjectW(NULL, NULL);
     if (!g_resource_job || !configure_resource_job(g_resource_job,
         cpu_limit_percent, ram_limit_gb, selected_resource_priority())) {
