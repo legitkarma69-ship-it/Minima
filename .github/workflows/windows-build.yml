@@ -44,6 +44,13 @@ jobs:
           & ".\x64\Release\Minima.exe" --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Test held-out reasoning evaluation harness
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify evaluation prompts stay isolated from reference answers
+        run: python -m unittest tools.test_evaluate_logic
+
       - name: Test GUI reader-to-window readiness integration
         shell: pwsh
         run: |
