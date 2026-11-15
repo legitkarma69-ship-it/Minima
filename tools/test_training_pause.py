@@ -34,7 +34,8 @@ def main() -> int:
         "--sequence-length", "8", "--max-seq", "80", "--validation-batches", "1",
         "--log-interval", "1", "--validation-interval", "1",
         "--checkpoint-interval", "1", "--metrics", str(metrics_file),
-        "--pause-file", str(pause_file), "--stop-file", str(stop_file), str(corpus),
+        "--pause-file", str(pause_file), "--stop-file", str(stop_file),
+        "--source-weights", "1.0", str(corpus),
     ]
 
     process = subprocess.Popen(
