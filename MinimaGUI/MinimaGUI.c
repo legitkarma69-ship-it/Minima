@@ -701,6 +701,11 @@ static void start_logic_evaluation(void) {
         return;
     }
     wcscat_s(command, _countof(command), L" --max-new-tokens 64");
+    DWORD cpu_limit_percent = 0, ram_limit_gb = 0;
+    if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb)) {
+        MessageBoxW(g_window, L"CPU cap must be 0-100% and RAM cap must be 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+        return;
+    }
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
     HANDLE rd = NULL, wr = NULL;
     if (!CreatePipe(&rd, &wr, &sa, 0)) { MessageBoxW(g_window, L"Could not create evaluation output pipe.", L"ProjectMinima", MB_ICONERROR); return; }
@@ -709,9 +714,7 @@ static void start_logic_evaluation(void) {
     if (nul == INVALID_HANDLE_VALUE) { CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not open NUL.", L"ProjectMinima", MB_ICONERROR); return; }
     HANDLE eval_job = CreateJobObjectW(NULL, NULL);
     if (!eval_job) { CloseHandle(nul); CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not create an evaluation process group.", L"ProjectMinima", MB_ICONERROR); return; }
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits; ZeroMemory(&job_limits, sizeof(job_limits));
-    job_limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    if (!SetInformationJobObject(eval_job, JobObjectExtendedLimitInformation, &job_limits, sizeof(job_limits))) {
+    if (!configure_resource_job(eval_job, cpu_limit_percent, ram_limit_gb)) {
         CloseHandle(eval_job); CloseHandle(nul); CloseHandle(rd); CloseHandle(wr);
         MessageBoxW(g_window, L"Could not configure evaluation process cleanup.", L"ProjectMinima", MB_ICONERROR); return;
     }
@@ -732,6 +735,8 @@ static void start_logic_evaluation(void) {
     }
     ResumeThread(pi.hThread); CloseHandle(pi.hThread);
     g_eval_job = eval_job; g_process = pi.hProcess;
+    g_last_cpu_pid = 0; g_last_cpu_tick = g_last_cpu_100ns = 0;
+    update_resource_monitor();
     g_chat_mode = FALSE; g_evaluation_mode = TRUE;
     gui_layout_select_main_page(g_window, 2); set_running(TRUE);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), FALSE);
