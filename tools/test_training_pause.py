@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import queue
+import shutil
 import subprocess
 import threading
 import time
@@ -22,6 +23,8 @@ def main() -> int:
     pause_file = workdir / "minima_ci_pause.signal"
     stop_file = workdir / "minima_ci_pause.stop"
     metrics_file = workdir / "minima_ci_pause_metrics.csv"
+    second_corpus = workdir / "minima_ci_pause_corpus_copy.txt"
+    shutil.copyfile(corpus, second_corpus)
     for path in (pause_file, stop_file, metrics_file):
         path.unlink(missing_ok=True)
 
@@ -35,7 +38,7 @@ def main() -> int:
         "--log-interval", "1", "--validation-interval", "1",
         "--checkpoint-interval", "1", "--metrics", str(metrics_file),
         "--pause-file", str(pause_file), "--stop-file", str(stop_file),
-        "--source-weights", "1.0", str(corpus),
+        "--source-weights", "1.0,2.0", str(corpus), str(second_corpus),
     ]
 
     process = subprocess.Popen(
@@ -115,6 +118,7 @@ def main() -> int:
     finally:
         pause_file.unlink(missing_ok=True)
         stop_file.unlink(missing_ok=True)
+        second_corpus.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
