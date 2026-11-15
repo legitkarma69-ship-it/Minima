@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#define WIN32_LEAN_AND_MEAN
+#define _WIN32_WINNT 0x0600
+#include <windows.h>
 
 static bool stop_file_exists(const char* path) {
     if (!path || !path[0]) return false;
@@ -15,6 +18,26 @@ static bool stop_file_exists(const char* path) {
 static bool consume_file_signal(const char* path) {
     if(!stop_file_exists(path))return false;
     remove(path);return true;
+}
+
+static ULONGLONG wait_while_paused(const char* pause_path, const char* stop_path) {
+    if (!pause_path || !pause_path[0] || !stop_file_exists(pause_path))
+        return 0;
+    const ULONGLONG pause_started = GetTickCount64();
+    bool announced = false;
+    while (stop_file_exists(pause_path) && !stop_file_exists(stop_path)) {
+        if (!announced) {
+            printf("TRAIN_PAUSED\n");
+            fflush(stdout);
+            announced = true;
+        }
+        Sleep(200);
+    }
+    if (announced && !stop_file_exists(stop_path)) {
+        printf("TRAIN_RESUMED\n");
+        fflush(stdout);
+    }
+    return announced ? GetTickCount64() - pause_started : 0;
 }
 
 typedef struct {
@@ -200,6 +223,8 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
     if (fseek(metrics,0,SEEK_END)!=0) die("could not seek metrics CSV");
     if (ftell(metrics)==0) { fprintf(metrics,"step,train_loss,validation_loss,learning_rate,train_perplexity,validation_perplexity,elapsed_seconds\n"); fflush(metrics); }
     const clock_t training_started=clock();
+    const ULONGLONG training_started_ms = GetTickCount64();
+    ULONGLONG paused_total_ms = 0;
     printf("Metrics CSV: %s\n",options.metrics_path);
     printf("Settings: lr=%.7g schedule=%s warmup=%lld total_steps=%lld log=%d validation_every=%d val_batches=%d checkpoint=%d seed=%llu tokenizer_sample=%zu sampling=%s corpus_mix=%s grad_clip=%.3g batch=%d seq=%d\n",
         opt->schedule_base_lr,opt->schedule_type==0?"cosine":"constant",(long long)opt->schedule_warmup_steps,(long long)opt->schedule_total_steps,options.log_interval,options.validation_interval,options.validation_batches,
@@ -234,6 +259,17 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
         printf("Diagnostics-only mode: optimizer updates skipped.\n");
     }
     else for (int local_step = 0; local_step < options.steps; local_step++) {
+        if (stop_file_exists(options.stop_file)) {
+            printf("Cooperative stop requested before optimizer step %lld.\n",
+                (long long)(opt->step + 1));
+            break;
+        }
+        paused_total_ms += wait_while_paused(options.pause_file, options.stop_file);
+        if (stop_file_exists(options.stop_file)) {
+            printf("Cooperative stop requested while paused; stopping after optimizer step %lld.\n",
+                (long long)opt->step);
+            break;
+        }
         arena_reset(temp);
         if (!activations_init(&act, temp, options.batch_size, options.sequence_length, model))
             die("activation allocation failed");
@@ -314,10 +350,21 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
             const double elapsed=(double)(clock()-training_started)/CLOCKS_PER_SEC;
             const double mean_gradient_norm = gradient_norm_count > 0
                 ? gradient_norm_sum / gradient_norm_count : 0.0;
-            printf("%5lld | %10.4f | %10.4f | %.7f | grad %.3f/%.3f clipped %d/%d\n",
+            const ULONGLONG wall_ms = GetTickCount64() - training_started_ms;
+            const double active_seconds = wall_ms > paused_total_ms
+                ? (double)(wall_ms - paused_total_ms) / 1000.0 : 0.0;
+            const int64_t completed_steps = opt->step - initial_step;
+            const double steps_per_second = active_seconds > 0.0
+                ? (double)completed_steps / active_seconds : 0.0;
+            const double tokens_per_second = steps_per_second *
+                options.batch_size * options.sequence_length;
+            const int remaining_steps = options.steps - (local_step + 1);
+            const double eta_seconds = steps_per_second > 0.0
+                ? (double)remaining_steps / steps_per_second : 0.0;
+            printf("%5lld | %10.4f | %10.4f | %.7f | grad %.3f/%.3f clipped %d/%d | %.2f steps/s %.0f tok/s ETA %.0f s\n",
                 (long long)opt->step,(float)average_train_loss,validation_loss,
                 opt->lr,mean_gradient_norm,gradient_norm_max,clipped_steps,
-                gradient_norm_count);
+                gradient_norm_count,steps_per_second,tokens_per_second,eta_seconds);
             fprintf(metrics,"%lld,%.7f,%.7f,%.9g,%.7f,%.7f,%.3f\n",
                 (long long)opt->step,(float)average_train_loss,validation_loss,opt->lr,
                 expf((float)average_train_loss),expf(validation_loss),elapsed);
