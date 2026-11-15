@@ -361,8 +361,14 @@ static void update_status_bar(double cpu_percent, SIZE_T committed_bytes,
     wchar_t mode[24], cpu_field[40], memory_field[48], threads_field[32], tps_field[32];
     if (!g_running) {
         wcscpy_s(mode, _countof(mode), L"Idle");
-        wcscpy_s(cpu_field, _countof(cpu_field), L"--");
-        wcscpy_s(memory_field, _countof(memory_field), L"--");
+        if (cpu_cap)
+            _snwprintf_s(cpu_field, _countof(cpu_field), _TRUNCATE, L"--/%lu%%", cpu_cap);
+        else
+            wcscpy_s(cpu_field, _countof(cpu_field), L"--/--");
+        if (ram_cap)
+            _snwprintf_s(memory_field, _countof(memory_field), _TRUNCATE, L"--/%luGB", ram_cap);
+        else
+            wcscpy_s(memory_field, _countof(memory_field), L"--/--GB");
         wcscpy_s(tps_field, _countof(tps_field), L"--");
     } else {
         const wchar_t* mode_text = g_training_paused ? L"Paused" :
