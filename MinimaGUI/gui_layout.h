@@ -37,6 +37,7 @@
 #define IDC_RAM_WARNING 1033
 #define IDC_RESOURCE_PROFILE_LABEL 1034
 #define IDC_RESOURCE_PROFILE 1035
+#define IDC_PAUSE 1036
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
