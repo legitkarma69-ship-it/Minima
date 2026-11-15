@@ -32,7 +32,8 @@ static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
     if (child == g_main_tabs) return TRUE;
     BOOL visible;
     if (page == 0)
-        visible = !is_advanced_page_control(child) && !is_chat_page_control(child);
+        visible = !is_advanced_page_control(child) &&
+            !is_chat_page_control(child) && !is_logs_page_control(child);
     else if (page == 1)
         visible = is_advanced_page_control(child) &&
             (child == g_group_advanced || g_advanced_expanded);
