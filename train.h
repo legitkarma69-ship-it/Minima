@@ -25,6 +25,7 @@ typedef struct {
     int train_tokens;
     int validation_start;
     int validation_tokens;
+    double weight; /* per-source multiplier; 1.0 preserves global mix behavior */
 } TrainSourceSpan;
 
 typedef struct {
