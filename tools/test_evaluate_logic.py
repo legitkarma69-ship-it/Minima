@@ -28,8 +28,8 @@ class EvaluationHarnessTests(unittest.TestCase):
     def test_response_parser_preserves_multiline_answers(self):
         output = (
             "CHAT_READY\nBOT: The answer is no.\n"
-            "The two conditions do not overlap.\nCHAT_RESPONSE_END\nCHAT_READY\n"
-            "BOT: Cannot be determined.\nCHAT_RESPONSE_END\nCHAT_READY\nCHAT_CLOSED\n"
+            "The two conditions do not overlap.\nCHAT_READY\n"
+            "BOT: Cannot be determined.\nCHAT_READY\nCHAT_CLOSED\n"
         )
         self.assertEqual(evaluate_logic.parse_chat_responses(output), [
             "The answer is no.\nThe two conditions do not overlap.",
