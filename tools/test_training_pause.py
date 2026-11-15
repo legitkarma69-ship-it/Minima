@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import queue
 import shutil
+import sys
 import subprocess
 import threading
 import time
@@ -12,6 +13,8 @@ from pathlib import Path
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--corpus", type=Path, required=True)
