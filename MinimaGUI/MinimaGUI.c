@@ -58,6 +58,7 @@ static SIZE_T g_peak_working_bytes, g_peak_private_bytes;
 static DWORD g_cpu_warning_limit, g_ram_warning_limit_gb;
 static BOOL g_cpu_warning_issued, g_ram_warning_issued;
 static BOOL g_applying_resource_profile;
+static BOOL g_training_paused;
 static BOOL g_chat_mode;
 static BOOL g_evaluation_mode;
 static BOOL g_chat_response_active;
@@ -434,6 +435,46 @@ static void update_fresh_only_controls(void) {
     EnableWindow(g_tokenizer_bytes,enabled);
     EnableWindow(g_tokenizer_sampling,enabled);
     EnableWindow(g_optimizer,enabled);
+}
+
+static BOOL engine_sidecar_path(const wchar_t* filename, wchar_t* path, size_t capacity) {
+    if (!filename || !path || capacity == 0 || !g_engine_path[0]) return FALSE;
+    if (wcscpy_s(path, capacity, g_engine_path) != 0) return FALSE;
+    wchar_t* slash = wcsrchr(path, L'\\');
+    if (!slash) return FALSE;
+    return wcscpy_s(slash + 1, capacity - (size_t)(slash + 1 - path), filename) == 0;
+}
+
+static void toggle_training_pause(void) {
+    if (!InterlockedCompareExchange(&g_running, 0, 0) ||
+        g_chat_mode || g_evaluation_mode || g_tokenizer_rebuild_mode) return;
+    wchar_t path[MAX_PATH];
+    if (!engine_sidecar_path(L"minima.pause", path, _countof(path))) {
+        MessageBoxW(g_window, L"Could not locate the training pause signal file.", L"ProjectMinima", MB_ICONERROR);
+        return;
+    }
+    if (!g_training_paused) {
+        HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file == INVALID_HANDLE_VALUE) {
+            MessageBoxW(g_window, L"Could not create the training pause signal.", L"ProjectMinima", MB_ICONERROR);
+            return;
+        }
+        CloseHandle(file);
+        g_training_paused = TRUE;
+        SetWindowTextW(GetDlgItem(g_window, IDC_PAUSE), L"Resume training");
+        SetWindowTextW(g_status, L"Pausing after current step");
+        append_log(L"Training pause requested; Minima will pause between optimizer steps.\r\n");
+    } else {
+        if (!DeleteFileW(path) && GetLastError() != ERROR_FILE_NOT_FOUND) {
+            MessageBoxW(g_window, L"Could not remove the training pause signal.", L"ProjectMinima", MB_ICONERROR);
+            return;
+        }
+        g_training_paused = FALSE;
+        SetWindowTextW(GetDlgItem(g_window, IDC_PAUSE), L"Pause training");
+        SetWindowTextW(g_status, L"Resuming training");
+        append_log(L"Training resume requested.\r\n");
+    }
 }
 
 static void set_running(BOOL running) {
