@@ -240,7 +240,7 @@ jobs:
       - name: Run fresh-training smoke test (non-default configuration A)
         shell: pwsh
         run: |
-          $output = & ".\x64\Release\Minima.exe" --use-existing-tokenizer --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
+          $output = & ".\x64\Release\Minima.exe" --use-existing-tokenizer --memory-budget-gb 1 --steps 1 --total-steps 2 --warmup 1 --vocab-size 300 --tokenizer-sample-bytes 8192 --batch-size 1 --dim 96 --layers 3 --heads 4 --ffn-dim 192 --sequence-length 8 --max-seq 80 --validation-batches 1 --log-interval 1 --validation-interval 1 --checkpoint-interval 1 --metrics ".\minima_ci_metrics.csv" ".\minima_ci_corpus.txt" 2>&1
           $output | ForEach-Object { Write-Host $_ }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $text = $output -join "`n"
