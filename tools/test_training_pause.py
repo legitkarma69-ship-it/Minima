@@ -41,7 +41,8 @@ def main() -> int:
         "--log-interval", "1", "--validation-interval", "1",
         "--checkpoint-interval", "1", "--metrics", str(metrics_file),
         "--pause-file", str(pause_file), "--stop-file", str(stop_file),
-        "--source-weights", "1.0,2.0", str(corpus), str(second_corpus),
+        "--source-weights", "1.0,2.0", "--beta1", "0.91", "--beta2", "0.96",
+        "--epsilon", "1e-7", str(corpus), str(second_corpus),
     ]
 
     process = subprocess.Popen(
@@ -107,6 +108,8 @@ def main() -> int:
             raise RuntimeError(f"Minima exited with status {return_code}")
         if not observed_paused or not observed_resumed:
             raise RuntimeError("Pause/resume protocol was incomplete")
+        if not any("beta1=0.91 beta2=0.96 epsilon=1e-07" in line for line in captured):
+            raise RuntimeError("Configured optimizer beta/epsilon values were not applied or reported")
         print("Training pause/resume integration: PASS", flush=True)
         return 0
     except Exception:
