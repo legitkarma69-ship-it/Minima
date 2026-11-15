@@ -391,40 +391,120 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
 // Sampling helpers
 // ------------------------------------------------------------------
 
+static bool repeats_ngram(const uint16_t* history, int history_len,
+    uint16_t candidate, int ngram_size) {
+    if (ngram_size <= 0 || history_len < ngram_size - 1) return false;
+    if (ngram_size == 1) {
+        for (int i = 0; i < history_len; ++i)
+            if (history[i] == candidate) return true;
+        return false;
+    }
+    const int prefix_len = ngram_size - 1;
+    const int current_start = history_len - prefix_len;
+    for (int start = 0; start + prefix_len < history_len; ++start) {
+        if (memcmp(history + start, history + current_start,
+                (size_t)prefix_len * sizeof(uint16_t)) == 0 &&
+            history[start + prefix_len] == candidate)
+            return true;
+    }
+    return false;
+}
+
 static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
-    int top_k, float top_p, float repetition_penalty,
+    int top_k, float top_p, float repetition_penalty, float min_p,
+    float frequency_penalty, float presence_penalty, int no_repeat_ngram_size,
     const uint16_t* history, int history_len, Rng* rng) {
-    int idx[256]; float vals[256]; int n=0;
-    uint8_t seen[TOK_MAX_VOCAB]={0};
-    if(top_k<1)top_k=1;if(top_k>vocab)top_k=vocab;if(top_k>256)top_k=256;
-    if(repetition_penalty>1.0f)
-        for(int j=0;j<history_len;j++)if(history[j]<(uint16_t)vocab)seen[history[j]]=1;
-    for(int id=0;id<vocab;id++){
-        float value=logits[id];
-        if(seen[id])value=value>0.0f?value/repetition_penalty:value*repetition_penalty;
-        value/=temperature;
-        if(n<top_k){idx[n]=id;vals[n]=value;n++;}
-        else{
-            int min_i=0;for(int j=1;j<n;j++)if(vals[j]<vals[min_i])min_i=j;
-            if(value>vals[min_i]){idx[min_i]=id;vals[min_i]=value;}
+    int idx[256];
+    float vals[256];
+    int n = 0;
+    uint8_t seen[TOK_MAX_VOCAB] = {0};
+    uint16_t counts[TOK_MAX_VOCAB] = {0};
+    if (top_k < 1) top_k = 1;
+    if (top_k > vocab) top_k = vocab;
+    if (top_k > 256) top_k = 256;
+    if (repetition_penalty > 1.0f || frequency_penalty != 0.0f ||
+        presence_penalty != 0.0f) {
+        for (int j = 0; j < history_len; ++j) {
+            const uint16_t id = history[j];
+            if (id >= (uint16_t)vocab) continue;
+            seen[id] = 1;
+            if (counts[id] < UINT16_MAX) ++counts[id];
         }
     }
-    // Sort the retained candidates by descending adjusted logit.
-    for(int i=0;i<n;i++)for(int j=i+1;j<n;j++)if(vals[j]>vals[i]){
-        float tv=vals[i];vals[i]=vals[j];vals[j]=tv;
-        int ti=idx[i];idx[i]=idx[j];idx[j]=ti;
+    for (int id = 0; id < vocab; ++id) {
+        float value = logits[id];
+        if (seen[id] && repetition_penalty > 1.0f)
+            value = value > 0.0f ? value / repetition_penalty :
+                value * repetition_penalty;
+        if (counts[id] > 0)
+            value -= frequency_penalty * (float)counts[id] + presence_penalty;
+        if (no_repeat_ngram_size > 0 &&
+            repeats_ngram(history, history_len, (uint16_t)id, no_repeat_ngram_size))
+            value = -INFINITY;
+        value /= temperature;
+        if (n < top_k) {
+            idx[n] = id;
+            vals[n] = value;
+            ++n;
+        } else {
+            int min_i = 0;
+            for (int j = 1; j < n; ++j)
+                if (vals[j] < vals[min_i]) min_i = j;
+            if (value > vals[min_i]) {
+                idx[min_i] = id;
+                vals[min_i] = value;
+            }
+        }
     }
-    float maxv=vals[0], probs[256], sum=0.0f;
-    for(int i=0;i<n;i++){probs[i]=expf(vals[i]-maxv);sum+=probs[i];}
-    if(top_p<1.0f){
-        float cumulative=0.0f;int keep=0;
-        for(int i=0;i<n;i++){cumulative+=probs[i]/sum;keep++;if(cumulative>=top_p)break;}
-        n=keep;
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            if (vals[j] > vals[i]) {
+                float tv = vals[i]; vals[i] = vals[j]; vals[j] = tv;
+                int ti = idx[i]; idx[i] = idx[j]; idx[j] = ti;
+            }
+        }
     }
-    sum=0.0f;for(int i=0;i<n;i++)sum+=probs[i];
-    float draw=rng_f32(rng)*sum;
-    for(int i=0;i<n;i++){draw-=probs[i];if(draw<=0.0f)return idx[i];}
-    return idx[n-1];
+    /* If every candidate was blocked by no-repeat, relax only that constraint
+       for this token rather than producing NaNs or failing generation. */
+    if (n == 0 || !isfinite(vals[0]))
+        return sample_top_k_top_p(logits, vocab, temperature, top_k, top_p,
+            repetition_penalty, min_p, frequency_penalty, presence_penalty,
+            0, history, history_len, rng);
+
+    float maxv = vals[0], probs[256], sum = 0.0f;
+    for (int i = 0; i < n; ++i) {
+        probs[i] = expf(vals[i] - maxv);
+        sum += probs[i];
+    }
+    if (!(sum > 0.0f) || !isfinite(sum)) return idx[0];
+
+    if (min_p > 0.0f) {
+        const float min_probability = (probs[0] / sum) * min_p;
+        int keep = 1;
+        for (int i = 1; i < n; ++i) {
+            if (probs[i] / sum < min_probability) break;
+            ++keep;
+        }
+        n = keep;
+    }
+    if (top_p < 1.0f) {
+        float cumulative = 0.0f;
+        int keep = 0;
+        for (int i = 0; i < n; ++i) {
+            cumulative += probs[i] / sum;
+            ++keep;
+            if (cumulative >= top_p) break;
+        }
+        n = keep;
+    }
+    sum = 0.0f;
+    for (int i = 0; i < n; ++i) sum += probs[i];
+    float draw = rng_f32(rng) * sum;
+    for (int i = 0; i < n; ++i) {
+        draw -= probs[i];
+        if (draw <= 0.0f) return idx[i];
+    }
+    return idx[n - 1];
 }
 
 // ------------------------------------------------------------------
