@@ -723,6 +723,24 @@ static void remember_prebuilt_tokenizer_settings(void) {
 static BOOL read_float_control(HWND control, float minimum, float maximum, float* value);
 
 static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
+    if (chat_mode) {
+        float temperature, top_p, repetition, min_p, frequency, presence;
+        DWORD top_k, max_tokens, min_tokens, ngram, sampling_seed;
+        if (!read_float_control(g_temperature, 0.05f, 5.0f, &temperature) ||
+            !read_float_control(g_top_p, 0.01f, 1.0f, &top_p) ||
+            !read_float_control(g_repetition, 1.0f, 3.0f, &repetition) ||
+            !read_float_control(g_min_p, 0.0f, 1.0f, &min_p) ||
+            !read_float_control(g_frequency_penalty, -2.0f, 2.0f, &frequency) ||
+            !read_float_control(g_presence_penalty, -2.0f, 2.0f, &presence) ||
+            !read_bounded_integer(g_top_k, 256, &top_k) || top_k < 1 ||
+            !read_bounded_integer(g_max_tokens, 512, &max_tokens) || max_tokens < 1 ||
+            !read_bounded_integer(g_min_new_tokens, 512, &min_tokens) ||
+            !read_bounded_integer(g_no_repeat_ngram, 16, &ngram) ||
+            !read_bounded_integer(g_sampling_seed, 2147483647u, &sampling_seed)) {
+            MessageBoxW(g_window, L"Check Generation settings: temperature 0.05-5, top-p/min-p 0-1 (top-p minimum 0.01), repetition 1-3, penalties -2 to 2, top-k 1-256, max tokens 1-512, min tokens 0-512, n-gram 0-16, seed 0-2147483647.", L"Generation settings", MB_ICONWARNING);
+            return;
+        }
+    }
     if (!chat_mode && !tokenizer_only &&
         SendMessageW(g_resume, BM_GETCHECK, 0, 0) != BST_CHECKED) {
         float beta1, beta2, epsilon;
