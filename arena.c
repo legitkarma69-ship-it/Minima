@@ -6,10 +6,82 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+typedef union {
+    struct { uint64_t magic; ArenaBudget* budget; size_t size; } fields;
+    max_align_t alignment;
+} BudgetAllocationHeader;
+#define BUDGET_ALLOCATION_MAGIC UINT64_C(0x4D494E494D414D45)
+
+static void budget_lock(ArenaBudget* budget) {
+    while (InterlockedCompareExchange((volatile LONG*)&budget->lock, 1, 0) != 0)
+        Sleep(0);
+}
+static void budget_unlock(ArenaBudget* budget) {
+    InterlockedExchange((volatile LONG*)&budget->lock, 0);
+}
+static bool budget_reserve(ArenaBudget* budget, size_t bytes, bool external) {
+    if (!budget || bytes == 0) return true;
+    budget_lock(budget);
+    const size_t current = budget->committed + budget->external_committed;
+    const bool overflow = current < budget->committed || bytes > SIZE_MAX - current;
+    if (overflow || (budget->limit > 0 &&
+        (current > budget->limit || bytes > budget->limit - current))) {
+        budget->failed++;
+        budget_unlock(budget);
+        return false;
+    }
+    if (external) budget->external_committed += bytes;
+    else budget->committed += bytes;
+    const size_t total = budget->committed + budget->external_committed;
+    if (total > budget->peak) budget->peak = total;
+    budget_unlock(budget);
+    return true;
+}
+static void budget_release(ArenaBudget* budget, size_t bytes, bool external) {
+    if (!budget || bytes == 0) return;
+    budget_lock(budget);
+    size_t* current = external ? &budget->external_committed : &budget->committed;
+    *current = *current >= bytes ? *current - bytes : 0;
+    budget_unlock(budget);
+}
 void arena_budget_init(ArenaBudget* budget, size_t limit) {
     if (!budget) return;
     memset(budget, 0, sizeof(*budget));
     budget->limit = limit;
+}
+size_t arena_budget_total_committed(const ArenaBudget* budget) {
+    if (!budget) return 0;
+    if (budget->committed > SIZE_MAX - budget->external_committed) return SIZE_MAX;
+    return budget->committed + budget->external_committed;
+}
+void* arena_budget_malloc(ArenaBudget* budget, size_t size) {
+    if (size == 0) size = 1;
+    if (size > SIZE_MAX - sizeof(BudgetAllocationHeader)) return NULL;
+    if (!budget_reserve(budget, size, true)) return NULL;
+    BudgetAllocationHeader* header =
+        (BudgetAllocationHeader*)malloc(sizeof(BudgetAllocationHeader) + size);
+    if (!header) { budget_release(budget, size, true); return NULL; }
+    header->fields.magic = BUDGET_ALLOCATION_MAGIC;
+    header->fields.budget = budget;
+    header->fields.size = size;
+    return (void*)(header + 1);
+}
+void* arena_budget_calloc(ArenaBudget* budget, size_t count, size_t size) {
+    if (count != 0 && size > SIZE_MAX / count) return NULL;
+    const size_t bytes = count * size;
+    void* allocation = arena_budget_malloc(budget, bytes);
+    if (allocation) memset(allocation, 0, bytes);
+    return allocation;
+}
+void arena_budget_free(void* allocation) {
+    if (!allocation) return;
+    BudgetAllocationHeader* header = ((BudgetAllocationHeader*)allocation) - 1;
+    if (header->fields.magic != BUDGET_ALLOCATION_MAGIC) return;
+    ArenaBudget* budget = header->fields.budget;
+    const size_t size = header->fields.size;
+    header->fields.magic = 0;
+    budget_release(budget, size, true);
+    free(header);
 }
 
 bool arena_init_with_budget(Arena* a, size_t size, ArenaBudget* budget) {
@@ -43,12 +115,7 @@ void arena_free(Arena* a) {
     if (!a || !a->base) return;
 
     VirtualFree(a->base, 0, MEM_RELEASE);
-    if (a->budget) {
-        if (a->budget->committed >= a->committed)
-            a->budget->committed -= a->committed;
-        else
-            a->budget->committed = 0;
-    }
+    budget_release(a->budget, a->committed, false);
     memset(a, 0, sizeof(*a));
 }
 
@@ -70,30 +137,24 @@ void* arena_alloc(Arena* a, size_t n) {
 
         const size_t commit_bytes = commit_end - a->committed;
         if (commit_bytes > 0) {
-            if (a->budget && a->budget->limit > 0 &&
-                (a->budget->committed > a->budget->limit ||
-                 commit_bytes > a->budget->limit - a->budget->committed)) {
-                ++a->budget->failed;
+            if (!budget_reserve(a->budget, commit_bytes, false)) {
                 fprintf(stderr,
-                    "Memory budget reached: request needs another %.2f MiB of arena pages; %.2f MiB of %.2f MiB is already committed. Increase --memory-budget-gb or reduce the model/batch/corpus workload.\n",
+                    "Engine memory budget reached: arena request needs %.2f MiB; %.2f MiB arena + %.2f MiB tracked heap is committed against a %.2f MiB limit.\\n",
                     (double)commit_bytes / (1024.0 * 1024.0),
                     (double)a->budget->committed / (1024.0 * 1024.0),
+                    (double)a->budget->external_committed / (1024.0 * 1024.0),
                     (double)a->budget->limit / (1024.0 * 1024.0));
                 return NULL;
             }
             void* committed = VirtualAlloc(a->base + a->committed,
                 commit_bytes, MEM_COMMIT, PAGE_READWRITE);
             if (!committed) {
-                fprintf(stderr, "Arena page commitment failed (Windows error %lu).\n",
+                budget_release(a->budget, commit_bytes, false);
+                fprintf(stderr, "Arena page commitment failed (Windows error %lu).\\n",
                     (unsigned long)GetLastError());
                 return NULL;
             }
             a->committed = commit_end;
-            if (a->budget) {
-                a->budget->committed += commit_bytes;
-                if (a->budget->committed > a->budget->peak)
-                    a->budget->peak = a->budget->committed;
-            }
         }
     }
 
