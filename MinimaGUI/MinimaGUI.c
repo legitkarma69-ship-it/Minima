@@ -49,7 +49,7 @@ static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_s
 static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights, g_beta1, g_beta2, g_epsilon;
 static HWND g_min_p, g_frequency_penalty, g_presence_penalty, g_no_repeat_ngram;
 static HWND g_min_new_tokens, g_sampling_seed, g_stop_sequence;
-HWND g_group_generation;
+HWND g_group_generation, g_status_bar;
 HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_profile, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
@@ -1435,6 +1435,9 @@ static void create_controls(HWND hwnd) {
         &g_group_monitor, &g_group_output);
     g_group_generation = CreateWindowW(L"BUTTON", L"Generation and sampling", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
         12, 150, 900, 190, hwnd, (HMENU)(INT_PTR)IDC_GROUP_GENERATION, NULL, NULL);
+    g_status_bar = CreateWindowW(L"STATIC", L"Idle | CPU -- | RAM -- | Threads Auto | tok/s --",
+        WS_CHILD | WS_VISIBLE | SS_LEFT, 12, 100, 900, 18, hwnd,
+        (HMENU)(INT_PTR)IDC_STATUS_BAR, NULL, NULL);
     HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     GuiPageControls page_controls = {
         &g_corpus,
@@ -1549,7 +1552,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation,g_status_bar };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
