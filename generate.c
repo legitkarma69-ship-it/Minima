@@ -468,10 +468,14 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
     }
     /* If every candidate was blocked by no-repeat, relax only that constraint
        for this token rather than producing NaNs or failing generation. */
-    if (n == 0 || !isfinite(vals[0]))
-        return sample_top_k_top_p(logits, vocab, temperature, top_k, top_p,
-            repetition_penalty, min_p, frequency_penalty, presence_penalty,
-            0, history, history_len, rng);
+    if (n == 0) return 0;
+    if (!isfinite(vals[0])) {
+        if (no_repeat_ngram_size > 0)
+            return sample_top_k_top_p(logits, vocab, temperature, top_k, top_p,
+                repetition_penalty, min_p, frequency_penalty, presence_penalty,
+                0, history, history_len, rng);
+        return idx[0];
+    }
 
     float maxv = vals[0], probs[256], sum = 0.0f;
     for (int i = 0; i < n; ++i) {
