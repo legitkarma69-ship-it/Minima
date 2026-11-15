@@ -75,7 +75,7 @@ void* arena_alloc(Arena* a, size_t n) {
                  commit_bytes > a->budget->limit - a->budget->committed)) {
                 ++a->budget->failed;
                 fprintf(stderr,
-                    "Memory budget reached: request needs another %.2f MiB of arena pages; %.2f MiB of %.2f MiB is already committed. Increase --memory-budget-gb or reduce the model/batch/corpus workload.\\n",
+                    "Memory budget reached: request needs another %.2f MiB of arena pages; %.2f MiB of %.2f MiB is already committed. Increase --memory-budget-gb or reduce the model/batch/corpus workload.\n",
                     (double)commit_bytes / (1024.0 * 1024.0),
                     (double)a->budget->committed / (1024.0 * 1024.0),
                     (double)a->budget->limit / (1024.0 * 1024.0));
@@ -84,7 +84,7 @@ void* arena_alloc(Arena* a, size_t n) {
             void* committed = VirtualAlloc(a->base + a->committed,
                 commit_bytes, MEM_COMMIT, PAGE_READWRITE);
             if (!committed) {
-                fprintf(stderr, "Arena page commitment failed (Windows error %lu).\\n",
+                fprintf(stderr, "Arena page commitment failed (Windows error %lu).\n",
                     (unsigned long)GetLastError());
                 return NULL;
             }
