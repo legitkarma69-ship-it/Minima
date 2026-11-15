@@ -23,6 +23,12 @@ static BOOL is_chat_page_control(HWND child) {
         child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
         child == GetDlgItem(g_window, IDC_CHAT_STOP);
 }
+static BOOL is_generation_page_control(HWND child) {
+    const int id = GetDlgCtrlID(child);
+    return child == g_group_generation ||
+        (id >= IDC_GEN_TEMP_LABEL && id <= IDC_GROUP_GENERATION);
+}
+
 static BOOL is_logs_page_control(HWND child) {
     return child == g_log || child == g_log_label || child == g_clear_logs;
 }
@@ -33,11 +39,13 @@ static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
     BOOL visible;
     if (page == 0)
         visible = !is_advanced_page_control(child) &&
-            !is_chat_page_control(child) && !is_logs_page_control(child);
+            !is_generation_page_control(child) && !is_chat_page_control(child) && !is_logs_page_control(child);
     else if (page == 1)
         visible = is_advanced_page_control(child) &&
             (child == g_group_advanced || g_advanced_expanded);
     else if (page == 2)
+        visible = is_generation_page_control(child);
+    else if (page == 3)
         visible = is_chat_page_control(child);
     else
         visible = is_logs_page_control(child);
@@ -46,7 +54,7 @@ static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
 }
 
 void gui_layout_select_main_page(HWND hwnd, int page) {
-    if (page < 0 || page > 3) return;
+    if (page < 0 || page > 4) return;
     g_active_page = page;
     if (g_main_tabs) TabCtrl_SetCurSel(g_main_tabs, page);
     EnumChildWindows(hwnd, apply_page_visibility, (LPARAM)page);
@@ -61,7 +69,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(inner<=0)return;
     const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
     const int bottom_h=scale_px(82), action_h=scale_px(38);
-    const int output_top=((g_active_page==2 || g_active_page==3)?scale_px(46):work_top+scale_px(368));
+    const int output_top=((g_active_page==3 || g_active_page==4)?scale_px(46):work_top+scale_px(368));
     const int output_bottom=height-bottom_h-scale_px(8);
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
@@ -79,6 +87,35 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
     if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(430),TRUE);
+    if(g_group_generation)MoveWindow(g_group_generation,pad,work_top,inner,scale_px(160),TRUE);
+    const int gy = work_top + scale_px(34);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_TEMP_LABEL),pad+scale_px(8),gy+scale_px(3),scale_px(45),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_TEMP),pad+scale_px(55),gy,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_TOPK_LABEL),pad+scale_px(130),gy+scale_px(3),scale_px(42),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_TOPK),pad+scale_px(174),gy,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_TOPP_LABEL),pad+scale_px(245),gy+scale_px(3),scale_px(42),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_TOPP),pad+scale_px(289),gy,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_MINP_LABEL),pad+scale_px(360),gy+scale_px(3),scale_px(42),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_MINP),pad+scale_px(404),gy,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_REPEAT_LABEL),pad+scale_px(475),gy+scale_px(3),scale_px(50),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_REPEAT),pad+scale_px(527),gy,scale_px(55),scale_px(23),TRUE);
+    const int gy2 = gy + scale_px(38);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_FREQ_LABEL),pad+scale_px(8),gy2+scale_px(3),scale_px(78),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_FREQ),pad+scale_px(88),gy2,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_PRES_LABEL),pad+scale_px(155),gy2+scale_px(3),scale_px(72),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_PRES),pad+scale_px(229),gy2,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_NGRAM_LABEL),pad+scale_px(295),gy2+scale_px(3),scale_px(105),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_NGRAM),pad+scale_px(402),gy2,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_MINTOK_LABEL),pad+scale_px(468),gy2+scale_px(3),scale_px(95),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_MINTOK),pad+scale_px(565),gy2,scale_px(55),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_MAXTOK_LABEL),pad+scale_px(630),gy2+scale_px(3),scale_px(85),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_MAXTOK),pad+scale_px(717),gy2,scale_px(55),scale_px(23),TRUE);
+    const int gy3 = gy2 + scale_px(38);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_SEED_LABEL),pad+scale_px(8),gy3+scale_px(3),scale_px(90),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_SEED),pad+scale_px(100),gy3,scale_px(100),scale_px(23),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_STOP_LABEL),pad+scale_px(220),gy3+scale_px(3),scale_px(90),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_GEN_STOP),pad+scale_px(312),gy3,scale_px(500),scale_px(23),TRUE);
+
     if(g_graph)MoveWindow(g_graph,right_x+scale_px(8),work_top+scale_px(22),right_w-scale_px(16),scale_px(220),TRUE);
     if(g_resource_status)MoveWindow(g_resource_status,right_x+scale_px(8),work_top+scale_px(244),right_w-scale_px(16),scale_px(20),TRUE);
     if(g_cpu_limit)MoveWindow(g_cpu_limit,right_x+scale_px(86),work_top+scale_px(270),scale_px(48),scale_px(23),TRUE);
@@ -100,8 +137,8 @@ void gui_layout_layout_controls(HWND hwnd) {
     for(int i=0;i<g_initial_rect_count;i++){
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
-           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
-           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile||GetDlgCtrlID(child)==IDC_SAVE_PROFILE||GetDlgCtrlID(child)==IDC_LOAD_PROFILE)continue;
+           child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_group_generation||child==g_main_tabs||child==g_corpus||
+           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile||is_generation_page_control(child)||GetDlgCtrlID(child)==IDC_SAVE_PROFILE||GetDlgCtrlID(child)==IDC_LOAD_PROFILE)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
@@ -129,21 +166,21 @@ void gui_layout_layout_controls(HWND hwnd) {
     MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(610),actions_y,scale_px(90),action_h,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
     if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
-    if(g_output_label)MoveWindow(g_output_label,pad+(g_active_page==2?scale_px(112):scale_px(8)),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
+    if(g_output_label)MoveWindow(g_output_label,pad+(g_active_page==3?scale_px(112):scale_px(8)),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
     if(g_log_label)MoveWindow(g_log_label,pad+scale_px(8),output_top+scale_px(4),scale_px(520),scale_px(18),TRUE);
-    if(g_active_page==2)
+    if(g_active_page==3)
         MoveWindow(GetDlgItem(hwnd,IDC_STATUS),width-pad-scale_px(150),
             output_top+scale_px(4),scale_px(140),scale_px(18),TRUE);
     if(g_chat_display)MoveWindow(g_chat_display,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(270):pad,chat_y,inner-scale_px(500),scale_px(180),TRUE);
-    if(g_active_page==2) {
+    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==3?pad+scale_px(270):pad,chat_y,inner-scale_px(500),scale_px(180),TRUE);
+    if(g_active_page==3) {
         MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
         MoveWindow(g_eval_button,pad+scale_px(112),chat_y,scale_px(150),scale_px(28),TRUE);
         MoveWindow(g_clear_chat,pad+scale_px(8),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
     }
-    if(g_active_page==3)
+    if(g_active_page==4)
         MoveWindow(g_clear_logs,width-pad-scale_px(112),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
     if(g_chat_test)MoveWindow(g_chat_test,right_x,advanced_y+scale_px(28),scale_px(120),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
