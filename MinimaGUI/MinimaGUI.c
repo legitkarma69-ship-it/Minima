@@ -1298,24 +1298,34 @@ static void test_generation_settings(void) {
         return;
     }
 
-    float temperature, top_p, repetition;
-    long top_k, max_tokens;
+    float temperature, top_p, repetition, min_p, frequency, presence;
+    long top_k, max_tokens, min_tokens, ngram, sampling_seed;
     if (!read_float_control(g_temperature, 0.05f, 5.0f, &temperature) ||
         !read_integer_control(g_top_k, 1, 256, &top_k) ||
         !read_float_control(g_top_p, 0.01f, 1.0f, &top_p) ||
         !read_float_control(g_repetition, 1.0f, 3.0f, &repetition) ||
-        !read_integer_control(g_max_tokens, 1, 512, &max_tokens)) {
+        !read_float_control(g_min_p, 0.0f, 1.0f, &min_p) ||
+        !read_float_control(g_frequency_penalty, -2.0f, 2.0f, &frequency) ||
+        !read_float_control(g_presence_penalty, -2.0f, 2.0f, &presence) ||
+        !read_integer_control(g_max_tokens, 1, 512, &max_tokens) ||
+        !read_integer_control(g_min_new_tokens, 0, 512, &min_tokens) ||
+        min_tokens > max_tokens ||
+        !read_integer_control(g_no_repeat_ngram, 0, 16, &ngram) ||
+        !read_integer_control(g_sampling_seed, 0, 2147483647L, &sampling_seed)) {
         MessageBoxW(g_window,
-            L"Sampling settings are out of range. Temperature: 0.05-5.0, top-k: 1-256, top-p: 0.01-1.0, repetition: 1.0-3.0, max tokens: 1-512.",
+            L"Check generation settings: temperature 0.05-5, top-k 1-256, top-p 0.01-1, min-p 0-1, repetition 1-3, penalties -2 to 2, max tokens 1-512, min tokens 0-512, n-gram 0-16, seed 0-2147483647.",
             L"Generation Lab", MB_ICONWARNING);
         return;
     }
 
+    wchar_t stop_sequence[257];
+    GetWindowTextW(g_stop_sequence, stop_sequence, (int)_countof(stop_sequence));
     wchar_t message[8192];
     const int chars = _snwprintf_s(message, _countof(message), _TRUNCATE,
-        L"/test %.6g %ld %.6g %.6g %ld\n%s\n",
+        L"/test %.6g %ld %.6g %.6g %ld %.6g %.6g %.6g %ld %ld %ld %s\n%s\n",
         (double)temperature, top_k, (double)top_p, (double)repetition,
-        max_tokens, prompt);
+        max_tokens, (double)min_p, (double)frequency, (double)presence,
+        ngram, min_tokens, sampling_seed, stop_sequence, prompt);
     if (chars <= 0) {
         append_log(L"Generation test prompt is too long.\r\n");
         return;
