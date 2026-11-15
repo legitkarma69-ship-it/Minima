@@ -48,16 +48,26 @@ The GUI displays engine output, including:
 
 The engine appends structured rows to `minima_metrics.csv`. The lightweight GDI graph reads that CSV and plots training and validation loss. It refreshes once per second and does not participate in training.
 
-## Chat
+## Chat and evaluation
 
+- The **Chat** tab contains only the conversation transcript and message controls. The **Logs** tab contains the complete engine/evaluation output, including training steps, validation, warnings, and errors.
 - Start chat loads the existing checkpoint and tokenizer.
 - The message field accepts typed text; its dropdown contains example prompts. Press Enter to start chat and send the first message, or click Start chat and send when the engine is ready. Enter sends later messages.
 - Resume is cleared automatically after a successful tokenizer rebuild because the old checkpoint is incompatible with the new tokenizer.
 - Temperature, top-k, top-p, repetition penalty, and maximum new tokens are configurable.
-- Chat transcript is appended to `minima_chat.txt` and reloaded when the GUI starts. The visible transcript persists; the model's rolling context starts fresh when a new chat process is launched.
+- Chat transcript is appended to `minima_chat.txt` and reloaded when the GUI starts. **Clear chat** clears the visible and saved transcript and sends `/clear` to an active chat session so its context is reset too.
+- **Clear logs** clears the visible Logs tab only. It does not delete metrics, checkpoints, or evaluation results.
 - Stop generation terminates the inference child process. This does not affect checkpoint weights.
 
 Chat requires `minima.model` and `minima.bpe`. Set the model configuration controls to match the checkpoint before starting chat if it was trained with non-default architecture settings.
+
+### 24-question evaluation
+
+- Click **Run 24-question test** in the Chat tab to run the held-out `data/evaluation/logic.jsonl` set.
+- The GUI launches `tools/evaluate_logic.py` through the Windows `py -3` launcher. Python 3 and the repository's `tools` and `data/evaluation` folders must be available beside the x64 build folder.
+- The runner loads the checkpoint once, clears model conversation context between prompts, uses greedy decoding, and prints each question and answer to Logs as soon as it completes.
+- Results are written incrementally to `logic_results.jsonl` beside the executables. Reference answers and scoring notes are never sent to Minima.
+- **Stop evaluation** terminates the evaluation process and its Minima child process. Completed result records remain on disk.
 
 ## Process and persistence behavior
 
@@ -79,7 +89,7 @@ The UI is deliberately a controller. It must not own model weights, perform forw
 The Win32 shell is being split into focused modules while keeping the existing window procedure and control behavior intact:
 
 - `gui_layout.c/.h` owns responsive control positioning, tab visibility, and DPI scaling.
-- `gui_pages.c/.h` owns the tab strip, top-level page containers, and the Training, Advanced, and Chat control construction.
+- `gui_pages.c/.h` owns the tab strip, top-level page containers, and the Training, Advanced, Chat, and Logs control construction.
 - `gui_actions.c/.h` owns command-ID dispatch and routes commands to the application action callbacks.
 - `MinimaGUI.c` retains process orchestration, application state, and the concrete callbacks that connect UI actions to settings and engine operations.
 
