@@ -1100,7 +1100,7 @@ static void start_logic_evaluation(void) {
     reset_resource_peaks();
     update_resource_monitor();
     g_chat_mode = FALSE; g_evaluation_mode = TRUE;
-    gui_layout_select_main_page(g_window, 2); set_running(TRUE);
+    gui_layout_select_main_page(g_window, 3); set_running(TRUE);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), FALSE);
     EnableWindow(GetDlgItem(g_window, IDC_CHAT_STOP), TRUE);
     SetWindowTextW(GetDlgItem(g_window, IDC_CHAT_STOP), L"Stop evaluation");
