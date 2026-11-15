@@ -481,6 +481,16 @@ static void set_running(BOOL running) {
     InterlockedExchange(&g_running, running ? 1 : 0);
     EnableWindow(GetDlgItem(g_window, IDC_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), running);
+    EnableWindow(GetDlgItem(g_window, IDC_PAUSE), running && !g_chat_mode && !g_evaluation_mode && !g_tokenizer_rebuild_mode);
+    if (!running) {
+        g_training_paused = FALSE;
+        SetWindowTextW(GetDlgItem(g_window, IDC_PAUSE), L"Pause training");
+        wchar_t pause_path[MAX_PATH];
+        if (engine_sidecar_path(L"minima.pause", pause_path, _countof(pause_path)))
+            DeleteFileW(pause_path);
+    } else {
+        SetWindowTextW(GetDlgItem(g_window, IDC_PAUSE), L"Pause training");
+    }
     EnableWindow(GetDlgItem(g_window, IDC_SAVE_NOW), running && !g_chat_mode);
     EnableWindow(GetDlgItem(g_window, IDC_CHAT_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_ADD), !running);
@@ -718,11 +728,13 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
             MessageBoxW(g_window,L"Check the total training-step horizon.",L"ProjectMinima",MB_ICONWARNING);return;
         }
         if(use_prebuilt_tokenizer)wcscat_s(command,_countof(command),L" --use-existing-tokenizer");
-        wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\" --save-file \"minima.save\"");
+        wcscat_s(command,_countof(command),L" --metrics \"minima_metrics.csv\" --stop-file \"minima.stop\" --pause-file \"minima.pause\" --save-file \"minima.save\"");
         wchar_t stop_path[MAX_PATH];wcscpy_s(stop_path,_countof(stop_path),g_engine_path);
         wchar_t* stop_slash=wcsrchr(stop_path,L'\\');
         if(stop_slash)wcscpy_s(stop_slash+1,_countof(stop_path)-(size_t)(stop_slash+1-stop_path),L"minima.stop");
         DeleteFileW(stop_path);
+        wchar_t pause_path[MAX_PATH];
+        if (engine_sidecar_path(L"minima.pause", pause_path, _countof(pause_path))) DeleteFileW(pause_path);
         wchar_t save_path[MAX_PATH];wcscpy_s(save_path,_countof(save_path),g_engine_path);
         wchar_t* save_slash=wcsrchr(save_path,L'\\');
         if(save_slash)wcscpy_s(save_slash+1,_countof(save_path)-(size_t)(save_slash+1-save_path),L"minima.save");
@@ -1326,6 +1338,8 @@ static void create_controls(HWND hwnd) {
         &g_ram_warning
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
+    CreateWindowW(L"BUTTON", L"Pause training", WS_CHILD | WS_VISIBLE | WS_DISABLED,
+        142, 340, 84, 30, hwnd, (HMENU)(INT_PTR)IDC_PAUSE, NULL, NULL);
     g_resource_status = CreateWindowW(L"STATIC", L"CPU: --   RAM: --", WS_CHILD | WS_VISIBLE,
         600, 430, 300, 20, hwnd, NULL, NULL, NULL);
     CreateWindowW(L"STATIC", L"CPU cap %", WS_CHILD | WS_VISIBLE,
@@ -1366,7 +1380,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE) };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1424,7 +1438,7 @@ static void create_controls(HWND hwnd) {
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
         g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
-        GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
+        GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_PAUSE),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
         g_group_advanced,g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP),g_eval_button
     };
@@ -1560,6 +1574,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         break;
     case WM_COMMAND:
+        if (LOWORD(wp) == IDC_PAUSE && HIWORD(wp) == BN_CLICKED) {
+            toggle_training_pause();
+            return 0;
+        }
         if (LOWORD(wp) == IDC_RESOURCE_PROFILE && HIWORD(wp) == CBN_SELCHANGE) {
             apply_resource_profile();
             return 0;
@@ -1592,6 +1610,15 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_APPEND_LOG: {
         const wchar_t* line = (const wchar_t*)lp;
         append_log(line);
+        if (line && wcsstr(line, L"TRAIN_PAUSED")) {
+            g_training_paused = TRUE;
+            SetWindowTextW(GetDlgItem(hwnd, IDC_PAUSE), L"Resume training");
+            SetWindowTextW(g_status, L"Training paused");
+        } else if (line && wcsstr(line, L"TRAIN_RESUMED")) {
+            g_training_paused = FALSE;
+            SetWindowTextW(GetDlgItem(hwnd, IDC_PAUSE), L"Pause training");
+            SetWindowTextW(g_status, L"Training running");
+        }
         if (g_chat_mode && line) {
             if (wcsncmp(line, L"BOT: ", 5) == 0) {
                 g_chat_response_active = TRUE;
