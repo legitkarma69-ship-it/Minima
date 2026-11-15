@@ -36,6 +36,10 @@ typedef struct {
     HWND* graph;
     HWND* output_label;
     HWND* log;
+    HWND* chat_display;
+    HWND* log_label;
+    HWND* clear_chat;
+    HWND* clear_logs;
     HWND* chat_input;
     HWND* chat_test;
     HWND* optimizer;

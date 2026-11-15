@@ -20,8 +20,10 @@ void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
             TabCtrl_InsertItem(*tabs, 0, &item);
             item.pszText = L"Advanced";
             TabCtrl_InsertItem(*tabs, 1, &item);
-            item.pszText = L"Chat & Generation";
+            item.pszText = L"Chat";
             TabCtrl_InsertItem(*tabs, 2, &item);
+            item.pszText = L"Logs";
+            TabCtrl_InsertItem(*tabs, 3, &item);
         }
     }
     if (corpus_group)
@@ -91,6 +93,10 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_graph (*page_controls->graph)
 #define g_output_label (*page_controls->output_label)
 #define g_log (*page_controls->log)
+#define g_chat_display (*page_controls->chat_display)
+#define g_log_label (*page_controls->log_label)
+#define g_clear_chat (*page_controls->clear_chat)
+#define g_clear_logs (*page_controls->clear_logs)
 #define g_chat_input (*page_controls->chat_input)
 #define g_chat_test (*page_controls->chat_test)
 #define g_optimizer (*page_controls->optimizer)
@@ -185,11 +191,18 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     g_status=CreateWindowW(L"STATIC",L"Idle",WS_CHILD|WS_VISIBLE,738,346,110,20,parent,(HMENU)(INT_PTR)IDC_STATUS,NULL,NULL);
 
     g_graph=CreateWindowExW(WS_EX_CLIENTEDGE,L"MinimaLossGraph",L"",WS_CHILD|WS_VISIBLE,600,170,285,175,parent,NULL,NULL,NULL);
-    g_output_label=CreateWindowW(L"STATIC",L"Engine output / chat history",WS_CHILD|WS_VISIBLE,12,380,300,20,parent,NULL,NULL,NULL);
+    g_output_label=CreateWindowW(L"STATIC",L"Conversation",WS_CHILD|WS_VISIBLE,12,380,300,20,parent,NULL,NULL,NULL);
+    g_chat_display=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
+        WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
+        12,402,850,250,parent,NULL,NULL,NULL);
+    SendMessageW(g_chat_display,EM_SETLIMITTEXT,1024*1024,0);
+    g_log_label=CreateWindowW(L"STATIC",L"Engine output, training progress, warnings and errors",WS_CHILD|WS_VISIBLE,12,380,500,20,parent,NULL,NULL,NULL);
     g_log=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",
         WS_CHILD|WS_VISIBLE|WS_VSCROLL|ES_MULTILINE|ES_AUTOVSCROLL|ES_READONLY,
         12,402,850,250,parent,(HMENU)(INT_PTR)IDC_LOG,NULL,NULL);
-    SendMessageW(g_log,EM_SETLIMITTEXT,1024*1024,0);
+    SendMessageW(g_log,EM_SETLIMITTEXT,4*1024*1024,0);
+    g_clear_chat=CreateWindowW(L"BUTTON",L"Clear chat",WS_CHILD|WS_VISIBLE,12,665,100,26,parent,(HMENU)(INT_PTR)IDC_CLEAR_CHAT,NULL,NULL);
+    g_clear_logs=CreateWindowW(L"BUTTON",L"Clear logs",WS_CHILD|WS_VISIBLE,12,665,100,26,parent,(HMENU)(INT_PTR)IDC_CLEAR_LOGS,NULL,NULL);
     g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"COMBOBOX",L"",
         WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_VSCROLL,
         12,665,600,180,parent,(HMENU)(INT_PTR)IDC_CHAT_INPUT,NULL,NULL);
@@ -242,6 +255,10 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #undef g_graph
 #undef g_output_label
 #undef g_log
+#undef g_chat_display
+#undef g_log_label
+#undef g_clear_chat
+#undef g_clear_logs
 #undef g_chat_input
 #undef g_chat_test
 #undef g_optimizer

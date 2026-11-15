@@ -21,6 +21,8 @@ BOOL gui_actions_dispatch(HWND hwnd, UINT command_id,
     case IDC_CHAT_TEST: if (handlers->chat_test) handlers->chat_test(hwnd); return TRUE;
     case IDC_CHAT_STOP: if (handlers->chat_stop) handlers->chat_stop(hwnd); return TRUE;
     case IDC_SAVE_NOW: if (handlers->save_checkpoint) handlers->save_checkpoint(hwnd); return TRUE;
+    case IDC_CLEAR_CHAT: if (handlers->clear_chat) handlers->clear_chat(hwnd); return TRUE;
+    case IDC_CLEAR_LOGS: if (handlers->clear_logs) handlers->clear_logs(hwnd); return TRUE;
     default: return FALSE;
     }
 }

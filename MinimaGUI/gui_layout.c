@@ -16,12 +16,15 @@ static BOOL is_advanced_page_control(HWND child) {
 }
 
 static BOOL is_chat_page_control(HWND child) {
-    return child == g_group_output || child == g_output_label || child == g_log ||
-        child == g_chat_input ||
+    return child == g_group_output || child == g_output_label ||
+        child == g_chat_display || child == g_chat_input || child == g_clear_chat ||
         child == GetDlgItem(g_window, IDC_STATUS) ||
         child == GetDlgItem(g_window, IDC_CHAT_START) ||
         child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
         child == GetDlgItem(g_window, IDC_CHAT_STOP);
+}
+static BOOL is_logs_page_control(HWND child) {
+    return child == g_log || child == g_log_label || child == g_clear_logs;
 }
 
 static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
@@ -33,14 +36,16 @@ static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
     else if (page == 1)
         visible = is_advanced_page_control(child) &&
             (child == g_group_advanced || g_advanced_expanded);
-    else
+    else if (page == 2)
         visible = is_chat_page_control(child);
+    else
+        visible = is_logs_page_control(child);
     ShowWindow(child, visible ? SW_SHOWNA : SW_HIDE);
     return TRUE;
 }
 
 void gui_layout_select_main_page(HWND hwnd, int page) {
-    if (page < 0 || page > 2) return;
+    if (page < 0 || page > 3) return;
     g_active_page = page;
     if (g_main_tabs) TabCtrl_SetCurSel(g_main_tabs, page);
     EnumChildWindows(hwnd, apply_page_visibility, (LPARAM)page);
@@ -55,7 +60,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(inner<=0)return;
     const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
     const int bottom_h=scale_px(82), action_h=scale_px(38);
-    const int output_top=(g_active_page==2?scale_px(46):work_top+scale_px(368));
+    const int output_top=((g_active_page==2 || g_active_page==3)?scale_px(46):work_top+scale_px(368));
     const int output_bottom=height-bottom_h-scale_px(8);
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
@@ -80,11 +85,11 @@ void gui_layout_layout_controls(HWND hwnd) {
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
            child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
-           child==g_graph||child==g_log||child==g_chat_input||child==g_chat_test)continue;
+           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_log_label)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
-           id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG)continue;
+           id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG||id==IDC_CLEAR_CHAT||id==IDC_CLEAR_LOGS)continue;
         int oy=r.top;
         if(oy>=scale_px(168)&&oy<scale_px(250)){
             int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
@@ -108,13 +113,20 @@ void gui_layout_layout_controls(HWND hwnd) {
     MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
     if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
     if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
+    if(g_log_label)MoveWindow(g_log_label,pad+scale_px(8),output_top+scale_px(4),scale_px(520),scale_px(18),TRUE);
     if(g_active_page==2)
         MoveWindow(GetDlgItem(hwnd,IDC_STATUS),width-pad-scale_px(150),
             output_top+scale_px(4),scale_px(140),scale_px(18),TRUE);
+    if(g_chat_display)MoveWindow(g_chat_display,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
     if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(112):pad,chat_y,inner-scale_px(340)-scale_px(112),scale_px(180),TRUE);
-    if(g_active_page==2)MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
+    if(g_active_page==2) {
+        MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
+        MoveWindow(g_clear_chat,pad+scale_px(8),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
+    }
+    if(g_active_page==3)
+        MoveWindow(g_clear_logs,width-pad-scale_px(112),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
     if(g_chat_test)MoveWindow(g_chat_test,right_x,advanced_y+scale_px(28),scale_px(120),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);

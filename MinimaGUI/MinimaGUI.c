@@ -27,7 +27,8 @@
 #define WM_CHAT_READY    (WM_APP + 3)
 #define IDT_GRAPH_REFRESH 1
 
-HWND g_window, g_corpus, g_log;
+HWND g_window, g_corpus, g_log, g_chat_display, g_log_label;
+HWND g_clear_chat, g_clear_logs;
 static HWND g_steps, g_resume, g_status;
 HWND g_main_tabs;
 static MinimaSettingsContext g_settings_context;
@@ -141,11 +142,40 @@ static void save_chat_text(const wchar_t* text) {
 }
 
 static void append_log(const wchar_t* text) {
+    if (!g_log || !text) return;
     int end=GetWindowTextLengthW(g_log);
     SendMessageW(g_log,EM_SETSEL,(WPARAM)end,(LPARAM)end);
     SendMessageW(g_log,EM_REPLACESEL,FALSE,(LPARAM)text);
     SendMessageW(g_log,EM_SCROLLCARET,0,0);
+}
+static void append_chat_text(const wchar_t* text) {
+    if (!g_chat_display || !text) return;
+    int end=GetWindowTextLengthW(g_chat_display);
+    SendMessageW(g_chat_display,EM_SETSEL,(WPARAM)end,(LPARAM)end);
+    SendMessageW(g_chat_display,EM_REPLACESEL,FALSE,(LPARAM)text);
+    SendMessageW(g_chat_display,EM_SCROLLCARET,0,0);
     save_chat_text(text);
+}
+static void clear_chat_history(void) {
+    if (g_chat_mode && g_stdin_write) {
+        static const char clear_command[] = "/clear\n";
+        DWORD written = 0;
+        (void)WriteFile(g_stdin_write, clear_command,
+            (DWORD)(sizeof(clear_command) - 1), &written, NULL);
+    }
+    if (g_chat_display) SetWindowTextW(g_chat_display, L"");
+    if (g_engine_path[0]) {
+        wchar_t path[MAX_PATH];
+        wcscpy_s(path, _countof(path), g_engine_path);
+        wchar_t* slash = wcsrchr(path, L'\\');
+        if (slash) wcscpy_s(slash + 1,
+            _countof(path) - (size_t)(slash + 1 - path), L"minima_chat.txt");
+        DeleteFileW(path);
+    }
+    append_log(L"Chat transcript cleared.\r\n");
+}
+static void clear_engine_logs(void) {
+    if (g_log) SetWindowTextW(g_log, L"");
 }
 
 static void update_fresh_only_controls(void) {
@@ -642,7 +672,7 @@ static void send_chat_message(void) {
         EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),TRUE);
         free(utf8);return;
     }
-    append_log(L"\r\nYou: ");append_log(wide);append_log(L"\r\n");
+    append_chat_text(L"\r\nYou: ");append_chat_text(wide);append_chat_text(L"\r\n");
     free(utf8);SetWindowTextW(g_chat_input,L"");
     EnableWindow(GetDlgItem(g_window,IDC_CHAT_SEND),FALSE);
     EnableWindow(g_chat_test,FALSE);
@@ -836,6 +866,10 @@ static void create_controls(HWND hwnd) {
         &g_graph,
         &g_output_label,
         &g_log,
+        &g_chat_display,
+        &g_log_label,
+        &g_clear_chat,
+        &g_clear_logs,
         &g_chat_input,
         &g_chat_test,
         &g_optimizer,
@@ -845,7 +879,7 @@ static void create_controls(HWND hwnd) {
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
 
 
-    HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_lr,g_warmup,g_log_interval,
+    HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_chat_display,g_clear_chat,g_clear_logs,g_log_label,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
@@ -929,7 +963,7 @@ static void create_controls(HWND hwnd) {
         while(fgets(line,sizeof(line),history_file)){
             int count=MultiByteToWideChar(CP_UTF8,0,line,-1,NULL,0);
             if(count>0){wchar_t* wide=(wchar_t*)calloc((size_t)count,sizeof(wchar_t));
-                if(wide){MultiByteToWideChar(CP_UTF8,0,line,-1,wide,count);append_log(wide);free(wide);}}
+                if(wide){MultiByteToWideChar(CP_UTF8,0,line,-1,wide,count);append_chat_text(wide);free(wide);}}
         }
         fclose(history_file);
     }
@@ -972,13 +1006,15 @@ static void action_chat_send(HWND hwnd) { (void)hwnd; send_chat_message(); }
 static void action_chat_test(HWND hwnd) { (void)hwnd; test_generation_settings(); }
 static void action_chat_stop(HWND hwnd) { (void)hwnd; stop_generation(); }
 static void action_save_checkpoint(HWND hwnd) { (void)hwnd; request_checkpoint_save(); }
+static void action_clear_chat(HWND hwnd) { (void)hwnd; clear_chat_history(); }
+static void action_clear_logs(HWND hwnd) { (void)hwnd; clear_engine_logs(); }
 
 static const GuiActionHandlers g_action_handlers = {
     action_add_corpus, action_remove_corpus, action_resume_changed,
     action_start_training, action_stop_training, action_start_chat,
     action_rebuild_tokenizer, action_auto_settings, action_basic_defaults,
     action_advanced_toggle, action_chat_send, action_chat_test,
-    action_chat_stop, action_save_checkpoint
+    action_chat_stop, action_save_checkpoint, action_clear_chat, action_clear_logs
 };
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1047,10 +1083,16 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
         return 0;
-    case WM_APPEND_LOG:
-        append_log((const wchar_t*)lp);
+    case WM_APPEND_LOG: {
+        const wchar_t* line = (const wchar_t*)lp;
+        append_log(line);
+        if (g_chat_mode && line && wcsncmp(line, L"BOT: ", 5) == 0) {
+            append_chat_text(L"Minima: ");
+            append_chat_text(line + 5);
+        }
         free((void*)lp);
         return 0;
+    }
     case WM_ENGINE_EXIT:
         if(wp==0 && g_tokenizer_rebuild_mode) {
             g_use_saved_tokenizer=TRUE; remember_prebuilt_tokenizer_settings();

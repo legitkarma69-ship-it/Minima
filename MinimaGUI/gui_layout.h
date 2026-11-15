@@ -22,9 +22,12 @@
 #define IDC_CHAT_TEST 1018
 #define IDC_MAIN_TABS 1019
 #define IDC_BASIC_DEFAULTS 1020
+#define IDC_CLEAR_CHAT 1021
+#define IDC_CLEAR_LOGS 1022
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
-extern HWND g_window, g_corpus, g_log, g_main_tabs;
+extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
+extern HWND g_clear_chat, g_clear_logs;
 extern HWND g_group_corpus, g_group_model, g_group_training;
 extern HWND g_group_advanced, g_group_monitor, g_group_output, g_output_label;
 extern HWND g_advanced_controls[64];

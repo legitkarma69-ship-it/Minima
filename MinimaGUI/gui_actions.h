@@ -17,6 +17,8 @@ typedef struct {
     void (*chat_test)(HWND);
     void (*chat_stop)(HWND);
     void (*save_checkpoint)(HWND);
+    void (*clear_chat)(HWND);
+    void (*clear_logs)(HWND);
 } GuiActionHandlers;
 BOOL gui_actions_dispatch(HWND hwnd, UINT command_id,
     const GuiActionHandlers* handlers);
