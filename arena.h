@@ -35,6 +35,10 @@ size_t arena_budget_total_committed(const ArenaBudget* budget);
 void* arena_budget_malloc(ArenaBudget* budget, size_t size);
 void* arena_budget_calloc(ArenaBudget* budget, size_t count, size_t size);
 void arena_budget_free(void* allocation);
+size_t arena_budget_total_committed(const ArenaBudget* budget);
+void* arena_budget_malloc(ArenaBudget* budget, size_t size);
+void* arena_budget_calloc(ArenaBudget* budget, size_t count, size_t size);
+void arena_budget_free(void* allocation);
 bool arena_init_with_budget(Arena* a, size_t size, ArenaBudget* budget);
 
 // Destroy and free the underlying memory.
