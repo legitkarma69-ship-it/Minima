@@ -58,6 +58,7 @@ void gui_layout_layout_controls(HWND hwnd);
 void gui_layout_select_main_page(HWND hwnd, int page);
 void gui_layout_scale_children(HWND hwnd, UINT old_dpi, UINT new_dpi);
 extern HWND g_group_generation;
+extern HWND g_status_bar;
 #define IDC_GEN_TEMP_LABEL 1040
 #define IDC_GEN_TEMP 1041
 #define IDC_GEN_TOPK_LABEL 1042
@@ -83,4 +84,5 @@ extern HWND g_group_generation;
 #define IDC_GEN_STOP_LABEL 1062
 #define IDC_GEN_STOP 1063
 #define IDC_GROUP_GENERATION 1064
+#define IDC_STATUS_BAR 1065
 #endif
