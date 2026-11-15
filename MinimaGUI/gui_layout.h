@@ -25,6 +25,10 @@
 #define IDC_CLEAR_CHAT 1021
 #define IDC_CLEAR_LOGS 1022
 #define IDC_RUN_EVAL 1023
+#define IDC_CPU_LIMIT_LABEL 1024
+#define IDC_RAM_LIMIT_LABEL 1025
+#define IDC_CPU_LIMIT 1026
+#define IDC_RAM_LIMIT 1027
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
