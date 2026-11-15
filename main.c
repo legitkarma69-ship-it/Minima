@@ -51,6 +51,7 @@ typedef struct {
     uint64_t seed;
     size_t tokenizer_sample_bytes;
     int threads;
+    int memory_budget_gb;
     const char* metrics_path;
     const char* stop_file;
     const char* save_file;
@@ -104,6 +105,7 @@ static void print_usage(const char* exe) {
     printf("  --corpus-mix proportional|sqrt|equal (default: sqrt)\n");
     printf("  --optimizer adamw|lion (Lion uses less optimizer memory; tune --lr)\n");
     printf("  --weight-decay FLOAT\n");
+    printf("  --memory-budget-gb N (aggregate committed arena budget; 0 disables)\n");
     printf("  --grad-clip FLOAT (global gradient norm; 0 disables clipping)\n");
     printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
@@ -126,7 +128,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->validation_interval=DEFAULT_LOG_INTERVAL;
     o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
-    o->threads=0;
+    o->threads=0; o->memory_budget_gb=0;
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->save_file=NULL;
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
@@ -165,6 +167,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             strcmp(argv[i], "--seed") == 0 ||
             strcmp(argv[i], "--tokenizer-sample-bytes") == 0 ||
             strcmp(argv[i], "--threads") == 0 ||
+            strcmp(argv[i], "--memory-budget-gb") == 0 ||
             strcmp(argv[i], "--vocab-size") == 0 ||
             strcmp(argv[i], "--dim") == 0 ||
             strcmp(argv[i], "--layers") == 0 ||
@@ -180,6 +183,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=4194304; }
             if (strcmp(opt,"--threads")==0) { lo=0; hi=256; }
+            if (strcmp(opt,"--memory-budget-gb")==0) { lo=0; hi=64; }
             if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=MODEL_MAX_VOCAB_SIZE; }
             if (strcmp(opt,"--dim")==0) { lo=1; hi=512; }
             if (strcmp(opt,"--layers")==0) { lo=1; hi=16; }
@@ -206,6 +210,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--batch-size")==0) o->batch_size=(int)v;
             else if (strcmp(opt,"--sequence-length")==0) o->sequence_length=(int)v;
             else if (strcmp(opt,"--threads")==0) o->threads=(int)v;
+            else if (strcmp(opt,"--memory-budget-gb")==0) o->memory_budget_gb=(int)v;
             else o->tokenizer_sample_bytes=(size_t)v;
         }
         else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
@@ -363,15 +368,23 @@ int main(int argc, char** argv) {
     Arena arena;
     Arena temp;
     Arena corpus_arena;
+    ArenaBudget memory_budget;
+    const size_t memory_budget_bytes = options.memory_budget_gb > 0
+        ? (size_t)options.memory_budget_gb * 1024u * 1024u * 1024u : 0;
+    arena_budget_init(&memory_budget, memory_budget_bytes);
     memset(&corpus_arena, 0, sizeof(corpus_arena));
 
-    if (!arena_init(&arena, 8ull * 1024 * 1024 * 1024))
+    if (!arena_init_with_budget(&arena, 8ull * 1024 * 1024 * 1024, &memory_budget))
         die("permanent arena failed");
-    if (!arena_init(&temp, 256ull * 1024 * 1024))
+    if (!arena_init_with_budget(&temp, 256ull * 1024 * 1024, &memory_budget))
         die("temp arena failed");
     if (!options.tokenizer_only && !options.chat_mode &&
-        !arena_init(&corpus_arena, 8ull * 1024 * 1024 * 1024))
+        !arena_init_with_budget(&corpus_arena, 8ull * 1024 * 1024 * 1024, &memory_budget))
         die("corpus arena failed");
+
+    printf("Arena memory budget: %s\n", options.memory_budget_gb > 0 ? "enabled" : "unlimited");
+    if (options.memory_budget_gb > 0)
+        printf("  Aggregate committed arena limit: %d GiB\n", options.memory_budget_gb);
 
     // ------------------------------------------------------------------
     // 2. Select corpus sources and sample the tokenizer directly from disk
@@ -721,6 +734,9 @@ int main(int argc, char** argv) {
     if (!gradients_check_layout(&grads, &model, &arena))
         die("gradient allocation layout does not match runtime model configuration");
     printf("Gradient allocation layout: PASS (runtime configuration, all 9 tensors)\n");
+    printf("Arena committed memory: %.2f GiB (peak %.2f GiB)\n",
+        (double)memory_budget.committed / (1024.0*1024.0*1024.0),
+        (double)memory_budget.peak / (1024.0*1024.0*1024.0));
 
     
     /* Lower-bound estimate for the live training allocations. */
@@ -949,6 +965,8 @@ int main(int argc, char** argv) {
     printf("\nSmoke test finished.\n");
     printf("Training, validation, persistence, and generation checks completed.\n");
 
+    printf("Arena memory high-water mark: %.2f GiB; rejected allocations: %zu\n",
+        (double)memory_budget.peak / (1024.0*1024.0*1024.0), memory_budget.failed);
     mapped_buffer_destroy(&token_ids_mapping);
     arena_free(&corpus_arena);
     arena_free(&temp);
