@@ -710,7 +710,19 @@ static void remember_prebuilt_tokenizer_settings(void) {
     WritePrivateProfileStringW(L"Training",L"prebuilt_sampling",g_prebuilt_sampling,g_settings_path);
 }
 
+static BOOL read_float_control(HWND control, float minimum, float maximum, float* value);
+
 static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
+    if (!chat_mode && !tokenizer_only &&
+        SendMessageW(g_resume, BM_GETCHECK, 0, 0) != BST_CHECKED) {
+        float beta1, beta2, epsilon;
+        if (!read_float_control(g_beta1, 0.0f, 0.999999f, &beta1) ||
+            !read_float_control(g_beta2, 0.0f, 0.999999f, &beta2) ||
+            !read_float_control(g_epsilon, 1e-12f, 1e-2f, &epsilon)) {
+            MessageBoxW(g_window, L"Beta1 and beta2 must be between 0 and 0.999999; epsilon must be between 1e-12 and 0.01.", L"Optimizer settings", MB_ICONWARNING);
+            return;
+        }
+    }
     if (InterlockedCompareExchange(&g_running, 0, 0)) return;
     if (!chat_mode && !tokenizer_only &&
         SendMessageW(g_resume, BM_GETCHECK, 0, 0) == BST_CHECKED &&
