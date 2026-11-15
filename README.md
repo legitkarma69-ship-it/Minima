@@ -187,11 +187,11 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 
 | ID | Feature | Status / notes |
 |---|---|---|
-| E1.1 | Clear Chat: reset the engine-side conversation state, not merely the GUI textbox. | [ ] |
-| E1.2 | Separate Clear Display from Clear Saved Chat Log. | [ ] These must remain distinct operations. |
+| E1.1 | Clear Chat: reset the active engine conversation and clear the visible and saved transcript. | [x] Implemented with the chat-tab Clear chat control and the engine `/clear` command. |
+| E1.2 | Separate the Chat transcript from engine Logs, with independent Clear chat and Clear logs controls. | [x] Chat history and engine output now have separate tabs and clear actions. |
 | E1.3 | Configurable RAM allocation limit in MB/GB, enforced as an internal budget with graceful failure. | [ ] |
 | E1.4 | CPU utilization limit, preferably enforced with Windows Job Objects rather than relying only on thread count. | [ ] |
-| E1.5 | Expose the existing CLI thread-count selector in the GUI. | [ ] |
+| E1.5 | Expose the existing CLI thread-count selector in the GUI. | [x] Implemented; 0 selects the runtime default. |
 | E1.6 | Live RAM, CPU, and peak-resource monitoring with configurable warning thresholds. | [ ] |
 | E1.7 | Resource profiles: Eco, Balanced, Performance, Training, and Chat. | [ ] |
 | E1.8 | Persistent status bar showing mode, RAM used/limit, CPU used/limit, thread count, and tokens/second. | [ ] |
@@ -200,7 +200,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 
 | ID | Feature | Status / notes |
 |---|---|---|
-| E2.1 | Expose optimizer selection (AdamW / Lion), weight decay, and advanced beta1/beta2/epsilon settings where applicable. | [ ] |
+| E2.1 | Expose optimizer selection (AdamW / Lion), weight decay, and advanced beta1/beta2/epsilon settings where applicable. | [~] Optimizer selection and weight decay are exposed; beta1/beta2/epsilon controls remain. AdamW now excludes RMSNorm scales from decoupled weight decay. |
 | E2.2 | Allow individual corpus-source weights, not only global mix modes. | [ ] |
 | E2.3 | Add generation controls: min-p, frequency/presence penalties, no-repeat n-gram, sampling seed, stop sequences, and minimum new tokens. | [ ] |
 | E2.4 | Configuration profiles with save, load, export, and import. | [ ] |
@@ -223,6 +223,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 | E4.2 | Add token-probability inspection, generation history, and reusable prompt templates. | [ ] |
 | E4.3 | Save, load, and export conversations. | [ ] |
 | E4.4 | Implement proper EOS and stop-sequence handling. Reserved tokens are currently suppressed; generation should use explicit stopping semantics. | [ ] |
+| E4.5 | Run the held-out 24-question logic evaluation from the GUI, sequentially logging each isolated answer and preserving partial results. | [x] GUI launcher and streaming JSONL result output implemented; requires Python 3 via the Windows `py` launcher. |
 
 ### 5.5 Diagnostics and organization
 
@@ -454,7 +455,7 @@ Do not make model-layout changes while tests are red.
 
 ### Phase 2 — Resource and chat UX
 
-1. Implement engine-side Clear Chat and separate display/log clearing (E1.1/E1.2).
+1. Extend chat/log UX with export and conversation management after the current separate tabs and clear controls (E1.1/E1.2).
 2. Add resource budgets, CPU limits, monitoring, profiles, thread selection, and a persistent status bar (E1.3–E1.8).
 3. Integrate the memory estimator with the resource budget (E2.5).
 4. Expose optimizer selection and relevant weight-decay controls (E2.1).
