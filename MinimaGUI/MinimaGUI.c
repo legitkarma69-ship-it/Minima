@@ -1107,7 +1107,7 @@ static void create_controls(HWND hwnd) {
         600, 455, 76, 18, hwnd, (HMENU)(INT_PTR)IDC_CPU_LIMIT_LABEL, NULL, NULL);
     g_cpu_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
         680, 452, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_CPU_LIMIT, NULL, NULL);
-    CreateWindowW(L"STATIC", L"RAM cap GB", WS_CHILD | WS_VISIBLE,
+    CreateWindowW(L"STATIC", L"Commit cap GB", WS_CHILD | WS_VISIBLE,
         750, 455, 88, 18, hwnd, (HMENU)(INT_PTR)IDC_RAM_LIMIT_LABEL, NULL, NULL);
     g_ram_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
         842, 452, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_RAM_LIMIT, NULL, NULL);
@@ -1145,7 +1145,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_weight_decay, L"AdamW/Lion weight decay, from 0 to 1. The GUI passes this value explicitly, including when resuming.");
         add_tooltip(g_threads, L"OpenMP worker threads. 0 lets the runtime choose its default; 1-256 explicitly sets the worker count.");
         add_tooltip(g_cpu_limit, L"Windows Job Object hard CPU cap. 0 disables the cap; 1-100 limits total CPU capacity across all logical processors, not the percentage of one core.");
-        add_tooltip(g_ram_limit, L"Windows Job Object hard memory limit for the Minima process group. 0 disables the limit; 1-64 sets the maximum in GiB. A hard limit can cause allocations to fail if set too low.");
+        add_tooltip(g_ram_limit, L"Windows Job Object hard committed-memory limit for the Minima process group. This is a commit ceiling, not a physical working-set cap. 0 disables it; 1-64 sets GiB. Too low can make allocations fail.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
