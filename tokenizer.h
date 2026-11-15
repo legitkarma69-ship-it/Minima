@@ -1,0 +1,111 @@
+#ifndef TOKENIZER_H
+#define TOKENIZER_H
+
+#include "arena.h"
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#define TOK_MAX_VOCAB     32768
+#define TOK_MAX_MERGES    (TOK_MAX_VOCAB - 260)
+#define TOK_MAX_TOKEN_LEN 64          // longest token string we keep
+
+/* Reserved token IDs are serialized but not emitted by the raw-byte encoder. */
+#define TOK_BOS_ID        0
+#define TOK_EOS_ID        1
+#define TOK_PAD_ID        2
+#define TOK_UNK_ID        3
+#define TOK_SPECIAL_COUNT 4
+
+typedef struct {
+    uint16_t left;                    // token id
+    uint16_t right;                   // token id
+} Merge;
+
+typedef struct {
+    int      vocab_size;
+    int      n_merges;
+
+    // token id → null-terminated string (owned by arena)
+    char* token_str[TOK_MAX_VOCAB];
+    int      token_len[TOK_MAX_VOCAB];
+
+    // merge table: ordered by creation (lower index = higher priority)
+    Merge    merges[TOK_MAX_MERGES];
+
+    // Derived pair -> merge-rank hash index, rebuilt after training/load.
+    // Owned by the same arena as token strings; excluded from BPE1 persistence.
+    void* merge_rank_index;
+    uint32_t merge_rank_capacity;
+} Tokenizer;
+
+// ---------- Training ----------
+// Train BPE from a raw text buffer (bytes).
+// `sample` is the text, `sample_len` its length.
+// `vocab_size` is an upper bound (must be >= 260). Training can stop below
+// it when no pair occurs at least twice or all remaining pairs exceed the
+// maximum token length. True means a valid tokenizer was produced, not that
+// the requested upper bound was necessarily reached. Everything is allocated
+// from `arena`.
+bool tokenizer_train(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    int vocab_size);
+
+/* Train from concatenated byte segments without counting pairs across the
+   supplied exclusive-end offsets. Offsets must be strictly increasing and
+   the final offset must equal sample_len. */
+bool tokenizer_train_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count,
+    int vocab_size);
+
+/* Slow recounting trainer retained as a correctness reference. */
+bool tokenizer_train_reference(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len, int target_vocab);
+bool tokenizer_train_reference_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab);
+
+/* Incremental linked-sequence / indexed-heap trainer under equivalence test. */
+bool tokenizer_train_incremental(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len, int target_vocab);
+bool tokenizer_train_incremental_segments(Tokenizer* tok, Arena* arena,
+    const uint8_t* sample, size_t sample_len,
+    const size_t* segment_ends, size_t segment_count, int target_vocab);
+
+// ---------- Encode / Decode ----------
+// Encode text → token ids. Returns number of tokens written, 0 for empty input,
+// or -1 for invalid arguments / insufficient output capacity.
+// `out` must have room for at least `text_len` tokens (worst case).
+int  tokenizer_encode(const Tokenizer* tok,
+    const uint8_t* text, size_t text_len,
+    uint16_t* out, int out_cap);
+/* Reference multipass encoder retained for exact regression comparisons. */
+int tokenizer_encode_reference(const Tokenizer* tok,
+    const uint8_t* text, size_t text_len,
+    uint16_t* out, int out_cap);
+
+// Decode token ids → text. Returns bytes written (not including NUL), or -1
+// for invalid arguments, invalid IDs, or insufficient capacity. Output is
+// all-or-nothing; out_cap includes the terminating NUL and must be positive.
+int  tokenizer_decode(const Tokenizer* tok,
+    const uint16_t* ids, int n_ids,
+    char* out, int out_cap);
+
+// Stable fingerprint of vocabulary strings and ordered merge rules.
+uint64_t tokenizer_fingerprint(const Tokenizer* tok);
+
+// ---------- Persistence ----------
+bool tokenizer_save(const Tokenizer* tok, const char* path);
+bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path);
+
+// Special token ids (fixed)
+enum {
+    TOK_BOS = 0,          // we reserve 0..3
+    TOK_EOS = 1,
+    TOK_PAD = 2,
+    TOK_UNK = 3,
+    TOK_BYTE_START = 4    // 4..259 = raw bytes 0..255
+};
+
+#endif

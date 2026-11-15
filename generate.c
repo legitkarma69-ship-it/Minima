@@ -1,0 +1,484 @@
+#include "generate.h"
+#include "forward.h"
+#include "rotary.h"
+#include "util.h"
+#include <math.h>
+#include <string.h>
+#include <stdio.h>
+
+// ------------------------------------------------------------------
+// KV cache
+// ------------------------------------------------------------------
+
+bool kvcache_init(KVCache* cache, Arena* arena, const Model* model, int max_seq) {
+    if (!cache || !arena || !model || !model_validate(model) || max_seq <= 0 ||
+        max_seq > model->max_seq || max_seq > 512 ||
+        model->n_layers <= 0 || model->dim <= 0 ||
+        model->dim > 512 || model->ffn_dim <= 0 ||
+        model->ffn_dim > 1024 || model->vocab_size <= 0 ||
+        model->vocab_size > TOK_MAX_VOCAB || model->n_heads <= 0 ||
+        model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim)
+        return false;
+
+    memset(cache, 0, sizeof(*cache));
+    cache->max_seq = max_seq;
+    cache->n_layers = model->n_layers;
+    cache->n_heads = model->n_heads;
+    cache->n_kv_heads = model->n_kv_heads;
+    cache->head_dim = model->head_dim;
+    cache->dim = model->dim;
+    cache->kv_dim = model->kv_dim;
+
+    const size_t count = (size_t)model->n_layers *
+        (size_t)max_seq * (size_t)model->kv_dim;
+    if (count > SIZE_MAX / sizeof(float)) return false;
+
+    const size_t bytes = count * sizeof(float);
+    cache->k_cache = arena_alloc(arena, bytes);
+    cache->v_cache = arena_alloc(arena, bytes);
+    if (!cache->k_cache || !cache->v_cache) {
+        memset(cache, 0, sizeof(*cache));
+        return false;
+    }
+
+    cache->pos = 0;
+    return true;
+}
+
+void kvcache_reset(KVCache* cache) {
+    if (cache) cache->pos = 0;
+}
+
+// ------------------------------------------------------------------
+// Single-token forward with KV cache (much cheaper than full forward)
+// ------------------------------------------------------------------
+
+static void rmsnorm_inplace(float* x, const float* scale, int dim, float eps) {
+    float ss = 0.0f;
+    for (int i = 0; i < dim; i++) ss += x[i] * x[i];
+    float inv = 1.0f / sqrtf(ss / dim + eps);
+    for (int i = 0; i < dim; i++)
+        x[i] = x[i] * inv * scale[i];
+}
+
+static void matvec(float* out, const float* x, const float* w, int d_in, int d_out) {
+    for (int j = 0; j < d_out; j++) {
+        float sum = 0.0f;
+        const float* row = w + j * d_in;
+        for (int k = 0; k < d_in; k++)
+            sum += x[k] * row[k];
+        out[j] = sum;
+    }
+}
+
+// Forward one token, updating the KV cache. Returns logits for the new token.
+static void forward_one(Model* model, KVCache* cache,
+    uint16_t token_id, float* x, float* logits) {
+
+    int dim = model->dim;
+    int n_heads = model->n_heads;
+    int head_dim = model->head_dim;
+    int ffn_dim = model->ffn_dim;
+    int pos = cache->pos;
+
+    // Token embedding; rotary features encode this position inside attention.
+    const float* tok = model->tok_emb + token_id * dim;
+    for (int d = 0; d < dim; d++)
+        x[d] = tok[d];
+
+    // Temporary buffers (stack is fine for this tiny model)
+    float x_norm[512];
+    float qkv[3 * 512];
+    float attn_out[512];
+    float ffn_buf[1024];
+    float gate_buf[1024];
+
+    for (int layer = 0; layer < model->n_layers; layer++) {
+        // ----- Attention -----
+        memcpy(x_norm, x, dim * sizeof(float));
+        rmsnorm_inplace(x_norm, model->rms1_scale + layer * dim, dim, 1e-5f);
+
+        // QKV
+        const float* w_qkv = model->attn_qkv +
+            (size_t)layer * model->qkv_dim * dim;
+        matvec(qkv, x_norm, w_qkv, dim, model->qkv_dim);
+        rotary_apply_qkv(qkv, 1, 1, n_heads, model->n_kv_heads,
+            head_dim, model->qkv_dim, pos, 0);
+
+        // Split Q, K, V and write K/V into cache
+        const int kv_dim = model->kv_dim;
+        float* k_cache_l = cache->k_cache +
+            (size_t)layer * cache->max_seq * kv_dim;
+        float* v_cache_l = cache->v_cache +
+            (size_t)layer * cache->max_seq * kv_dim;
+
+        // store current K and V
+        memcpy(k_cache_l + pos * kv_dim, qkv + dim, kv_dim * sizeof(float));
+        memcpy(v_cache_l + pos * kv_dim, qkv + dim + kv_dim,
+            kv_dim * sizeof(float));
+
+        // Attention (only the new query against all keys 0..pos)
+        memset(attn_out, 0, dim * sizeof(float));
+        float scale = 1.0f / sqrtf((float)head_dim);
+
+        for (int h = 0; h < n_heads; h++) {
+            const int kv_head = h / (n_heads / model->n_kv_heads);
+            const float* q = qkv + h * head_dim;
+            float scores[512];
+            float max_score = -1e30f;
+
+            for (int kj = 0; kj <= pos; kj++) {
+                const float* k = k_cache_l + kj * kv_dim + kv_head * head_dim;
+                float dot = 0.0f;
+                for (int d = 0; d < head_dim; d++)
+                    dot += q[d] * k[d];
+                scores[kj] = dot * scale;
+                if (scores[kj] > max_score) max_score = scores[kj];
+            }
+
+            float sum = 0.0f;
+            for (int kj = 0; kj <= pos; kj++) {
+                scores[kj] = expf(scores[kj] - max_score);
+                sum += scores[kj];
+            }
+            float inv = 1.0f / sum;
+            for (int kj = 0; kj <= pos; kj++)
+                scores[kj] *= inv;
+
+            float* out_h = attn_out + h * head_dim;
+            for (int kj = 0; kj <= pos; kj++) {
+                const float* v = v_cache_l + kj * kv_dim + kv_head * head_dim;
+                float s = scores[kj];
+                for (int d = 0; d < head_dim; d++)
+                    out_h[d] += s * v[d];
+            }
+        }
+
+        // Output projection + residual
+        const float* w_proj = model->attn_proj + (size_t)layer * dim * dim;
+        float proj[512];
+        matvec(proj, attn_out, w_proj, dim, dim);
+        for (int d = 0; d < dim; d++)
+            x[d] += proj[d];
+
+        // ----- FFN -----
+        memcpy(x_norm, x, dim * sizeof(float));
+        rmsnorm_inplace(x_norm, model->rms2_scale + layer * dim, dim, 1e-5f);
+
+        const float* w_up = model->ffn_up + (size_t)layer * ffn_dim * dim;
+        const float* w_gate = model->ffn_gate + (size_t)layer * ffn_dim * dim;
+        const float* w_down = model->ffn_down + (size_t)layer * dim * ffn_dim;
+
+        matvec(ffn_buf, x_norm, w_up, dim, ffn_dim);
+        matvec(gate_buf, x_norm, w_gate, dim, ffn_dim);
+
+        for (int i = 0; i < ffn_dim; i++) {
+            float s = gate_buf[i] / (1.0f + expf(-gate_buf[i])); // silu
+            ffn_buf[i] = s * ffn_buf[i];
+        }
+
+        float down[512];
+        matvec(down, ffn_buf, w_down, ffn_dim, dim);
+        for (int d = 0; d < dim; d++)
+            x[d] += down[d];
+    }
+
+    // Final norm
+    rmsnorm_inplace(x, model->rms_final_scale, dim, 1e-5f);
+
+    // Logits (tied)
+    matvec(logits, x, model->tok_emb, dim, model->vocab_size);
+
+    cache->pos++;
+}
+
+// ------------------------------------------------------------------
+// KV-cache parity check
+// ------------------------------------------------------------------
+
+// Compare the final-token logits from a full causal forward pass against
+// incremental single-token inference using the KV cache.
+bool generation_check_kv_cache(Model* model, KVCache* cache, Arena* temp_arena,
+    const uint16_t* tokens, int seq, float tolerance) {
+
+    if (!model || !model_validate(model) || !cache || !temp_arena || !tokens || seq <= 0 ||
+        seq > model->max_seq || seq > cache->max_seq ||
+        seq > 512 || !isfinite(tolerance) || tolerance <= 0.0f ||
+        model->dim <= 0 || model->dim > 512 ||
+        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
+        model->vocab_size <= 0 || model->vocab_size > TOK_MAX_VOCAB ||
+        model->n_layers <= 0 || model->n_heads <= 0 ||
+        model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim ||
+        cache->n_layers != model->n_layers ||
+        cache->dim != model->dim ||
+        cache->n_heads != model->n_heads ||
+        cache->n_kv_heads != model->n_kv_heads ||
+        cache->head_dim != model->head_dim ||
+        cache->kv_dim != model->kv_dim ||
+        !cache->k_cache || !cache->v_cache)
+        return false;
+
+    for (int i = 0; i < seq; i++)
+        if (tokens[i] >= model->vocab_size) return false;
+
+    arena_reset(temp_arena);
+
+    Activations act;
+    if (!activations_init(&act, temp_arena, 1, seq, model))
+        return false;
+
+    float* full_logits = model_forward(model, &act, tokens, 1, seq);
+    if (!full_logits) return false;
+
+    float x[512];
+    float cached_logits[TOK_MAX_VOCAB];
+    float max_abs = 0.0f;
+    float max_rel = 0.0f;
+
+    // Compare every incremental prefix, not only the final prompt position.
+    // This catches errors in position handling and cache updates during prefill.
+    kvcache_reset(cache);
+    for (int pos = 0; pos < seq; pos++) {
+        forward_one(model, cache, tokens[pos], x, cached_logits);
+        const float* expected = full_logits +
+            (size_t)pos * model->vocab_size;
+
+        for (int i = 0; i < model->vocab_size; i++) {
+            const float diff = fabsf(expected[i] - cached_logits[i]);
+            const float denom = fmaxf(fabsf(expected[i]), 1e-6f);
+            const float rel = diff / denom;
+            if (diff > max_abs) max_abs = diff;
+            if (rel > max_rel) max_rel = rel;
+        }
+    }
+
+    printf("KV-cache parity check\n");
+    printf("  prefix positions: %d\n", seq);
+    printf("  max abs error   : %.8e\n", max_abs);
+    printf("  max rel error   : %.8e\n", max_rel);
+    printf("  tolerance       : %.8e\n", tolerance);
+    printf("  result          : %s\n", max_abs <= tolerance ? "PASS" : "FAIL");
+
+    return max_abs <= tolerance;
+}
+
+// Print one token as a quoted, byte-safe representation.
+static void print_token_escaped(const Tokenizer* tok, int id) {
+    if (!tok || id < 0 || id >= tok->vocab_size) {
+        printf("\"<invalid>\"");
+        return;
+    }
+    const unsigned char* s = (const unsigned char*)tok->token_str[id];
+    const int len = tok->token_len[id];
+    putchar('"');
+    for (int i = 0; i < len; i++) {
+        const unsigned char c = s[i];
+        if (c == '\\') printf("\\\\");
+        else if (c == '"') printf("\\\"");
+        else if (c == '\n') printf("\\n");
+        else if (c == '\r') printf("\\r");
+        else if (c == '\t') printf("\\t");
+        else if (c >= 32 && c <= 126) putchar((int)c);
+        else printf("\\x%02X", (unsigned int)c);
+    }
+    putchar('"');
+}
+
+// Inspect the model's next-token distribution after a prompt. Probabilities
+// are normalized over sampleable tokens, not only the displayed top N.
+bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
+    KVCache* cache, const uint16_t* prompt_ids, int prompt_len, int top_n) {
+    if (!model || !model_validate(model) || !tok || !cache || !prompt_ids || prompt_len <= 0 ||
+        top_n <= 0 || model->vocab_size <= 0 ||
+        model->vocab_size > TOK_MAX_VOCAB || tok->vocab_size != model->vocab_size ||
+        model->dim <= 0 || model->dim > 512 ||
+        model->ffn_dim <= 0 || model->ffn_dim > 1024 ||
+        model->n_layers <= 0 || model->n_heads <= 0 ||
+        model->head_dim <= 0 ||
+        model->n_heads * model->head_dim != model->dim ||
+        prompt_len > model->max_seq || prompt_len > cache->max_seq ||
+        cache->n_layers != model->n_layers || cache->dim != model->dim ||
+        cache->n_heads != model->n_heads ||
+        cache->n_kv_heads != model->n_kv_heads ||
+        cache->head_dim != model->head_dim ||
+        cache->kv_dim != model->kv_dim ||
+        !cache->k_cache || !cache->v_cache)
+        return false;
+
+    if (top_n > 20) top_n = 20;
+    float x[512];
+    float logits[TOK_MAX_VOCAB];
+    kvcache_reset(cache);
+
+    for (int i = 0; i < prompt_len; i++) {
+        if (prompt_ids[i] >= model->vocab_size) return false;
+        forward_one(model, cache, prompt_ids[i], x, logits);
+    }
+
+    float max_logit = -INFINITY;
+    for (int i = 0; i < model->vocab_size; i++) {
+        if (i < TOK_SPECIAL_COUNT) {
+            logits[i] = -INFINITY;
+            continue;
+        }
+        if (!isfinite(logits[i])) return false;
+        if (logits[i] > max_logit) max_logit = logits[i];
+    }
+
+    double denom = 0.0;
+    for (int i = TOK_SPECIAL_COUNT; i < model->vocab_size; i++)
+        denom += exp((double)logits[i] - (double)max_logit);
+    if (!(denom > 0.0) || !isfinite(denom)) return false;
+
+    int best_ids[20];
+    float best_logits[20];
+    int found = 0;
+    for (int id = TOK_SPECIAL_COUNT; id < model->vocab_size; id++) {
+        int at = found;
+        if (at > top_n) at = top_n;
+        while (at > 0 && logits[id] > best_logits[at - 1]) {
+            if (at < top_n) {
+                best_logits[at] = best_logits[at - 1];
+                best_ids[at] = best_ids[at - 1];
+            }
+            at--;
+        }
+        if (at < top_n) {
+            best_logits[at] = logits[id];
+            best_ids[at] = id;
+            if (found < top_n) found++;
+        }
+    }
+
+    double entropy_bits = 0.0;
+    for (int i = TOK_SPECIAL_COUNT; i < model->vocab_size; ++i) {
+        const double probability =
+            exp((double)logits[i] - (double)max_logit) / denom;
+        if (probability > 0.0)
+            entropy_bits -= probability * (log(probability) / log(2.0));
+    }
+
+    double top1_mass = 0.0, top5_mass = 0.0, top10_mass = 0.0;
+    double cumulative_mass = 0.0;
+    for (int i = 0; i < found; ++i) {
+        const double probability =
+            exp((double)best_logits[i] - (double)max_logit) / denom;
+        cumulative_mass += probability;
+        if (i == 0) top1_mass = cumulative_mass;
+        if (i == 4) top5_mass = cumulative_mass;
+        if (i == 9) top10_mass = cumulative_mass;
+    }
+
+    printf("  Next-token distribution (top %d, sampleable-vocabulary probabilities):\n",
+        found);
+    printf("    entropy=%.4f bits, top-1=%.2f%%, top-5=%.2f%%, top-10=%.2f%%\n",
+        entropy_bits, top1_mass * 100.0, top5_mass * 100.0,
+        top10_mass * 100.0);
+    for (int i = 0; i < found; i++) {
+        const double probability =
+            exp((double)best_logits[i] - (double)max_logit) / denom;
+        printf("    %2d. id=%4d  p=%8.4f%%  token=",
+            i + 1, best_ids[i], probability * 100.0);
+        print_token_escaped(tok, best_ids[i]);
+        putchar('\n');
+    }
+    return true;
+}
+
+// ------------------------------------------------------------------
+// Sampling helpers
+// ------------------------------------------------------------------
+
+static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
+    int top_k, float top_p, float repetition_penalty,
+    const uint16_t* history, int history_len, Rng* rng) {
+    int idx[256]; float vals[256]; int n=0;
+    uint8_t seen[TOK_MAX_VOCAB]={0};
+    if(top_k<1)top_k=1;if(top_k>vocab)top_k=vocab;if(top_k>256)top_k=256;
+    if(repetition_penalty>1.0f)
+        for(int j=0;j<history_len;j++)if(history[j]<(uint16_t)vocab)seen[history[j]]=1;
+    for(int id=0;id<vocab;id++){
+        float value=logits[id];
+        if(seen[id])value=value>0.0f?value/repetition_penalty:value*repetition_penalty;
+        value/=temperature;
+        if(n<top_k){idx[n]=id;vals[n]=value;n++;}
+        else{
+            int min_i=0;for(int j=1;j<n;j++)if(vals[j]<vals[min_i])min_i=j;
+            if(value>vals[min_i]){idx[min_i]=id;vals[min_i]=value;}
+        }
+    }
+    // Sort the retained candidates by descending adjusted logit.
+    for(int i=0;i<n;i++)for(int j=i+1;j<n;j++)if(vals[j]>vals[i]){
+        float tv=vals[i];vals[i]=vals[j];vals[j]=tv;
+        int ti=idx[i];idx[i]=idx[j];idx[j]=ti;
+    }
+    float maxv=vals[0], probs[256], sum=0.0f;
+    for(int i=0;i<n;i++){probs[i]=expf(vals[i]-maxv);sum+=probs[i];}
+    if(top_p<1.0f){
+        float cumulative=0.0f;int keep=0;
+        for(int i=0;i<n;i++){cumulative+=probs[i]/sum;keep++;if(cumulative>=top_p)break;}
+        n=keep;
+    }
+    sum=0.0f;for(int i=0;i<n;i++)sum+=probs[i];
+    float draw=rng_f32(rng)*sum;
+    for(int i=0;i<n;i++){draw-=probs[i];if(draw<=0.0f)return idx[i];}
+    return idx[n-1];
+}
+
+// ------------------------------------------------------------------
+// Public generate
+// ------------------------------------------------------------------
+
+int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
+    const uint16_t* prompt_ids, int prompt_len,
+    uint16_t* out_ids, int out_cap, int n_new,
+    float temperature, int top_k, float top_p,
+    float repetition_penalty, Rng* rng) {
+
+    if (!model || !model_validate(model) || !tok || !cache || !prompt_ids || !out_ids || !rng ||
+        prompt_len<=0 || out_cap<=0 || n_new<0 ||
+        !isfinite(temperature) || temperature<=0.0f ||
+        !isfinite(top_p) || top_p<=0.0f || top_p>1.0f ||
+        !isfinite(repetition_penalty) || repetition_penalty<1.0f ||
+        model->dim<=0 || model->dim>512 || model->ffn_dim<=0 || model->ffn_dim>1024 ||
+        model->vocab_size<=0 || model->vocab_size>TOK_MAX_VOCAB ||
+        model->n_heads<=0 || model->head_dim<=0 ||
+        model->n_heads*model->head_dim!=model->dim ||
+        cache->n_layers!=model->n_layers || cache->dim!=model->dim ||
+        cache->n_heads!=model->n_heads ||
+        cache->n_kv_heads!=model->n_kv_heads ||
+        cache->head_dim!=model->head_dim || cache->kv_dim!=model->kv_dim ||
+        !cache->k_cache || !cache->v_cache || cache->max_seq<=0 ||
+        cache->max_seq>512 || tok->vocab_size!=model->vocab_size) return 0;
+
+    if(prompt_len>out_cap || prompt_len>cache->max_seq)return 0;
+    if(n_new>out_cap-prompt_len)n_new=out_cap-prompt_len;
+    if(n_new>cache->max_seq-prompt_len)n_new=cache->max_seq-prompt_len;
+    if(n_new<=0){memcpy(out_ids,prompt_ids,(size_t)prompt_len*sizeof(uint16_t));return prompt_len;}
+    if(top_k<1)top_k=1;if(top_k>model->vocab_size)top_k=model->vocab_size;if(top_k>256)top_k=256;
+    for(int i=0;i<prompt_len;i++)if(prompt_ids[i]>=model->vocab_size||prompt_ids[i]>=tok->vocab_size)return 0;
+
+    kvcache_reset(cache);
+    float x[512],logits[TOK_MAX_VOCAB];
+    for(int i=0;i<prompt_len;i++){out_ids[i]=prompt_ids[i];forward_one(model,cache,prompt_ids[i],x,logits);}
+    for(int i=0;i<n_new;i++){
+        for (int special = 0; special < TOK_SPECIAL_COUNT; special++)
+            logits[special] = -INFINITY;
+        int next=sample_top_k_top_p(logits,model->vocab_size,temperature,top_k,
+            top_p,repetition_penalty,out_ids,prompt_len+i,rng);
+        if(next<0||next>=tok->vocab_size)return 0;
+        out_ids[prompt_len+i]=(uint16_t)next;
+        forward_one(model,cache,(uint16_t)next,x,logits);
+    }
+    return prompt_len+n_new;
+}
+
+int generate(Model* model, Tokenizer* tok, KVCache* cache,
+    const uint16_t* prompt_ids, int prompt_len,
+    uint16_t* out_ids, int out_cap, int n_new,
+    float temperature, int top_k, Rng* rng) {
+    return generate_ex(model,tok,cache,prompt_ids,prompt_len,out_ids,out_cap,
+        n_new,temperature,top_k,1.0f,1.0f,rng);
+}
