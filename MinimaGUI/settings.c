@@ -8,23 +8,25 @@
 #define _countof(array) (sizeof(array) / sizeof((array)[0]))
 #endif
 
-static const wchar_t* const g_edit_keys[24] = {
+static const wchar_t* const g_edit_keys[26] = {
     L"steps", L"vocab", L"dim", L"layers", L"heads", L"ffn", L"context",
     L"batch", L"sequence", L"learning_rate", L"warmup", L"total_steps",
     L"log_interval", L"validation_interval", L"validation_batches",
     L"checkpoint_interval", L"seed", L"tokenizer_bytes", L"temperature",
-    L"top_k", L"top_p", L"repetition", L"max_tokens", L"grad_clip"
+    L"top_k", L"top_p", L"repetition", L"max_tokens", L"grad_clip",
+    L"weight_decay", L"threads"
 };
-static const wchar_t* const g_edit_defaults[24] = {
+static const wchar_t* const g_edit_defaults[26] = {
     L"10000", L"30000", L"128", L"8", L"4", L"512", L"128", L"4", L"128",
     L"0.0002", L"3000", L"100000", L"1000", L"1000", L"16", L"1000", L"1234",
-    L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0"
+    L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0",
+    L"0.01", L"0"
 };
-static const wchar_t* const g_combo_keys[3] = {
-    L"lr_schedule", L"tokenizer_sampling", L"corpus_mix"
+static const wchar_t* const g_combo_keys[4] = {
+    L"lr_schedule", L"tokenizer_sampling", L"corpus_mix", L"optimizer"
 };
-static const wchar_t* const g_combo_defaults[3] = {
-    L"cosine", L"spread", L"sqrt"
+static const wchar_t* const g_combo_defaults[4] = {
+    L"cosine", L"spread", L"sqrt", L"adamw"
 };
 
 static void load_edit_setting(const wchar_t* path, const wchar_t* key,
@@ -88,11 +90,11 @@ static void save_combo_setting(const wchar_t* path, const wchar_t* key, HWND con
 
 void minima_settings_load(const MinimaSettingsContext* context) {
     if (!context || !context->path || !context->path[0]) return;
-    for (int i = 0; i < 24; ++i)
+    for (int i = 0; i < 26; ++i)
         load_edit_setting(context->path, g_edit_keys[i],
             context->edit_controls[i], g_edit_defaults[i]);
     migrate_long_run_intervals(context);
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         load_combo_setting(context->path, g_combo_keys[i],
             context->combo_controls[i], g_combo_defaults[i]);
 

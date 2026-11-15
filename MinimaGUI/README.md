@@ -22,6 +22,7 @@ The engine working directory is the executable directory. Keep the `data` folder
 - Configure vocabulary size, embedding dimension, layers, attention heads, FFN dimension, and model context length.
 - Configure batch size and training sequence length.
 - Configure learning rate, warmup, and cosine or constant learning-rate schedule.
+- Choose AdamW or Lion for fresh runs, configure weight decay, and set OpenMP worker threads (0 selects the runtime default). Resume automatically retains the optimizer type stored in the checkpoint; weight decay and thread count remain configurable.
 - Configure training-log interval, validation interval, validation batch count, and checkpoint interval independently.
 - Choose the random seed.
 - Configure tokenizer sample byte limit (4 MiB maximum) and either evenly spread sampling or prefix sampling.

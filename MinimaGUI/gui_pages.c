@@ -93,6 +93,9 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_log (*page_controls->log)
 #define g_chat_input (*page_controls->chat_input)
 #define g_chat_test (*page_controls->chat_test)
+#define g_optimizer (*page_controls->optimizer)
+#define g_weight_decay (*page_controls->weight_decay)
+#define g_threads (*page_controls->threads)
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, parent, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
         12, 34, 520, 105, parent, (HMENU)(INT_PTR)IDC_CORPUS, NULL, NULL);
@@ -165,6 +168,14 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Total steps",WS_CHILD|WS_VISIBLE,535,329,65,18,parent,NULL,NULL,NULL));
     g_total_steps=CreateWindowW(L"EDIT",L"100000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,600,326,70,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_total_steps);
 
+    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Optimizer",WS_CHILD|WS_VISIBLE,12,398,64,18,parent,NULL,NULL,NULL));
+    g_optimizer=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,78,395,100,100,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_optimizer);
+    SendMessageW(g_optimizer,CB_ADDSTRING,0,(LPARAM)L"adamw"); SendMessageW(g_optimizer,CB_ADDSTRING,0,(LPARAM)L"lion"); SendMessageW(g_optimizer,CB_SETCURSEL,0,0);
+    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Weight decay",WS_CHILD|WS_VISIBLE,190,398,78,18,parent,NULL,NULL,NULL));
+    g_weight_decay=CreateWindowW(L"EDIT",L"0.01",WS_CHILD|WS_VISIBLE|WS_BORDER,270,395,58,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_weight_decay);
+    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"CPU threads (0=auto)",WS_CHILD|WS_VISIBLE,345,398,122,18,parent,NULL,NULL,NULL));
+    g_threads=CreateWindowW(L"EDIT",L"0",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,470,395,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_threads);
+
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,parent,(HMENU)(INT_PTR)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,parent,(HMENU)(INT_PTR)IDC_STOP,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Start chat",WS_CHILD|WS_VISIBLE,257,340,90,30,parent,(HMENU)(INT_PTR)IDC_CHAT_START,NULL,NULL);
@@ -233,5 +244,8 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #undef g_log
 #undef g_chat_input
 #undef g_chat_test
+#undef g_optimizer
+#undef g_weight_decay
+#undef g_threads
 #undef REGISTER_ADVANCED
 }

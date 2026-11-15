@@ -179,7 +179,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if(strcmp(opt,"--validation-batches")==0)hi=4096;
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=4194304; }
-            if (strcmp(opt,"--threads")==0) { lo=1; hi=256; }
+            if (strcmp(opt,"--threads")==0) { lo=0; hi=256; }
             if (strcmp(opt,"--vocab-size")==0) { lo=260; hi=MODEL_MAX_VOCAB_SIZE; }
             if (strcmp(opt,"--dim")==0) { lo=1; hi=512; }
             if (strcmp(opt,"--layers")==0) { lo=1; hi=16; }

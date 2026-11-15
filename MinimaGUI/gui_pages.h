@@ -38,6 +38,9 @@ typedef struct {
     HWND* log;
     HWND* chat_input;
     HWND* chat_test;
+    HWND* optimizer;
+    HWND* weight_decay;
+    HWND* threads;
 } GuiPageControls;
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
