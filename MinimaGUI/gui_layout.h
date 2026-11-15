@@ -29,10 +29,12 @@
 #define IDC_RAM_LIMIT_LABEL 1025
 #define IDC_CPU_LIMIT 1026
 #define IDC_RAM_LIMIT 1027
+#define IDC_ARENA_BUDGET_LABEL 1028
+#define IDC_ARENA_BUDGET 1029
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
-extern HWND g_cpu_limit, g_ram_limit, g_resource_status;
+extern HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_resource_status;
 extern HWND g_clear_chat, g_clear_logs, g_eval_button;
 extern HWND g_group_corpus, g_group_model, g_group_training;
 extern HWND g_group_advanced, g_group_monitor, g_group_output, g_output_label;
