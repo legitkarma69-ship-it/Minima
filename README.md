@@ -75,7 +75,7 @@ This is a useful CPU-first target, not a reason to tune the whole engine around 
 | Power | Plugged in, Windows best-performance mode for benchmark runs | Record power mode and temperatures; repeat a normal-use run separately |
 | GPU | CPU only | Revisit only with a measured, maintainable backend |
 
-These are starting limits, not hard-coded truths. Do not automatically use all 16 logical threads: SMT threads share physical-core resources, and a 15 W laptop may become slower after it heats up. The CLI already accepts `--threads N`; the GUI does not yet expose that option. OpenMP is enabled in the Visual Studio project files. Current parallel regions cover selected matrix-multiplication work in the forward/backward paths, not every operation, so thread-count scaling must be measured rather than assumed.
+These are starting limits, not hard-coded truths. Do not automatically use all 16 logical threads: SMT threads share physical-core resources, and a 15 W laptop may become slower after it heats up. The CLI and GUI both expose the `--threads N` setting; the GUI also offers resource profiles and independent CPU-rate and memory limits. OpenMP is enabled in the Visual Studio project files. Current parallel regions cover selected matrix-multiplication work in the forward/backward paths, not every operation, so thread-count scaling must be measured rather than assumed.
 
 ### Memory implications
 
