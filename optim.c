@@ -203,7 +203,7 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
 #define UPDATE_WITH_DECAY(field, count, decay) \
         adamw_update(model->field, opt->m_##field, opt->v_##field, \
                      grads->field, (count), \
-                     opt->lr, b1, b2, (decay), bias1, bias2)
+                     opt->lr, b1, b2, opt->eps, (decay), bias1, bias2)
 
     /* Decay embedding and matrix weights, but not RMSNorm scale vectors. */
     UPDATE_WITH_DECAY(tok_emb, tok_n, opt->weight_decay);
