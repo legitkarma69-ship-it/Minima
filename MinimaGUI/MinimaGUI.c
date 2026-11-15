@@ -577,7 +577,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -586,6 +586,13 @@ static void set_running(BOOL running) {
     EnableWindow(g_top_p,!running || g_chat_mode);
     EnableWindow(g_repetition,!running || g_chat_mode);
     EnableWindow(g_max_tokens,!running || g_chat_mode);
+    EnableWindow(g_min_p,!running || g_chat_mode);
+    EnableWindow(g_frequency_penalty,!running || g_chat_mode);
+    EnableWindow(g_presence_penalty,!running || g_chat_mode);
+    EnableWindow(g_no_repeat_ngram,!running || g_chat_mode);
+    EnableWindow(g_min_new_tokens,!running || g_chat_mode);
+    EnableWindow(g_sampling_seed,!running || g_chat_mode);
+    EnableWindow(g_stop_sequence,!running || g_chat_mode);
     EnableWindow(g_chat_test,FALSE);
     EnableWindow(g_eval_button,!running);
     SetWindowTextW(g_status,running?(g_chat_mode?L"Starting chat":L"Training running"):L"Idle");
