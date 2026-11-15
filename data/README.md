@@ -112,6 +112,18 @@ prompts and greedy top-k=1 decoding. Each prompt is generated twice from the
 same initial state and the token sequences are compared exactly. This checks
 repeatability; it does not measure generation quality by itself.
 
+## Reasoning evaluation data
+
+Held-out behavioral evaluation lives in `data/evaluation/`, separate from `books.txt` and `chatlogs.txt`.
+
+- `data/evaluation/logic.jsonl` contains text-only basic-logic prompts with reference answers and scoring guidance.
+- **Never add evaluation files to the training corpus, tokenizer sample, or supervised fine-tuning data.** The model must receive only the prompt during evaluation, never the reference answer or scoring notes.
+- Keep evaluation examples deterministic, self-contained, and answerable from the stated information. Include cases where the correct response is that the information is insufficient.
+- Score both the conclusion and the explanation. Equivalent wording is acceptable; exact-string matching is not a reliable measure of reasoning.
+- Add paraphrased variants and new examples over time. Do not optimize against a tiny fixed list at the expense of generalization.
+
+The first benchmark is intentionally small. It establishes a repeatable starting point before any reasoning-focused training data is introduced.
+
 ## Tokenizer maintenance
 
 A normal fresh training run trains a tokenizer from the current corpus. Resume
