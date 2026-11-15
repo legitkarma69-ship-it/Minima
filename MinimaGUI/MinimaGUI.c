@@ -1104,13 +1104,13 @@ static void create_controls(HWND hwnd) {
     g_resource_status = CreateWindowW(L"STATIC", L"CPU: --   RAM: --", WS_CHILD | WS_VISIBLE,
         600, 430, 300, 20, hwnd, NULL, NULL, NULL);
     CreateWindowW(L"STATIC", L"CPU cap %", WS_CHILD | WS_VISIBLE,
-        600, 455, 76, 18, hwnd, (HMENU)(INT_PTR)1024, NULL, NULL);
+        600, 455, 76, 18, hwnd, (HMENU)(INT_PTR)IDC_CPU_LIMIT_LABEL, NULL, NULL);
     g_cpu_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-        680, 452, 48, 23, hwnd, (HMENU)(INT_PTR)1026, NULL, NULL);
+        680, 452, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_CPU_LIMIT, NULL, NULL);
     CreateWindowW(L"STATIC", L"RAM cap GB", WS_CHILD | WS_VISIBLE,
-        750, 455, 88, 18, hwnd, (HMENU)(INT_PTR)1025, NULL, NULL);
+        750, 455, 88, 18, hwnd, (HMENU)(INT_PTR)IDC_RAM_LIMIT_LABEL, NULL, NULL);
     g_ram_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
-        842, 452, 48, 23, hwnd, (HMENU)(INT_PTR)1027, NULL, NULL);
+        842, 452, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_RAM_LIMIT, NULL, NULL);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
