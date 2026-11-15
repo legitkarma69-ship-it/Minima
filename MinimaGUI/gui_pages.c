@@ -20,10 +20,12 @@ void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
             TabCtrl_InsertItem(*tabs, 0, &item);
             item.pszText = L"Advanced";
             TabCtrl_InsertItem(*tabs, 1, &item);
-            item.pszText = L"Chat";
+            item.pszText = L"Generation";
             TabCtrl_InsertItem(*tabs, 2, &item);
-            item.pszText = L"Logs";
+            item.pszText = L"Chat";
             TabCtrl_InsertItem(*tabs, 3, &item);
+            item.pszText = L"Logs";
+            TabCtrl_InsertItem(*tabs, 4, &item);
         }
     }
     if (corpus_group)
@@ -152,16 +154,16 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Tokenizer bytes",WS_CHILD|WS_VISIBLE,12,298,92,18,parent,NULL,NULL,NULL));
     g_tokenizer_bytes=CreateWindowW(L"EDIT",L"4194304",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,106,295,75,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_tokenizer_bytes);
-    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,parent,NULL,NULL,NULL));
-    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_temperature);
-    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,parent,NULL,NULL,NULL));
-    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,324,295,40,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_top_k);
-    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,370,298,38,18,parent,NULL,NULL,NULL));
-    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,409,295,45,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_top_p);
-    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,460,298,45,18,parent,NULL,NULL,NULL));
-    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,295,45,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_repetition);
-    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,329,75,18,parent,NULL,NULL,NULL));
-    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,326,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_max_tokens);
+    CreateWindowW(L"STATIC",L"Temp",WS_CHILD|WS_VISIBLE,195,298,38,18,parent,(HMENU)(INT_PTR)IDC_GEN_TEMP_LABEL,NULL,NULL);
+    g_temperature=CreateWindowW(L"EDIT",L"0.8",WS_CHILD|WS_VISIBLE|WS_BORDER,234,295,45,23,parent,(HMENU)(INT_PTR)IDC_GEN_TEMP,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Top-k",WS_CHILD|WS_VISIBLE,285,298,38,18,parent,(HMENU)(INT_PTR)IDC_GEN_TOPK_LABEL,NULL,NULL);
+    g_top_k=CreateWindowW(L"EDIT",L"40",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,324,295,40,23,parent,(HMENU)(INT_PTR)IDC_GEN_TOPK,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Top-p",WS_CHILD|WS_VISIBLE,370,298,38,18,parent,(HMENU)(INT_PTR)IDC_GEN_TOPP_LABEL,NULL,NULL);
+    g_top_p=CreateWindowW(L"EDIT",L"0.9",WS_CHILD|WS_VISIBLE|WS_BORDER,409,295,45,23,parent,(HMENU)(INT_PTR)IDC_GEN_TOPP,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Repeat",WS_CHILD|WS_VISIBLE,460,298,45,18,parent,(HMENU)(INT_PTR)IDC_GEN_REPEAT_LABEL,NULL,NULL);
+    g_repetition=CreateWindowW(L"EDIT",L"1.1",WS_CHILD|WS_VISIBLE|WS_BORDER,506,295,45,23,parent,(HMENU)(INT_PTR)IDC_GEN_REPEAT,NULL,NULL);
+    CreateWindowW(L"STATIC",L"Max tokens",WS_CHILD|WS_VISIBLE,12,329,75,18,parent,(HMENU)(INT_PTR)IDC_GEN_MAXTOK_LABEL,NULL,NULL);
+    g_max_tokens=CreateWindowW(L"EDIT",L"32",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,90,326,48,23,parent,(HMENU)(INT_PTR)IDC_GEN_MAXTOK,NULL,NULL);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"LR schedule",WS_CHILD|WS_VISIBLE,155,329,68,18,parent,NULL,NULL,NULL));
     g_lr_schedule=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWNLIST|WS_VSCROLL,225,326,95,100,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_lr_schedule);
     SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"cosine");SendMessageW(g_lr_schedule,CB_ADDSTRING,0,(LPARAM)L"constant");SendMessageW(g_lr_schedule,CB_SETCURSEL,0,0);
