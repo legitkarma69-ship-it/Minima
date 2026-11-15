@@ -57,9 +57,12 @@ typedef struct {
     const char* stop_file;
     const char* pause_file;
     const char* source_weights;
+    const char* stop_sequence;
     const char* save_file;
     float temperature, top_p, repetition_penalty;
-    int top_k, max_new_tokens;
+    float min_p, frequency_penalty, presence_penalty;
+    int top_k, max_new_tokens, min_new_tokens, no_repeat_ngram;
+    uint64_t sampling_seed;
     bool chat_mode;
     ModelConfig model;
     const char* lr_schedule;
@@ -111,7 +114,9 @@ static void print_usage(const char* exe) {
     printf("  --weight-decay FLOAT --beta1 FLOAT --beta2 FLOAT --epsilon FLOAT\n");
     printf("  --memory-budget-gb N (aggregate committed arena budget; 0 disables)\n");
     printf("  --grad-clip FLOAT (global gradient norm; 0 disables clipping)\n");
-    printf("  --temperature F --top-k N --top-p F --repetition-penalty F\n");
+    printf("  --temperature F --top-k N --top-p F --min-p F --repetition-penalty F\n");
+    printf("  --frequency-penalty F --presence-penalty F --no-repeat-ngram N\n");
+    printf("  --min-new-tokens N --sampling-seed N --stop-sequence TEXT\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
     printf("  --stop-file PATH --pause-file PATH --save-file PATH (cooperative training controls)\n");
     printf("  --source-weights CSV (positive multipliers, one per non-empty corpus file)\n");
@@ -165,6 +170,8 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->threads=0; o->memory_budget_gb=0;
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->pause_file=NULL; o->source_weights=NULL; o->save_file=NULL;
     o->temperature=0.8f; o->top_k=40; o->top_p=0.9f;
+    o->min_p=0.0f; o->frequency_penalty=0.0f; o->presence_penalty=0.0f;
+    o->min_new_tokens=0; o->no_repeat_ngram=0; o->sampling_seed=0; o->stop_sequence=NULL;
     o->repetition_penalty=1.1f; o->max_new_tokens=32; o->chat_mode=false;
     o->lr_schedule="cosine"; o->tokenizer_spread=true;
     o->corpus_mix=CORPUS_MIX_SQRT;
@@ -247,19 +254,34 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--memory-budget-gb")==0) o->memory_budget_gb=(int)v;
             else o->tokenizer_sample_bytes=(size_t)v;
         }
-        else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0) {
+        else if (strcmp(argv[i], "--top-k") == 0 || strcmp(argv[i], "--max-new-tokens") == 0 ||
+            strcmp(argv[i], "--min-new-tokens") == 0 || strcmp(argv[i], "--no-repeat-ngram") == 0 ||
+            strcmp(argv[i], "--sampling-seed") == 0) {
             const char* option=argv[i]; if(++i>=argc)die("%s requires a value",option);
-            long v=parse_long_value(option,argv[i],1,
-                strcmp(option,"--top-k")==0?256:512);
-            if(strcmp(option,"--top-k")==0)o->top_k=(int)v;else o->max_new_tokens=(int)v;
+            long minv = (strcmp(option,"--min-new-tokens")==0 || strcmp(option,"--no-repeat-ngram")==0 || strcmp(option,"--sampling-seed")==0) ? 0 : 1;
+            long maxv = strcmp(option,"--top-k")==0 ? 256 :
+                (strcmp(option,"--no-repeat-ngram")==0 ? 16 :
+                 (strcmp(option,"--sampling-seed")==0 ? LONG_MAX : 512));
+            long v=parse_long_value(option,argv[i],minv,maxv);
+            if(strcmp(option,"--top-k")==0)o->top_k=(int)v;
+            else if(strcmp(option,"--max-new-tokens")==0)o->max_new_tokens=(int)v;
+            else if(strcmp(option,"--min-new-tokens")==0)o->min_new_tokens=(int)v;
+            else if(strcmp(option,"--no-repeat-ngram")==0)o->no_repeat_ngram=(int)v;
+            else o->sampling_seed=(uint64_t)v;
         }
         else if (strcmp(argv[i], "--temperature") == 0 ||
             strcmp(argv[i], "--top-p") == 0 ||
-            strcmp(argv[i], "--repetition-penalty") == 0) {
+            strcmp(argv[i], "--repetition-penalty") == 0 ||
+            strcmp(argv[i], "--min-p") == 0 ||
+            strcmp(argv[i], "--frequency-penalty") == 0 ||
+            strcmp(argv[i], "--presence-penalty") == 0) {
             const char* option=argv[i];if(++i>=argc)die("%s requires a value",option);
             if(strcmp(option,"--temperature")==0)o->temperature=parse_float_value(option,argv[i],0.05f,5.0f);
             else if(strcmp(option,"--top-p")==0)o->top_p=parse_float_value(option,argv[i],0.01f,1.0f);
-            else o->repetition_penalty=parse_float_value(option,argv[i],1.0f,3.0f);
+            else if(strcmp(option,"--repetition-penalty")==0)o->repetition_penalty=parse_float_value(option,argv[i],1.0f,3.0f);
+            else if(strcmp(option,"--min-p")==0)o->min_p=parse_float_value(option,argv[i],0.0f,1.0f);
+            else if(strcmp(option,"--frequency-penalty")==0)o->frequency_penalty=parse_float_value(option,argv[i],-2.0f,2.0f);
+            else o->presence_penalty=parse_float_value(option,argv[i],-2.0f,2.0f);
         }
         else if (strcmp(argv[i], "--lr-schedule") == 0) {
             if(++i>=argc)die("--lr-schedule requires cosine or constant");
@@ -324,13 +346,14 @@ static int parse_arguments(int argc, char** argv, bool* resume,
                 o->epsilon_explicit = true;
             }
         }
-        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--pause-file") == 0 || strcmp(argv[i], "--source-weights") == 0 || strcmp(argv[i], "--save-file") == 0) {
+        else if (strcmp(argv[i], "--metrics") == 0 || strcmp(argv[i], "--stop-file") == 0 || strcmp(argv[i], "--pause-file") == 0 || strcmp(argv[i], "--source-weights") == 0 || strcmp(argv[i], "--stop-sequence") == 0 || strcmp(argv[i], "--save-file") == 0) {
             const char* option=argv[i];
-            if (++i >= argc || !argv[i][0]) die("%s requires a path",option);
+            if (++i >= argc || !argv[i][0]) die("%s requires a value",option);
             if (strcmp(option,"--metrics")==0) o->metrics_path=argv[i];
             else if(strcmp(option,"--stop-file")==0)o->stop_file=argv[i];
             else if(strcmp(option,"--pause-file")==0)o->pause_file=argv[i];
             else if(strcmp(option,"--source-weights")==0)o->source_weights=argv[i];
+            else if(strcmp(option,"--stop-sequence")==0)o->stop_sequence=argv[i];
             else o->save_file=argv[i];
         }
         else if (argv[i][0] == '-') {
@@ -787,8 +810,15 @@ int main(int argc, char** argv) {
             .temperature = options.temperature,
             .top_p = options.top_p,
             .repetition_penalty = options.repetition_penalty,
+            .min_p = options.min_p,
+            .frequency_penalty = options.frequency_penalty,
+            .presence_penalty = options.presence_penalty,
             .top_k = options.top_k,
-            .max_new_tokens = options.max_new_tokens
+            .max_new_tokens = options.max_new_tokens,
+            .min_new_tokens = options.min_new_tokens,
+            .no_repeat_ngram_size = options.no_repeat_ngram,
+            .sampling_seed = options.sampling_seed,
+            .stop_sequence = options.stop_sequence
         };
         int chat_result=chat_run_console(&model,&tok,&chat_cache,&chat_options);
         mapped_buffer_destroy(&token_ids_mapping);
