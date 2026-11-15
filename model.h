@@ -37,6 +37,7 @@ typedef struct {
 
     // Total bytes occupied by weights
     size_t weight_bytes;
+    ArenaBudget* memory_budget; // shared runtime budget for checkpoint staging
 } Model;
 
 // Allocate all weight tensors from the arena and initialise them.
