@@ -48,6 +48,7 @@ typedef struct {
     HWND* arena_budget;
     HWND* cpu_warning;
     HWND* ram_warning;
+    HWND* source_weights;
 } GuiPageControls;
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
