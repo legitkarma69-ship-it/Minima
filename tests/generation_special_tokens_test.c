@@ -49,6 +49,53 @@ int main(void) {
         CHECK(output[i] < tokenizer.vocab_size);
     }
 
+    /* A one-token stop sequence is removed from the returned output. */
+    const uint16_t stop_id = output[prompt_len];
+    GenerationOptions stop_options = {
+        .temperature = 1.0f, .top_p = 1.0f, .repetition_penalty = 1.0f,
+        .min_p = 0.0f, .frequency_penalty = 0.0f, .presence_penalty = 0.0f,
+        .top_k = 256, .max_new_tokens = 20, .min_new_tokens = 0,
+        .no_repeat_ngram_size = 0, .stop_sequence_ids = &stop_id,
+        .stop_sequence_len = 1
+    };
+    rng_seed(&rng, 5678);
+    const int stopped_count = generate_with_options(&model, &tokenizer, &cache,
+        prompt_ids, prompt_len, output, 32, &stop_options, &rng);
+    CHECK(stopped_count == prompt_len);
+
+    /* Min-p=1 keeps only the highest-probability token for a fixed model. */
+    GenerationOptions minp_options = stop_options;
+    minp_options.stop_sequence_ids = NULL;
+    minp_options.stop_sequence_len = 0;
+    minp_options.min_p = 1.0f;
+    minp_options.max_new_tokens = 1;
+    rng_seed(&rng, 111);
+    const int minp_count_a = generate_with_options(&model, &tokenizer, &cache,
+        prompt_ids, prompt_len, output, 32, &minp_options, &rng);
+    CHECK(minp_count_a == prompt_len + 1);
+    const uint16_t minp_token = output[prompt_len];
+    rng_seed(&rng, 999);
+    const int minp_count_b = generate_with_options(&model, &tokenizer, &cache,
+        prompt_ids, prompt_len, output, 32, &minp_options, &rng);
+    CHECK(minp_count_b == prompt_len + 1);
+    CHECK(output[prompt_len] == minp_token);
+
+    /* No-repeat unigram filtering must avoid every token in the prompt. */
+    GenerationOptions ngram_options = minp_options;
+    ngram_options.min_p = 0.0f;
+    ngram_options.no_repeat_ngram_size = 1;
+    ngram_options.max_new_tokens = 8;
+    rng_seed(&rng, 2468);
+    const int ngram_count = generate_with_options(&model, &tokenizer, &cache,
+        prompt_ids, prompt_len, output, 32, &ngram_options, &rng);
+    CHECK(ngram_count == prompt_len + 8);
+    for (int i = prompt_len; i < ngram_count; ++i) {
+        for (int j = 0; j < prompt_len; ++j)
+            CHECK(output[i] != prompt_ids[j]);
+        for (int j = prompt_len; j < i; ++j)
+            CHECK(output[i] != output[j]);
+    }
+
     arena_free(&cache_arena);
     arena_free(&tokenizer_arena);
     arena_free(&model_arena);
