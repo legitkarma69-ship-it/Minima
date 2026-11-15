@@ -23,11 +23,12 @@ static const wchar_t* const g_edit_defaults[31] = {
     L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0",
     L"0.01", L"0", L"0", L"0", L"0", L"0", L"0"
 };
-static const wchar_t* const g_combo_keys[4] = {
-    L"lr_schedule", L"tokenizer_sampling", L"corpus_mix", L"optimizer"
+static const wchar_t* const g_combo_keys[5] = {
+    L"lr_schedule", L"tokenizer_sampling", L"corpus_mix", L"optimizer",
+    L"resource_profile"
 };
-static const wchar_t* const g_combo_defaults[4] = {
-    L"cosine", L"spread", L"sqrt", L"adamw"
+static const wchar_t* const g_combo_defaults[5] = {
+    L"cosine", L"spread", L"sqrt", L"adamw", L"Custom"
 };
 
 static void load_edit_setting(const wchar_t* path, const wchar_t* key,
@@ -95,7 +96,7 @@ void minima_settings_load(const MinimaSettingsContext* context) {
         load_edit_setting(context->path, g_edit_keys[i],
             context->edit_controls[i], g_edit_defaults[i]);
     migrate_long_run_intervals(context);
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 5; ++i)
         load_combo_setting(context->path, g_combo_keys[i],
             context->combo_controls[i], g_combo_defaults[i]);
 
