@@ -89,7 +89,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
     if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(430),TRUE);
     if(g_group_generation)MoveWindow(g_group_generation,pad,work_top,inner,scale_px(160),TRUE);
-    if(g_status_bar)MoveWindow(g_status_bar,pad,client_height-bottom-scale_px(22),inner,scale_px(18),TRUE);
+    if(g_status_bar)MoveWindow(g_status_bar,pad,height-bottom_h-scale_px(22),inner,scale_px(18),TRUE);
     const int gy = work_top + scale_px(34);
     MoveWindow(GetDlgItem(hwnd,IDC_GEN_TEMP_LABEL),pad+scale_px(8),gy+scale_px(3),scale_px(45),scale_px(18),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_GEN_TEMP),pad+scale_px(55),gy,scale_px(55),scale_px(23),TRUE);
