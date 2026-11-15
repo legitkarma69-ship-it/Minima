@@ -32,6 +32,31 @@ int main(void) {
     if (!a || budget.committed == 0u || budget.failed != 0u) return 9;
     arena_free(&first);
 
-    puts("Shared arena memory budget: PASS");
+    /* Tracked heap allocations share the same ceiling as arena pages. */
+    arena_budget_init(&budget, 8192u);
+    if (!arena_init_with_budget(&first, 65536u, &budget)) return 10;
+    a = arena_alloc(&first, 1u);
+    if (!a || budget.committed == 0u) return 11;
+    void* external = arena_budget_calloc(&budget, 1024u, sizeof(uint32_t));
+    if (!external || budget.external_committed != 4096u ||
+        arena_budget_total_committed(&budget) != 8192u) return 12;
+    if (arena_budget_malloc(&budget, 1u) != NULL || budget.failed != 1u)
+        return 13;
+    arena_budget_free(external);
+    if (budget.external_committed != 0u ||
+        arena_budget_total_committed(&budget) != budget.committed)
+        return 14;
+    external = arena_budget_malloc(&budget, 4096u);
+    if (!external || budget.external_committed != 4096u ||
+        budget.peak != 8192u) return 15;
+    arena_budget_free(external);
+    arena_free(&first);
+    if (arena_budget_total_committed(&budget) != 0u) return 16;
+
+    /* Allocation-size overflow is rejected without corrupting the budget. */
+    arena_budget_init(&budget, 0u);
+    if (arena_budget_calloc(&budget, SIZE_MAX, 2u) != NULL) return 17;
+
+    puts("Shared arena + tracked heap memory budget: PASS");
     return 0;
 }
