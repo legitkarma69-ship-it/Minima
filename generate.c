@@ -513,48 +513,108 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
 // Public generate
 // ------------------------------------------------------------------
 
+int generate_with_options(Model* model, Tokenizer* tok, KVCache* cache,
+    const uint16_t* prompt_ids, int prompt_len,
+    uint16_t* out_ids, int out_cap,
+    const GenerationOptions* options, Rng* rng) {
+    if (!model || !model_validate(model) || !tok || !cache || !prompt_ids ||
+        !out_ids || !options || !rng || prompt_len <= 0 || out_cap <= 0 ||
+        options->max_new_tokens < 0 ||
+        !isfinite(options->temperature) || options->temperature <= 0.0f ||
+        !isfinite(options->top_p) || options->top_p <= 0.0f || options->top_p > 1.0f ||
+        !isfinite(options->repetition_penalty) || options->repetition_penalty < 1.0f ||
+        !isfinite(options->min_p) || options->min_p < 0.0f || options->min_p > 1.0f ||
+        !isfinite(options->frequency_penalty) || options->frequency_penalty < -2.0f ||
+        options->frequency_penalty > 2.0f ||
+        !isfinite(options->presence_penalty) || options->presence_penalty < -2.0f ||
+        options->presence_penalty > 2.0f ||
+        options->no_repeat_ngram_size < 0 || options->no_repeat_ngram_size > 16 ||
+        options->min_new_tokens < 0 || options->min_new_tokens > 512 ||
+        options->stop_sequence_len < 0 || options->stop_sequence_len > 1024 ||
+        (options->stop_sequence_len > 0 && !options->stop_sequence_ids) ||
+        model->dim <= 0 || model->dim > 512 || model->ffn_dim <= 0 ||
+        model->ffn_dim > 1024 || model->vocab_size <= 0 ||
+        model->vocab_size > TOK_MAX_VOCAB || model->n_heads <= 0 ||
+        model->head_dim <= 0 || model->n_heads * model->head_dim != model->dim ||
+        cache->n_layers != model->n_layers || cache->dim != model->dim ||
+        cache->n_heads != model->n_heads || cache->n_kv_heads != model->n_kv_heads ||
+        cache->head_dim != model->head_dim || cache->kv_dim != model->kv_dim ||
+        !cache->k_cache || !cache->v_cache || cache->max_seq <= 0 ||
+        cache->max_seq > 512 || tok->vocab_size != model->vocab_size)
+        return 0;
+
+    if (prompt_len > out_cap || prompt_len > cache->max_seq) return 0;
+    int n_new = options->max_new_tokens;
+    if (n_new > out_cap - prompt_len) n_new = out_cap - prompt_len;
+    if (n_new > cache->max_seq - prompt_len) n_new = cache->max_seq - prompt_len;
+    if (n_new <= 0) {
+        memcpy(out_ids, prompt_ids, (size_t)prompt_len * sizeof(uint16_t));
+        return prompt_len;
+    }
+    int top_k = options->top_k;
+    if (top_k < 1) top_k = 1;
+    if (top_k > model->vocab_size) top_k = model->vocab_size;
+    if (top_k > 256) top_k = 256;
+    for (int i = 0; i < prompt_len; ++i)
+        if (prompt_ids[i] >= model->vocab_size || prompt_ids[i] >= tok->vocab_size)
+            return 0;
+    for (int i = 0; i < options->stop_sequence_len; ++i)
+        if (options->stop_sequence_ids[i] >= model->vocab_size ||
+            options->stop_sequence_ids[i] >= tok->vocab_size)
+            return 0;
+
+    kvcache_reset(cache);
+    float x[512], logits[TOK_MAX_VOCAB];
+    for (int i = 0; i < prompt_len; ++i) {
+        out_ids[i] = prompt_ids[i];
+        forward_one(model, cache, prompt_ids[i], x, logits);
+    }
+    for (int i = 0; i < n_new; ++i) {
+        for (int special = 0; special < TOK_SPECIAL_COUNT; ++special)
+            logits[special] = -INFINITY;
+        const int next = sample_top_k_top_p(logits, model->vocab_size,
+            options->temperature, top_k, options->top_p,
+            options->repetition_penalty, options->min_p,
+            options->frequency_penalty, options->presence_penalty,
+            options->no_repeat_ngram_size, out_ids, prompt_len + i, rng);
+        if (next < 0 || next >= tok->vocab_size) return 0;
+        out_ids[prompt_len + i] = (uint16_t)next;
+        const int generated_count = i + 1;
+        if (options->stop_sequence_len > 0 &&
+            generated_count >= options->min_new_tokens &&
+            generated_count >= options->stop_sequence_len) {
+            const int stop_start = prompt_len + generated_count -
+                options->stop_sequence_len;
+            if (memcmp(out_ids + stop_start, options->stop_sequence_ids,
+                    (size_t)options->stop_sequence_len * sizeof(uint16_t)) == 0)
+                return prompt_len + generated_count - options->stop_sequence_len;
+        }
+        forward_one(model, cache, (uint16_t)next, x, logits);
+    }
+    return prompt_len + n_new;
+}
+
 int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
     const uint16_t* prompt_ids, int prompt_len,
     uint16_t* out_ids, int out_cap, int n_new,
     float temperature, int top_k, float top_p,
     float repetition_penalty, Rng* rng) {
-
-    if (!model || !model_validate(model) || !tok || !cache || !prompt_ids || !out_ids || !rng ||
-        prompt_len<=0 || out_cap<=0 || n_new<0 ||
-        !isfinite(temperature) || temperature<=0.0f ||
-        !isfinite(top_p) || top_p<=0.0f || top_p>1.0f ||
-        !isfinite(repetition_penalty) || repetition_penalty<1.0f ||
-        model->dim<=0 || model->dim>512 || model->ffn_dim<=0 || model->ffn_dim>1024 ||
-        model->vocab_size<=0 || model->vocab_size>TOK_MAX_VOCAB ||
-        model->n_heads<=0 || model->head_dim<=0 ||
-        model->n_heads*model->head_dim!=model->dim ||
-        cache->n_layers!=model->n_layers || cache->dim!=model->dim ||
-        cache->n_heads!=model->n_heads ||
-        cache->n_kv_heads!=model->n_kv_heads ||
-        cache->head_dim!=model->head_dim || cache->kv_dim!=model->kv_dim ||
-        !cache->k_cache || !cache->v_cache || cache->max_seq<=0 ||
-        cache->max_seq>512 || tok->vocab_size!=model->vocab_size) return 0;
-
-    if(prompt_len>out_cap || prompt_len>cache->max_seq)return 0;
-    if(n_new>out_cap-prompt_len)n_new=out_cap-prompt_len;
-    if(n_new>cache->max_seq-prompt_len)n_new=cache->max_seq-prompt_len;
-    if(n_new<=0){memcpy(out_ids,prompt_ids,(size_t)prompt_len*sizeof(uint16_t));return prompt_len;}
-    if(top_k<1)top_k=1;if(top_k>model->vocab_size)top_k=model->vocab_size;if(top_k>256)top_k=256;
-    for(int i=0;i<prompt_len;i++)if(prompt_ids[i]>=model->vocab_size||prompt_ids[i]>=tok->vocab_size)return 0;
-
-    kvcache_reset(cache);
-    float x[512],logits[TOK_MAX_VOCAB];
-    for(int i=0;i<prompt_len;i++){out_ids[i]=prompt_ids[i];forward_one(model,cache,prompt_ids[i],x,logits);}
-    for(int i=0;i<n_new;i++){
-        for (int special = 0; special < TOK_SPECIAL_COUNT; special++)
-            logits[special] = -INFINITY;
-        int next=sample_top_k_top_p(logits,model->vocab_size,temperature,top_k,
-            top_p,repetition_penalty,out_ids,prompt_len+i,rng);
-        if(next<0||next>=tok->vocab_size)return 0;
-        out_ids[prompt_len+i]=(uint16_t)next;
-        forward_one(model,cache,(uint16_t)next,x,logits);
-    }
-    return prompt_len+n_new;
+    GenerationOptions options = {
+        .temperature = temperature,
+        .top_p = top_p,
+        .repetition_penalty = repetition_penalty,
+        .min_p = 0.0f,
+        .frequency_penalty = 0.0f,
+        .presence_penalty = 0.0f,
+        .top_k = top_k,
+        .max_new_tokens = n_new,
+        .min_new_tokens = 0,
+        .no_repeat_ngram_size = 0,
+        .stop_sequence_ids = NULL,
+        .stop_sequence_len = 0
+    };
+    return generate_with_options(model, tok, cache, prompt_ids, prompt_len,
+        out_ids, out_cap, &options, rng);
 }
 
 int generate(Model* model, Tokenizer* tok, KVCache* cache,
