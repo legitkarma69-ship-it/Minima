@@ -42,7 +42,10 @@ def main() -> int:
         "--checkpoint-interval", "1", "--metrics", str(metrics_file),
         "--pause-file", str(pause_file), "--stop-file", str(stop_file),
         "--source-weights", "1.0,2.0", "--beta1", "0.91", "--beta2", "0.96",
-        "--epsilon", "1e-7", str(corpus), str(second_corpus),
+        "--epsilon", "1e-7", "--min-p", "0.1", "--frequency-penalty", "0.2",
+        "--presence-penalty", "-0.1", "--no-repeat-ngram", "2",
+        "--min-new-tokens", "1", "--sampling-seed", "42",
+        "--stop-sequence", "STOP", str(corpus), str(second_corpus),
     ]
 
     process = subprocess.Popen(
