@@ -98,8 +98,9 @@ The first goal is a reliable performance baseline on this laptop. Model width, l
 Before changing model architecture or launching a large fine-tuning run, establish a small, held-out reasoning evaluation set. This is the first priority because current training loss and fluent-looking generation do not measure whether Minima can solve logic questions.
 
 - [x] Create an initial text-only evaluation set covering deduction, conditionals, constraints/order, classification, causal reasoning, consistency, simple counting, ambiguity, and insufficient-information cases. See `data/evaluation/logic.jsonl` (24 cases).
-- [ ] Keep evaluation prompts and reference answers out of all training/tokenizer corpora. They must remain held out.
-- [ ] Record a baseline from the current checkpoint using fixed prompts, deterministic decoding, and saved outputs. The evaluation set exists, but no baseline has been recorded yet.
+- [x] Keep evaluation prompts and reference answers out of all training/tokenizer corpora. They remain held out.
+- [x] Add a deterministic runner that sends only prompts to Minima and records model/tokenizer fingerprints. See `tools/evaluate_logic.py` and `data/evaluation/RUNNING.md`.
+- [ ] Record and save the first baseline from the current checkpoint. The runner is ready, but no model outputs have been collected yet.
 - [ ] Score conclusions and explanations separately with a simple, documented rubric. Do not rely only on exact string matching.
 - [ ] Add a separate curated reasoning-training dataset only after the baseline exists. Keep its format and provenance documented.
 - [ ] Compare every training change against the same held-out set and retain regressions as well as improvements.
