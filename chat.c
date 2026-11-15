@@ -264,14 +264,11 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
             }
         }
 
-        static uint64_t generation_turn = 0;
         Rng rng;
         const uint64_t generation_seed = active_options.sampling_seed
-            ? active_options.sampling_seed + generation_turn
+            ? active_options.sampling_seed
             : (((uint64_t)clock() << 17) ^
-                (uint64_t)active_options.seed ^ (uint64_t)prompt_len ^
-                generation_turn);
-        ++generation_turn;
+                (uint64_t)active_options.seed ^ (uint64_t)prompt_len);
         rng_seed(&rng, generation_seed);
         int max_new = active_options.max_new_tokens;
         if (max_new > model->max_seq - prompt_len)
