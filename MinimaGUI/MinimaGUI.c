@@ -1064,6 +1064,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     g_process = pi.hProcess;
     g_last_cpu_pid = 0; g_last_cpu_tick = g_last_cpu_100ns = 0;
     reset_resource_peaks();
+    g_last_tokens_per_second = 0.0;
     g_tokenizer_rebuild_mode=tokenizer_only;
     g_fresh_used_saved_tokenizer=use_prebuilt_tokenizer;
     CloseHandle(pi.hThread);
