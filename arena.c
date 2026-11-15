@@ -2,13 +2,14 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 typedef union {
     struct { uint64_t magic; ArenaBudget* budget; size_t size; } fields;
-    max_align_t alignment;
+    uint64_t alignment[4]; /* 32-byte header preserves malloc's x64 alignment. */
 } BudgetAllocationHeader;
 #define BUDGET_ALLOCATION_MAGIC UINT64_C(0x4D494E494D414D45)
 
