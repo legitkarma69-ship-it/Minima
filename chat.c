@@ -221,17 +221,51 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
             }
         }
 
+        static uint64_t generation_turn = 0;
         Rng rng;
-        rng_seed(&rng, ((uint64_t)clock() << 17) ^
-            (uint64_t)active_options.seed ^ (uint64_t)prompt_len);
+        const uint64_t generation_seed = active_options.sampling_seed
+            ? active_options.sampling_seed + generation_turn
+            : (((uint64_t)clock() << 17) ^
+                (uint64_t)active_options.seed ^ (uint64_t)prompt_len ^
+                generation_turn);
+        ++generation_turn;
+        rng_seed(&rng, generation_seed);
         int max_new = active_options.max_new_tokens;
         if (max_new > model->max_seq - prompt_len)
             max_new = model->max_seq - prompt_len;
 
-        int total = generate_ex(model, tok, cache, prompt, prompt_len,
-            output, 512, max_new, active_options.temperature,
-            active_options.top_k, active_options.top_p,
-            active_options.repetition_penalty, &rng);
+        uint16_t stop_ids[1024];
+        int stop_ids_len = 0;
+        if (active_options.stop_sequence && active_options.stop_sequence[0]) {
+            const size_t stop_bytes = strlen(active_options.stop_sequence);
+            if (stop_bytes <= sizeof(stop_ids) / sizeof(stop_ids[0])) {
+                stop_ids_len = tokenizer_encode(tok,
+                    (const uint8_t*)active_options.stop_sequence, stop_bytes,
+                    stop_ids, (int)(sizeof(stop_ids) / sizeof(stop_ids[0])));
+                if (stop_ids_len < 0) {
+                    puts("Stop sequence could not be encoded; ignoring it.");
+                    stop_ids_len = 0;
+                }
+            } else {
+                puts("Stop sequence is too long; ignoring it.");
+            }
+        }
+        GenerationOptions generation_options = {
+            .temperature = active_options.temperature,
+            .top_p = active_options.top_p,
+            .repetition_penalty = active_options.repetition_penalty,
+            .min_p = active_options.min_p,
+            .frequency_penalty = active_options.frequency_penalty,
+            .presence_penalty = active_options.presence_penalty,
+            .top_k = active_options.top_k,
+            .max_new_tokens = max_new,
+            .min_new_tokens = active_options.min_new_tokens,
+            .no_repeat_ngram_size = active_options.no_repeat_ngram_size,
+            .stop_sequence_ids = stop_ids_len > 0 ? stop_ids : NULL,
+            .stop_sequence_len = stop_ids_len
+        };
+        int total = generate_with_options(model, tok, cache, prompt, prompt_len,
+            output, 512, &generation_options, &rng);
 
         if (total <= prompt_len) {
             puts(is_test ? "TEST: [generation failed]" :
