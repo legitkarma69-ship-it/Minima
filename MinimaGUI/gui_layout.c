@@ -83,8 +83,8 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_resource_status)MoveWindow(g_resource_status,right_x+scale_px(8),work_top+scale_px(244),right_w-scale_px(16),scale_px(20),TRUE);
     if(g_cpu_limit)MoveWindow(g_cpu_limit,right_x+scale_px(86),work_top+scale_px(270),scale_px(48),scale_px(23),TRUE);
     if(g_ram_limit)MoveWindow(g_ram_limit,right_x+scale_px(242),work_top+scale_px(270),scale_px(48),scale_px(23),TRUE);
-    MoveWindow(GetDlgItem(hwnd,1024),right_x+scale_px(8),work_top+scale_px(273),scale_px(76),scale_px(18),TRUE);
-    MoveWindow(GetDlgItem(hwnd,1025),right_x+scale_px(150),work_top+scale_px(273),scale_px(88),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_CPU_LIMIT_LABEL),right_x+scale_px(8),work_top+scale_px(273),scale_px(76),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_RAM_LIMIT_LABEL),right_x+scale_px(150),work_top+scale_px(273),scale_px(88),scale_px(18),TRUE);
 
     const float xs=(float)(left_w-scale_px(20))/(float)scale_px(670);
     for(int i=0;i<g_initial_rect_count;i++){
