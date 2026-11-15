@@ -104,6 +104,17 @@ def run(args: argparse.Namespace) -> int:
         "--temperature", "1.0", "--top-k", "1", "--top-p", "1.0",
         "--repetition-penalty", "1.0", "--max-new-tokens", str(args.max_new_tokens),
     ]
+    model_options = (
+        ("--vocab-size", args.vocab_size),
+        ("--dim", args.dim),
+        ("--layers", args.layers),
+        ("--heads", args.heads),
+        ("--ffn-dim", args.ffn_dim),
+        ("--max-seq", args.max_seq),
+    )
+    for option, value in model_options:
+        if value is not None:
+            command.extend((option, str(value)))
     print(f"Loading checkpoint once for {len(cases)} isolated test prompts...")
     completed = subprocess.run(
         command, cwd=workdir,
@@ -173,11 +184,31 @@ def parse_args() -> argparse.Namespace:
                         help="Output JSONL path (default: logic_results.jsonl)")
     parser.add_argument("--max-new-tokens", type=int, default=64,
                         help="Maximum generated tokens per case (default: 64)")
+    parser.add_argument("--vocab-size", type=int, default=None,
+                        help="Checkpoint vocabulary size, if it differs from the engine default")
+    parser.add_argument("--dim", type=int, default=None,
+                        help="Checkpoint model dimension, if non-default")
+    parser.add_argument("--layers", type=int, default=None,
+                        help="Checkpoint transformer layer count, if non-default")
+    parser.add_argument("--heads", type=int, default=None,
+                        help="Checkpoint attention head count, if non-default")
+    parser.add_argument("--ffn-dim", type=int, default=None,
+                        help="Checkpoint feed-forward dimension, if non-default")
+    parser.add_argument("--max-seq", type=int, default=None,
+                        help="Checkpoint context length, if non-default")
     parser.add_argument("--timeout", type=int, default=900,
                         help="Process timeout in seconds (default: 900)")
     args = parser.parse_args()
     if not 1 <= args.max_new_tokens <= 512:
         parser.error("--max-new-tokens must be between 1 and 512")
+    bounds = {
+        "vocab_size": (260, 32768), "dim": (1, 512), "layers": (1, 16),
+        "heads": (1, 32), "ffn_dim": (1, 1024), "max_seq": (32, 512),
+    }
+    for name, (minimum, maximum) in bounds.items():
+        value = getattr(args, name)
+        if value is not None and not minimum <= value <= maximum:
+            parser.error(f"--{name.replace('_', '-')} must be between {minimum} and {maximum}")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
     return args
