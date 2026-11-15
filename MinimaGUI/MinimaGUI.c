@@ -734,7 +734,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
             !read_float_control(g_presence_penalty, -2.0f, 2.0f, &presence) ||
             !read_bounded_integer(g_top_k, 256, &top_k) || top_k < 1 ||
             !read_bounded_integer(g_max_tokens, 512, &max_tokens) || max_tokens < 1 ||
-            !read_bounded_integer(g_min_new_tokens, 512, &min_tokens) ||
+            !read_bounded_integer(g_min_new_tokens, 512, &min_tokens) || min_tokens > max_tokens ||
             !read_bounded_integer(g_no_repeat_ngram, 16, &ngram) ||
             !read_bounded_integer(g_sampling_seed, 2147483647u, &sampling_seed)) {
             MessageBoxW(g_window, L"Check Generation settings: temperature 0.05-5, top-p/min-p 0-1 (top-p minimum 0.01), repetition 1-3, penalties -2 to 2, top-k 1-256, max tokens 1-512, min tokens 0-512, n-gram 0-16, seed 0-2147483647.", L"Generation settings", MB_ICONWARNING);
