@@ -129,7 +129,7 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
 
     puts("CHAT_READY");
     puts("CHAT_FORMAT: Human:/Assistant:");
-    puts("ProjectMinima chat. Type /quit to exit.");
+    puts("ProjectMinima chat. Type /clear to reset history or /quit to exit.");
 
     for (;;) {
         if (!fgets(line, sizeof(line), stdin)) break;
