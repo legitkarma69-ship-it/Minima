@@ -47,6 +47,26 @@ int generate(Model* model, Tokenizer* tok, KVCache* cache,
     float temperature, int top_k,
     Rng* rng);
 
+typedef struct {
+    float temperature;
+    float top_p;
+    float repetition_penalty;
+    float min_p;
+    float frequency_penalty;
+    float presence_penalty;
+    int top_k;
+    int max_new_tokens;
+    int min_new_tokens;
+    int no_repeat_ngram_size;
+    const uint16_t* stop_sequence_ids;
+    int stop_sequence_len;
+} GenerationOptions;
+
+int generate_with_options(Model* model, Tokenizer* tok, KVCache* cache,
+    const uint16_t* prompt_ids, int prompt_len,
+    uint16_t* out_ids, int out_cap,
+    const GenerationOptions* options, Rng* rng);
+
 int generate_ex(Model* model, Tokenizer* tok, KVCache* cache,
     const uint16_t* prompt_ids, int prompt_len,
     uint16_t* out_ids, int out_cap, int n_new,
