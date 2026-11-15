@@ -35,7 +35,7 @@ Changing vocabulary or model architecture makes an existing checkpoint incompati
 
 ## Results and monitoring
 
-The Monitor panel displays live CPU utilization and committed memory for the entire Windows process group (including the evaluation runner's Minima child), plus the working set of the directly launched process. CPU and RAM caps are applied by Windows Job Objects. The Windows memory cap is a hard job-wide committed-memory limit, not a physical working-set cap. The engine arena budget is a separate allocation-level ceiling shared by permanent, temporary, and corpus arenas; it rejects arena allocations before they are committed and prints a diagnostic. It does not currently account for all ordinary heap allocations or memory-mapped token IDs. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
+The Monitor panel displays live process-group CPU utilization, working-set RAM, and private committed memory, along with per-run CPU and memory peaks. Configure CPU and RAM warning thresholds in the same panel; each threshold logs one warning per run when reached. CPU and RAM caps are applied by Windows Job Objects. The Windows memory cap is a hard job-wide committed-memory limit, not a physical working-set cap. The engine arena budget is a separate allocation-level ceiling shared by permanent, temporary, and corpus arenas; it rejects arena allocations before they are committed and prints a diagnostic. It does not currently account for all ordinary heap allocations or memory-mapped token IDs. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
 
 The GUI displays engine output, including:
 
@@ -81,7 +81,7 @@ Chat requires `minima.model` and `minima.bpe`. Set the model configuration contr
 - Automatic checkpoints are written at the configured interval and at the end of a training segment.
 - Long-run progress, validation, and checkpoint intervals default to 1,000 steps. Auto settings scale them with the planned run length, and the Advanced page keeps each interval editable.
 - `minima_metrics.csv`, `minima_chat.txt`, and signal files are stored beside the executables.
-- Resource limits are persisted in `minima_gui.ini`. The CPU cap and Windows committed-memory cap are applied to each newly launched engine/evaluation process group; the arena budget is passed to the engine and applies to its permanent, temporary, and corpus arenas. Changing the fields does not alter an already-running job.
+- Resource limits are persisted in `minima_gui.ini`. The CPU cap and Windows committed-memory cap are applied to each newly launched engine/evaluation process group; the arena budget is passed to the engine and applies to its permanent, temporary, and corpus arenas. CPU and RAM warning thresholds are also persisted and trigger at most one log warning per run. Changing the fields does not alter an already-running job.
 
 A Windows x64 GitHub Actions workflow builds both executables and publishes them as a downloadable artifact for each successful build.
 
