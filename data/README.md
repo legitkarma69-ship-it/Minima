@@ -31,7 +31,7 @@ Formatting rules for `chatlogs.txt`:
 - Do not mix book chapters, metadata, source notes, or preference-ranking records into this file.
 - Do not add a `System:` role yet. The current conversational format supports Human and Assistant turns only.
 
-The interactive chat engine uses the same serialized structure at inference time: it supplies `Human: <message>\nAssistant:` and carries the generated assistant response into the next turn. Generation Lab intentionally remains a raw text-continuation test and does not add conversational role tags.
+The interactive chat engine uses the same serialized structure at inference time: it supplies `Human: <message>\nAssistant:` and carries the generated assistant response into the next turn. Use `/clear` in chat to discard the current conversation history and begin a fresh context. Generation Lab intentionally remains a raw text-continuation test and does not add conversational role tags.
 
 UTF-8 files with or without a byte-order mark (BOM) are supported. LF and CRLF line endings are both accepted.
 
