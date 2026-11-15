@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <math.h>
 #include <psapi.h>
+#include <tlhelp32.h>
 #include "gui_protocol.h"
 #include "gui_chat_state.h"
 #include "graph.h"
@@ -223,6 +224,44 @@ static BOOL configure_resource_job(HANDLE job, DWORD cpu_percent, DWORD ram_gb) 
     return TRUE;
 }
 
+static BOOL query_job_memory_usage(HANDLE job, SIZE_T* working_bytes,
+    SIZE_T* private_bytes) {
+    if (!job || !working_bytes || !private_bytes) return FALSE;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return FALSE;
+
+    SIZE_T working_total = 0, private_total = 0;
+    BOOL found = FALSE;
+    PROCESSENTRY32W entry;
+    ZeroMemory(&entry, sizeof(entry));
+    entry.dwSize = sizeof(entry);
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+                FALSE, entry.th32ProcessID);
+            if (!process) continue;
+            BOOL in_job = FALSE;
+            if (IsProcessInJob(process, job, &in_job) && in_job) {
+                PROCESS_MEMORY_COUNTERS_EX counters;
+                ZeroMemory(&counters, sizeof(counters));
+                counters.cb = sizeof(counters);
+                if (GetProcessMemoryInfo(process,
+                    (PROCESS_MEMORY_COUNTERS*)&counters, sizeof(counters))) {
+                    working_total += counters.WorkingSetSize;
+                    private_total += counters.PrivateUsage;
+                    found = TRUE;
+                }
+            }
+            CloseHandle(process);
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    if (!found) return FALSE;
+    *working_bytes = working_total;
+    *private_bytes = private_total;
+    return TRUE;
+}
+
 static void update_resource_monitor(void) {
     if (!g_resource_status) return;
     if (!g_process || !InterlockedCompareExchange(&g_running, 0, 0)) {
@@ -275,22 +314,22 @@ static void update_resource_monitor(void) {
         g_last_cpu_tick = now;
         g_last_cpu_100ns = total;
     }
-    if (GetProcessMemoryInfo(g_process, (PROCESS_MEMORY_COUNTERS*)&memory,
-        sizeof(memory))) {
+    SIZE_T working_bytes = 0, private_bytes = 0;
+    BOOL have_memory = active_job &&
+        query_job_memory_usage(active_job, &working_bytes, &private_bytes);
+    if (!have_memory && GetProcessMemoryInfo(g_process,
+        (PROCESS_MEMORY_COUNTERS*)&memory, sizeof(memory))) {
+        working_bytes = memory.WorkingSetSize;
+        private_bytes = memory.PrivateUsage;
+        have_memory = TRUE;
+    }
+    if (have_memory) {
         wchar_t status[256];
-        double working = (double)memory.WorkingSetSize / (1024.0 * 1024.0 * 1024.0);
-        SIZE_T committed_bytes = memory.PrivateUsage;
-        if (active_job) {
-            JOBOBJECT_MEMORY_USAGE_INFORMATION job_memory;
-            ZeroMemory(&job_memory, sizeof(job_memory));
-            if (QueryInformationJobObject(active_job, JobObjectMemoryUsageInformation,
-                &job_memory, sizeof(job_memory), NULL))
-                committed_bytes = (SIZE_T)job_memory.JobMemory;
-        }
-        double committed_gb = (double)committed_bytes / (1024.0 * 1024.0 * 1024.0);
+        double working = (double)working_bytes / (1024.0 * 1024.0 * 1024.0);
+        double private_gb = (double)private_bytes / (1024.0 * 1024.0 * 1024.0);
         _snwprintf_s(status, _countof(status), _TRUNCATE,
-            L"CPU %.0f%% | WS %.2f GB | Job %.2f GB",
-            cpu_percent, working, committed_gb);
+            L"CPU %.0f%% | WS %.2f GB | Priv %.2f GB",
+            cpu_percent, working, private_gb);
         SetWindowTextW(g_resource_status, status);
     } else {
         SetWindowTextW(g_resource_status, L"CPU monitoring | memory unavailable");
