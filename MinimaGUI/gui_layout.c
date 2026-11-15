@@ -71,7 +71,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     const int corpus_h=scale_px(126), work_top=corpus_h+scale_px(44);
     const int bottom_h=scale_px(82), action_h=scale_px(38);
     const int output_top=((g_active_page==3 || g_active_page==4)?scale_px(46):work_top+scale_px(368));
-    const int output_bottom=height-bottom_h-scale_px(8);
+    const int output_bottom=height-bottom_h-scale_px(30);
     const int output_h=output_bottom-output_top;
     const int left_w=(inner-gap)*56/100, right_x=pad+left_w+gap, right_w=inner-left_w-gap;
     const int advanced_y=work_top+scale_px(106);
