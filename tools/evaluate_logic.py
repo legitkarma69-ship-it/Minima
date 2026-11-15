@@ -104,6 +104,8 @@ def run(args: argparse.Namespace) -> int:
         "--temperature", "1.0", "--top-k", "1", "--top-p", "1.0",
         "--repetition-penalty", "1.0", "--max-new-tokens", str(args.max_new_tokens),
     ]
+    if args.memory_budget_gb > 0:
+        command.extend(("--memory-budget-gb", str(args.memory_budget_gb)))
     model_options = (
         ("--vocab-size", args.vocab_size),
         ("--dim", args.dim),
@@ -218,6 +220,8 @@ def parse_args() -> argparse.Namespace:
                         help="Evaluation JSONL file (default: data/evaluation/logic.jsonl)")
     parser.add_argument("--output", type=Path, default=Path("logic_results.jsonl"),
                         help="Output JSONL path (default: logic_results.jsonl)")
+    parser.add_argument("--memory-budget-gb", type=int, default=0,
+                        help="Aggregate committed arena budget in GiB; 0 disables it")
     parser.add_argument("--max-new-tokens", type=int, default=64,
                         help="Maximum generated tokens per case (default: 64)")
     parser.add_argument("--vocab-size", type=int, default=None,
@@ -235,6 +239,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=900,
                         help="Process timeout in seconds (default: 900)")
     args = parser.parse_args()
+    if not 0 <= args.memory_budget_gb <= 64:
+        parser.error("--memory-budget-gb must be between 0 and 64")
     if not 1 <= args.max_new_tokens <= 512:
         parser.error("--max-new-tokens must be between 1 and 512")
     bounds = {
