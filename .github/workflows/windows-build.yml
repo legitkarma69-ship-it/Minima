@@ -49,7 +49,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Verify evaluation prompts stay isolated from reference answers
-        run: python -m unittest tools.test_evaluate_logic
+        run: python tools/test_evaluate_logic.py
 
       - name: Test GUI reader-to-window readiness integration
         shell: pwsh
