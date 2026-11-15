@@ -255,7 +255,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     OPT_ARRAYS(STAGE_OPT_MOMENTS);
 
     FILE* f = fopen(path, "rb");
-    if (!f) { arena_budget_arena_budget_free(staging); return false; }
+    if (!f) { arena_budget_free(staging); return false; }
 
     char magic[8];
     uint32_t version = 0, dims[6] = { 0 };
