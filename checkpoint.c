@@ -244,7 +244,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     if (param_count > SIZE_MAX / staged_arrays / sizeof(float))
         return false;
     const size_t staged_floats = param_count * staged_arrays;
-    float* staging = (float*)malloc(staged_floats * sizeof(float));
+    float* staging = (float*)arena_budget_malloc(model->memory_budget, staged_floats * sizeof(float));
     if (!staging) return false;
 
     Model staged_model = *model;
@@ -255,7 +255,7 @@ bool checkpoint_load(const char* path, Model* model, Optim* opt,
     OPT_ARRAYS(STAGE_OPT_MOMENTS);
 
     FILE* f = fopen(path, "rb");
-    if (!f) { free(staging); return false; }
+    if (!f) { arena_budget_free(staging); return false; }
 
     char magic[8];
     uint32_t version = 0, dims[6] = { 0 };
