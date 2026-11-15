@@ -49,6 +49,21 @@ static bool parse_test_settings(const char* line, ChatOptions* settings) {
     if (end == p || errno == ERANGE || max_tokens < 1 || max_tokens > 512) return false;
     p = skip_setting_space(end);
 
+    /* Keep accepting the original five-value /test protocol used by older
+       GUI builds and external scripts. Unspecified fields retain defaults. */
+    if (!*p) {
+        if (temperature < 0.05f || temperature > 5.0f ||
+            top_p < 0.01f || top_p > 1.0f ||
+            repetition < 1.0f || repetition > 3.0f)
+            return false;
+        settings->temperature = temperature;
+        settings->top_k = (int)top_k;
+        settings->top_p = top_p;
+        settings->repetition_penalty = repetition;
+        settings->max_new_tokens = (int)max_tokens;
+        return true;
+    }
+
     errno = 0;
     const float min_p = strtof(p, &end);
     if (end == p || errno == ERANGE || !isfinite(min_p)) return false;
