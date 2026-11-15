@@ -263,6 +263,8 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
     int gradient_norm_count = 0;
     int clipped_steps = 0;
     float last_validation_loss=NAN;
+    float best_validation_loss=INFINITY;
+    int64_t best_validation_step=initial_step;
 
     if (options.diagnostics_only) {
         printf("Diagnostics-only mode: optimizer updates skipped.\n");
@@ -352,6 +354,17 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
                 if(!isfinite(last_validation_loss))die("validation loss evaluation failed");
             }
             const float validation_loss=last_validation_loss;
+            if (validation_loss < best_validation_loss) {
+                best_validation_loss = validation_loss;
+                best_validation_step = opt->step;
+                if (!options.diagnostics_only) {
+                    if (!checkpoint_save("minima.segment_best.model", model, opt,
+                        rng, tokenizer_hash))
+                        die("best-segment checkpoint save failed");
+                    printf("Best segment checkpoint saved at optimizer step %lld (valid %.4f)\\n",
+                        (long long)best_validation_step, best_validation_loss);
+                }
+            }
 
             const double average_train_loss =
                 train_loss_sum / (double)train_loss_count;
@@ -372,10 +385,11 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
             const int remaining_steps = options.steps - (local_step + 1);
             const double eta_seconds = steps_per_second > 0.0
                 ? (double)remaining_steps / steps_per_second : 0.0;
-            printf("%5lld | %10.4f | %10.4f | %.7f | grad %.3f/%.3f clipped %d/%d | %.0f tokens %.2f steps/s %.0f tok/s ETA %.0f s\n",
+            printf("%5lld | %10.4f | %10.4f | %.7f | grad %.3f/%.3f clipped %d/%d | %.0f tokens %.2f steps/s %.0f tok/s ETA %.0f s | best %.4f @ %lld\n",
                 (long long)opt->step,(float)average_train_loss,validation_loss,
                 opt->lr,mean_gradient_norm,gradient_norm_max,clipped_steps,
-                gradient_norm_count,tokens_processed,steps_per_second,tokens_per_second,eta_seconds);
+                gradient_norm_count,tokens_processed,steps_per_second,tokens_per_second,
+                eta_seconds,best_validation_loss,(long long)best_validation_step);
             fprintf(metrics,"%lld,%.7f,%.7f,%.9g,%.7f,%.7f,%.3f\n",
                 (long long)opt->step,(float)average_train_loss,validation_loss,opt->lr,
                 expf((float)average_train_loss),expf(validation_loss),elapsed);
@@ -409,6 +423,13 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
         options.sequence_length);
     if (!isfinite(final_train_loss) || !isfinite(final_validation_loss))
         die("final loss diagnostics are unavailable");
+    if (final_validation_loss < best_validation_loss) {
+        best_validation_loss = final_validation_loss;
+        best_validation_step = opt->step;
+        if (!options.diagnostics_only &&
+            !checkpoint_save("minima.segment_best.model", model, opt, rng, tokenizer_hash))
+            die("final best-segment checkpoint save failed");
+    }
 
     printf("\nFinal evaluation loss and perplexity (fixed, evenly spaced windows)\n");
     printf("  train loss      : %.4f\n", final_train_loss);
@@ -419,6 +440,10 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
     printf("  total optimizer steps: %lld\n",(long long)opt->step);
     printf("  checkpoint status: %s (minima.model)\n",
         options.diagnostics_only ? "unchanged" : "saved");
+    printf("  best validation (this segment): %.4f at step %lld\n",
+        best_validation_loss, (long long)best_validation_step);
+    printf("  best segment checkpoint: %s\n",
+        options.diagnostics_only ? "not written in diagnostics-only mode" : "minima.segment_best.model");
 
 
 }
