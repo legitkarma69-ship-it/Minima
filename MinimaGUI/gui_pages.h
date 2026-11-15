@@ -45,6 +45,7 @@ typedef struct {
     HWND* optimizer;
     HWND* weight_decay;
     HWND* threads;
+    HWND* arena_budget;
 } GuiPageControls;
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
