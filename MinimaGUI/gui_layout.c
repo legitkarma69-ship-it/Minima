@@ -78,7 +78,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
     if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
-    if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(366),TRUE);
+    if(g_group_monitor)MoveWindow(g_group_monitor,right_x,work_top,right_w,scale_px(400),TRUE);
     if(g_graph)MoveWindow(g_graph,right_x+scale_px(8),work_top+scale_px(22),right_w-scale_px(16),scale_px(220),TRUE);
     if(g_resource_status)MoveWindow(g_resource_status,right_x+scale_px(8),work_top+scale_px(244),right_w-scale_px(16),scale_px(20),TRUE);
     if(g_cpu_limit)MoveWindow(g_cpu_limit,right_x+scale_px(86),work_top+scale_px(270),scale_px(48),scale_px(23),TRUE);
@@ -89,6 +89,8 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_ram_warning)MoveWindow(g_ram_warning,right_x+scale_px(242),work_top+scale_px(330),scale_px(48),scale_px(23),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CPU_WARNING_LABEL),right_x+scale_px(8),work_top+scale_px(333),scale_px(76),scale_px(18),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_RAM_WARNING_LABEL),right_x+scale_px(150),work_top+scale_px(333),scale_px(88),scale_px(18),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_RESOURCE_PROFILE_LABEL),right_x+scale_px(8),work_top+scale_px(363),scale_px(76),scale_px(18),TRUE);
+    if(g_resource_profile)MoveWindow(g_resource_profile,right_x+scale_px(86),work_top+scale_px(360),scale_px(150),scale_px(100),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CPU_LIMIT_LABEL),right_x+scale_px(8),work_top+scale_px(273),scale_px(76),scale_px(18),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_RAM_LIMIT_LABEL),right_x+scale_px(150),work_top+scale_px(273),scale_px(88),scale_px(18),TRUE);
 
@@ -97,7 +99,7 @@ void gui_layout_layout_controls(HWND hwnd) {
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
            child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
-           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning)continue;
+           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
