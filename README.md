@@ -189,7 +189,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 |---|---|---|
 | E1.1 | Clear Chat: reset the active engine conversation and clear the visible and saved transcript. | [x] Implemented with the chat-tab Clear chat control and the engine `/clear` command. |
 | E1.2 | Separate the Chat transcript from engine Logs, with independent Clear chat and Clear logs controls. | [x] Chat history and engine output now have separate tabs and clear actions. |
-| E1.3 | Configurable RAM limit with graceful internal allocation budgeting. | [~] A hard Windows Job Object process-group committed-memory ceiling is exposed in GiB and persisted; it is not a physical working-set cap. Engine-aware soft budgeting and graceful allocation diagnostics remain. |
+| E1.3 | Configurable RAM limit with graceful internal allocation budgeting. | [~] Added a shared engine arena committed-memory budget (`--memory-budget-gb`, GUI field, persisted) across permanent, temporary, and corpus arenas, with allocation-rejection diagnostics and peak accounting. It does not yet include every heap allocation or memory-mapped file; comprehensive process-wide soft budgeting and graceful preflight estimates remain. |
 | E1.4 | CPU utilization limit, preferably enforced with Windows Job Objects rather than relying only on thread count. | [x] Hard CPU-rate cap (1-100% of total logical-processor capacity, 0=off) is applied to engine and evaluation process groups before execution. |
 | E1.5 | Expose the existing CLI thread-count selector in the GUI. | [x] Implemented; 0 selects the runtime default. |
 | E1.6 | Live RAM, CPU, and peak-resource monitoring with configurable warning thresholds. | [~] Live process-group CPU and committed-memory readings plus the directly launched process working set are displayed; peak tracking and warning thresholds remain. |
@@ -204,7 +204,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 | E2.2 | Allow individual corpus-source weights, not only global mix modes. | [ ] |
 | E2.3 | Add generation controls: min-p, frequency/presence penalties, no-repeat n-gram, sampling seed, stop sequences, and minimum new tokens. | [ ] |
 | E2.4 | Configuration profiles with save, load, export, and import. | [ ] |
-| E2.5 | Show a pre-training memory estimate covering weights, gradients, optimizer state, activations, tokenizer, and corpus; compare it with the configured resource budget. | [~] Related startup budget estimates exist but need a clearer combined presentation and budget integration. |
+| E2.5 | Show a pre-training memory estimate covering weights, gradients, optimizer state, activations, tokenizer, and corpus; compare it with the configured resource budget. | [~] Existing working-set estimate now runs alongside the shared arena budget, but tokenizer, mapped corpus IDs, and process/runtime overhead are still excluded from the estimate. |
 
 ### 5.3 Training monitor
 
