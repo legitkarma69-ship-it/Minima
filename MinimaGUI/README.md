@@ -35,7 +35,7 @@ Changing vocabulary or model architecture makes an existing checkpoint incompati
 
 ## Results and monitoring
 
-The Monitor panel displays live process CPU utilization (normalized to total logical-processor capacity), working-set RAM, and private committed RAM. CPU and RAM caps are applied by Windows Job Objects. The memory cap is a hard job-wide committed-memory limit, not a physical working-set cap or graceful engine allocation budget; setting it too low can cause allocations to fail. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
+The Monitor panel displays live CPU utilization and committed memory for the entire Windows process group (including the evaluation runner's Minima child), plus the working set of the directly launched process. CPU and RAM caps are applied by Windows Job Objects. The memory cap is a hard job-wide committed-memory limit, not a physical working-set cap or graceful engine allocation budget; setting it too low can cause allocations to fail. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
 
 The GUI displays engine output, including:
 
