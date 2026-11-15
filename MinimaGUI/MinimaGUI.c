@@ -1587,7 +1587,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_presence_penalty, L"Presence penalty from -2 to 2. Subtracts a fixed amount from logits for tokens already present in the context.");
         add_tooltip(g_no_repeat_ngram, L"No-repeat n-gram size, 0-16. 0 disables it; 3 prevents repeating an existing three-token sequence.");
         add_tooltip(g_min_new_tokens, L"Minimum generated tokens before the stop sequence can end generation. 0 disables the minimum.");
-        add_tooltip(g_sampling_seed, L"Sampling seed. 0 uses a varying seed; a nonzero value makes generation repeatable for the same prompt and settings, with each subsequent turn using the next seed.");
+        add_tooltip(g_sampling_seed, L"Sampling seed. 0 uses a varying seed; a nonzero value makes generation repeatable for the same prompt and settings.");
         add_tooltip(g_stop_sequence, L"Optional text sequence that stops generation when emitted. The stop sequence is removed from the displayed response.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
