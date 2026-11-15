@@ -18,6 +18,46 @@ Keep this document aligned with the code. A feature being discussed or partially
 
 ---
 
+## Hardware target: Lenovo Ryzen 7 5700U / 16 GiB RAM
+
+The first known development target is a Lenovo laptop with:
+
+- AMD Ryzen 7 5700U (Lucienne, Zen 2): 8 physical CPU cores / 16 logical threads, 1.8 GHz base and up to 4.3 GHz boost; AMD lists a 15 W default TDP and configurable 10–25 W range.
+- 16 GiB DDR4 installed as two 64-bit memory channels (reported as 2 x 64-bit). The exact operating memory speed should be confirmed in Windows; the processor supports DDR4-3200.
+- Integrated AMD Radeon graphics using shared system memory.
+- Windows 11 and Visual Studio 2022 / MSVC are the primary build environment.
+
+This is a useful CPU-first target, not a reason to tune the whole engine around one benchmark. The 5700U is a low-power laptop processor: sustained clocks, cooling, power mode, and memory pressure matter more than its short boost clock. Keep the integrated GPU out of the critical path until a separate GPU backend is justified and measured.
+
+### Initial operating envelope (provisional)
+
+| Setting | Starting point | How to validate |
+|---|---:|---|
+| OpenMP workers | 8 | Compare 4, 8, 12, and 16 using identical Release builds and workloads |
+| Engine memory budget | 8 GiB | Measure peak committed/private bytes while Windows and the GUI are running |
+| Default model | Existing 5.7M-parameter configuration | Keep architecture fixed during the first benchmark |
+| Training batch / sequence | Existing 4 x 128 | Benchmark alternatives only after a baseline is recorded |
+| Power | Plugged in, Windows best-performance mode for benchmark runs | Record power mode and temperatures; repeat a normal-use run separately |
+| GPU | CPU only | Revisit only with a measured, maintainable backend |
+
+These are starting limits, not hard-coded truths. Do not automatically use all 16 logical threads: SMT threads share physical-core resources, and a 15 W laptop may become slower after it heats up. The CLI already accepts `--threads N`; the GUI does not yet expose that option. OpenMP is enabled in the Visual Studio project files. Current parallel regions cover selected matrix-multiplication work in the forward/backward paths, not every operation, so thread-count scaling must be measured rather than assumed.
+
+### Memory implications
+
+The engine currently reserves an 8 GiB permanent arena, an 8 GiB corpus arena for training, and a 256 MiB temporary arena. On Windows these arenas reserve virtual address space and commit pages as allocations are made; the reservation sizes are not the same as immediate physical RAM consumption. The corpus is nevertheless loaded into memory, and token IDs use 16-bit storage. A 906 MiB text corpus can therefore require roughly another 1.77 GiB for token IDs in a worst-case byte-per-token estimate, before tokenizer, model, optimizer, activations, and Windows overhead.
+
+The current code also rejects corpus byte/token lengths above `INT_MAX`. Consequently, the roadmap's 1–5 GiB corpus goal is not yet achievable as a single ordinary training input: the upper end requires a streaming/chunked corpus and tokenization design, plus removal of the signed-int length bottleneck. Do not simply increase arena reservations or remove the guard. First measure the actual working set and design the data path.
+
+### First hardware-tuning pass
+
+1. Build **Release | x64** and run the same fixed training workload at 4, 8, 12, and 16 OpenMP threads. Do not use Debug numbers.
+2. For each run, record commit, model/corpus fingerprints, batch, sequence, optimizer, worker count, elapsed time, milliseconds per optimizer step, tokens/second, peak process memory, and thermal/power conditions.
+3. Repeat the best two settings for long enough to expose thermal throttling. Select the fastest sustainable setting, not the fastest first minute.
+4. Add the selected worker count and a memory-budget setting to the GUI only after the benchmark demonstrates a useful default. Keep the CLI override.
+5. Add stage profiling before attempting SIMD, blocked matrix multiplication, or GPU work. The current code parallelizes only selected kernels; profiling will show whether attention, optimizer, corpus/tokenizer work, or memory traffic is limiting the whole step.
+
+The first goal is a reliable performance baseline on this laptop. Model width, layer count, vocabulary, and corpus size should not be changed during that baseline experiment.
+
 ## 1. Immediate priorities: correctness and CI
 
 These tasks protect the reliability of the project. Avoid changing model layout or adding performance complexity while the test suite is failing.
