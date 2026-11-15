@@ -361,7 +361,7 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
                     if (!checkpoint_save("minima.segment_best.model", model, opt,
                         rng, tokenizer_hash))
                         die("best-segment checkpoint save failed");
-                    printf("Best segment checkpoint saved at optimizer step %lld (valid %.4f)\\n",
+                    printf("Best segment checkpoint saved at optimizer step %lld (valid %.4f)\n",
                         (long long)best_validation_step, best_validation_loss);
                 }
             }
