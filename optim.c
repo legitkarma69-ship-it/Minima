@@ -86,6 +86,15 @@ bool optim_check_adamw(void) {
             return false;
     }
 
+    /* Normalization scales should not be multiplicatively shrunk. */
+    float norm_param = 1.25f, norm_m = 0.0f, norm_v = 0.0f;
+    const float zero_grad = 0.0f;
+    adamw_update(&norm_param, &norm_m, &norm_v, &zero_grad, 1,
+        lr, beta1, beta2, eps, 0.0f,
+        1.0f - beta1, 1.0f - beta2);
+    if (norm_param != 1.25f || norm_m != 0.0f || norm_v != 0.0f)
+        return false;
+
     return true;
 }
 
@@ -191,23 +200,23 @@ void optim_step(Optim* opt, Model* model, const Model* grads) {
     float bias2 = 1.0f - powf(b2, (float)opt->step);
 
     // Helper macro to keep the call sites short
-#define UPDATE(field, count) \
+#define UPDATE_WITH_DECAY(field, count, decay) \
         adamw_update(model->field, opt->m_##field, opt->v_##field, \
                      grads->field, (count), \
-                     opt->lr, b1, b2, opt->eps, opt->weight_decay, \
-                     bias1, bias2)
+                     opt->lr, b1, b2, (decay), bias1, bias2)
 
-    UPDATE(tok_emb, tok_n);
-    UPDATE(attn_qkv, qkv_n);
-    UPDATE(attn_proj, proj_n);
-    UPDATE(ffn_up, up_n);
-    UPDATE(ffn_gate, gate_n);
-    UPDATE(ffn_down, down_n);
-    UPDATE(rms1_scale, rms_n);
-    UPDATE(rms2_scale, rms_n);
-    UPDATE(rms_final_scale, model->dim);
+    /* Decay embedding and matrix weights, but not RMSNorm scale vectors. */
+    UPDATE_WITH_DECAY(tok_emb, tok_n, opt->weight_decay);
+    UPDATE_WITH_DECAY(attn_qkv, qkv_n, opt->weight_decay);
+    UPDATE_WITH_DECAY(attn_proj, proj_n, opt->weight_decay);
+    UPDATE_WITH_DECAY(ffn_up, up_n, opt->weight_decay);
+    UPDATE_WITH_DECAY(ffn_gate, gate_n, opt->weight_decay);
+    UPDATE_WITH_DECAY(ffn_down, down_n, opt->weight_decay);
+    UPDATE_WITH_DECAY(rms1_scale, rms_n, 0.0f);
+    UPDATE_WITH_DECAY(rms2_scale, rms_n, 0.0f);
+    UPDATE_WITH_DECAY(rms_final_scale, model->dim, 0.0f);
 
-#undef UPDATE
+#undef UPDATE_WITH_DECAY
 }
 
 // Simple cosine decay with linear warmup
