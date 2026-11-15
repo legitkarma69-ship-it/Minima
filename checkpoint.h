@@ -12,6 +12,9 @@
 bool checkpoint_save(const char* path, const Model* model, const Optim* opt,
     const Rng* rng, uint64_t tokenizer_hash);
 
+/* Preserve the current checkpoint in a bounded .prev.N archive before replacement. */
+bool checkpoint_archive_previous(const char* path, int keep_count);
+
 // Loads into already initialized objects transactionally: on any failure, model,
 // optimizer, and RNG destination state remain unchanged. Model vocabulary and architecture
 // must match the checkpoint, as must the tokenizer fingerprint.
