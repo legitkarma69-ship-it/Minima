@@ -38,6 +38,8 @@
 #define IDC_RESOURCE_PROFILE_LABEL 1034
 #define IDC_RESOURCE_PROFILE 1035
 #define IDC_PAUSE 1036
+#define IDC_SAVE_PROFILE 1037
+#define IDC_LOAD_PROFILE 1038
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
