@@ -23,7 +23,7 @@ The engine working directory is the executable directory. Keep the `data` folder
 - Configure batch size and training sequence length.
 - Configure learning rate, warmup, and cosine or constant learning-rate schedule.
 - Choose AdamW or Lion for fresh runs, configure weight decay, and set OpenMP worker threads (0 selects the runtime default). Resume automatically retains the optimizer type stored in the checkpoint; weight decay and thread count remain configurable.
-- Set a Windows Job Object hard CPU cap (0 disables it; 1-100 is a percentage of total logical-processor capacity) and a hard process-group committed-memory cap in GiB (0 disables it; 1-64 GiB). Limits are applied before the engine starts, including chat and tokenizer rebuilds. The 24-question evaluation process tree receives the same limits.
+- Set a Windows Job Object hard CPU cap (0 disables it; 1-100 is a percentage of total logical-processor capacity), a hard process-group committed-memory cap in GiB (0 disables it; 1-64 GiB), and a separate shared engine arena committed-memory budget in GiB (0 disables it; 1-64 GiB). Limits are applied before the engine starts, including chat and tokenizer rebuilds. The 24-question evaluation process tree receives the same limits.
 - Configure training-log interval, validation interval, validation batch count, and checkpoint interval independently.
 - Choose the random seed.
 - Configure tokenizer sample byte limit (4 MiB maximum) and either evenly spread sampling or prefix sampling.
@@ -35,7 +35,7 @@ Changing vocabulary or model architecture makes an existing checkpoint incompati
 
 ## Results and monitoring
 
-The Monitor panel displays live CPU utilization and committed memory for the entire Windows process group (including the evaluation runner's Minima child), plus the working set of the directly launched process. CPU and RAM caps are applied by Windows Job Objects. The memory cap is a hard job-wide committed-memory limit, not a physical working-set cap or graceful engine allocation budget; setting it too low can cause allocations to fail. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
+The Monitor panel displays live CPU utilization and committed memory for the entire Windows process group (including the evaluation runner's Minima child), plus the working set of the directly launched process. CPU and RAM caps are applied by Windows Job Objects. The Windows memory cap is a hard job-wide committed-memory limit, not a physical working-set cap. The engine arena budget is a separate allocation-level ceiling shared by permanent, temporary, and corpus arenas; it rejects arena allocations before they are committed and prints a diagnostic. It does not currently account for all ordinary heap allocations or memory-mapped token IDs. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
 
 The GUI displays engine output, including:
 
@@ -81,7 +81,7 @@ Chat requires `minima.model` and `minima.bpe`. Set the model configuration contr
 - Automatic checkpoints are written at the configured interval and at the end of a training segment.
 - Long-run progress, validation, and checkpoint intervals default to 1,000 steps. Auto settings scale them with the planned run length, and the Advanced page keeps each interval editable.
 - `minima_metrics.csv`, `minima_chat.txt`, and signal files are stored beside the executables.
-- Resource limits are persisted in `minima_gui.ini`. The CPU cap and RAM cap are applied to each newly launched engine/evaluation process group; changing the fields does not alter an already-running job.
+- Resource limits are persisted in `minima_gui.ini`. The CPU cap and Windows committed-memory cap are applied to each newly launched engine/evaluation process group; the arena budget is passed to the engine and applies to its permanent, temporary, and corpus arenas. Changing the fields does not alter an already-running job.
 
 A Windows x64 GitHub Actions workflow builds both executables and publishes them as a downloadable artifact for each successful build.
 
