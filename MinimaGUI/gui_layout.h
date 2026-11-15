@@ -35,10 +35,12 @@
 #define IDC_RAM_WARNING_LABEL 1031
 #define IDC_CPU_WARNING 1032
 #define IDC_RAM_WARNING 1033
+#define IDC_RESOURCE_PROFILE_LABEL 1034
+#define IDC_RESOURCE_PROFILE 1035
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
-extern HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_status;
+extern HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_profile, g_resource_status;
 extern HWND g_clear_chat, g_clear_logs, g_eval_button;
 extern HWND g_group_corpus, g_group_model, g_group_training;
 extern HWND g_group_advanced, g_group_monitor, g_group_output, g_output_label;
