@@ -92,7 +92,7 @@ def main() -> int:
                 continue
             if line is None:
                 break
-            remaining.append(line)
+            captured.append(line)
             print(line, flush=True)
 
         return_code = process.wait(timeout=120)
