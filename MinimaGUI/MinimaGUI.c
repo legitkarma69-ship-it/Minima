@@ -349,13 +349,21 @@ static void update_status_bar(double cpu_percent, SIZE_T committed_bytes,
             (g_tokenizer_rebuild_mode ? L"Tokenizer" :
             (g_chat_mode ? L"Chat" : L"Training")));
         wcscpy_s(mode, _countof(mode), mode_text);
-        _snwprintf_s(cpu_field, _countof(cpu_field), _TRUNCATE,
-            L"%.0f/%s", cpu_percent, cpu_cap ? L"capped" : L"uncapped");
+        if (cpu_cap)
+            _snwprintf_s(cpu_field, _countof(cpu_field), _TRUNCATE,
+                L"%.0f/%lu%%", cpu_percent, cpu_cap);
+        else
+            _snwprintf_s(cpu_field, _countof(cpu_field), _TRUNCATE,
+                L"%.0f/--", cpu_percent);
         if (have_memory) {
             const double committed_gb = (double)committed_bytes /
                 (1024.0 * 1024.0 * 1024.0);
-            _snwprintf_s(memory_field, _countof(memory_field), _TRUNCATE,
-                L"%.2f/%s", committed_gb, ram_cap ? L"GB cap" : L"GB");
+            if (ram_cap)
+                _snwprintf_s(memory_field, _countof(memory_field), _TRUNCATE,
+                    L"%.2f/%luGB", committed_gb, ram_cap);
+            else
+                _snwprintf_s(memory_field, _countof(memory_field), _TRUNCATE,
+                    L"%.2f/--GB", committed_gb);
         } else {
             wcscpy_s(memory_field, _countof(memory_field), L"--");
         }
