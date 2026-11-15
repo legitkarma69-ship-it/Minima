@@ -58,3 +58,29 @@ void gui_layout_layout_controls(HWND hwnd);
 void gui_layout_select_main_page(HWND hwnd, int page);
 void gui_layout_scale_children(HWND hwnd, UINT old_dpi, UINT new_dpi);
 #endif
+
+#define IDC_GEN_TEMP_LABEL 1040
+#define IDC_GEN_TEMP 1041
+#define IDC_GEN_TOPK_LABEL 1042
+#define IDC_GEN_TOPK 1043
+#define IDC_GEN_TOPP_LABEL 1044
+#define IDC_GEN_TOPP 1045
+#define IDC_GEN_REPEAT_LABEL 1046
+#define IDC_GEN_REPEAT 1047
+#define IDC_GEN_MAXTOK_LABEL 1048
+#define IDC_GEN_MAXTOK 1049
+#define IDC_GEN_MINP_LABEL 1050
+#define IDC_GEN_MINP 1051
+#define IDC_GEN_FREQ_LABEL 1052
+#define IDC_GEN_FREQ 1053
+#define IDC_GEN_PRES_LABEL 1054
+#define IDC_GEN_PRES 1055
+#define IDC_GEN_NGRAM_LABEL 1056
+#define IDC_GEN_NGRAM 1057
+#define IDC_GEN_MINTOK_LABEL 1058
+#define IDC_GEN_MINTOK 1059
+#define IDC_GEN_SEED_LABEL 1060
+#define IDC_GEN_SEED 1061
+#define IDC_GEN_STOP_LABEL 1062
+#define IDC_GEN_STOP 1063
+#define IDC_GROUP_GENERATION 1064
