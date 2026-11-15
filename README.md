@@ -200,9 +200,9 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 
 | ID | Feature | Status / notes |
 |---|---|---|
-| E2.1 | Expose optimizer selection (AdamW / Lion), weight decay, and advanced beta1/beta2/epsilon settings where applicable. | [~] Optimizer selection and weight decay are exposed; beta1/beta2/epsilon controls remain. AdamW now excludes RMSNorm scales from decoupled weight decay. |
+| E2.1 | Expose optimizer selection (AdamW / Lion), weight decay, and advanced beta1/beta2/epsilon settings where applicable. | [x] Optimizer selection, weight decay, beta1, beta2, and epsilon are exposed in CLI and GUI for fresh runs; resume restores checkpoint hyperparameters. AdamW excludes RMSNorm scales from decoupled weight decay. |
 | E2.2 | Allow individual corpus-source weights, not only global mix modes. | [x] Optional `--source-weights` CSV and Advanced GUI field apply positive per-source multipliers on top of proportional/sqrt/equal global mixing. One multiplier is required per non-empty corpus file, in list order. |
-| E2.3 | Add generation controls: min-p, frequency/presence penalties, no-repeat n-gram, sampling seed, stop sequences, and minimum new tokens. | [ ] |
+| E2.3 | Add generation controls: min-p, frequency/presence penalties, no-repeat n-gram, sampling seed, stop sequences, and minimum new tokens. | [~] Added a dedicated Generation tab and CLI/API support for all listed sampling controls, plus deterministic sampling seeds and stop-sequence handling. New C tests cover min-p, no-repeat, and stop termination; Windows CI validation is pending. |
 | E2.4 | Configuration profiles with save, load, export, and import. | [x] Save profile exports the current persisted GUI settings to an INI file; Load profile imports an INI and immediately applies its controls. |
 | E2.5 | Show a pre-training memory estimate covering weights, gradients, optimizer state, activations, tokenizer, and corpus; compare it with the configured resource budget. | [~] Existing working-set estimate now runs alongside the shared arena budget, but tokenizer, mapped corpus IDs, and process/runtime overhead are still excluded from the estimate. |
 
