@@ -98,6 +98,7 @@ bool model_init_config(Model* m, Arena* arena, uint64_t seed, const ModelConfig*
     const int vocab_size = config->vocab_size;
 
     memset(m, 0, sizeof(*m));
+    m->memory_budget = arena->budget;
 
     m->vocab_size = vocab_size;
     m->dim = config->dim;
