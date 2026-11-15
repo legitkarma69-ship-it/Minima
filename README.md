@@ -18,6 +18,41 @@ Keep this document aligned with the code. A feature being discussed or partially
 
 ---
 
+## Product scope: text-only conversational reasoning
+
+Minima is intentionally a **text-only** language model. This is a firm product boundary, not a temporary omission.
+
+### In scope
+
+- Natural text conversation and coherent multi-turn context.
+- Following straightforward instructions and answering clearly.
+- Basic logical reasoning: deduction, simple conditionals, classification, ordering and constraint problems, consistency checks, causal reasoning, and identifying when the available information is insufficient.
+- Explaining a conclusion in a short, understandable chain of reasoning.
+- General language understanding and useful everyday knowledge, with appropriate uncertainty when facts are unknown.
+
+### Explicitly out of scope
+
+- Audio input/output, speech recognition, music, image understanding/generation, video, and other multimodal capabilities.
+- Teaching Minima to write, debug, or execute code.
+- Advanced mathematics, symbolic algebra, long calculations, or specialist quantitative problem solving.
+- Autonomous execution of arbitrary programs or shell commands.
+
+Do not add multimodal encoders, media pipelines, code-generation training objectives, or complex-math subsystems. Do not spend model capacity or development time on them.
+
+### Design consequences
+
+- Keep the model and runtime text-only. Text documents and text-based retrieval may be considered later, but no media ingestion is planned.
+- Prioritize high-quality conversational and reasoning examples over sheer corpus size.
+- Evaluate reasoning behavior separately from next-token loss. A lower language-model loss does not prove that Minima can reason correctly.
+- Teach the model to distinguish facts, assumptions, deductions, and uncertainty. It should not invent missing premises to force an answer.
+- Prefer concise, transparent reasoning over elaborate chain-of-thought imitation. Training targets should show enough explanation to justify the answer without rewarding rambling.
+- Treat tool calling, RAG, persistent memory, and few-shot retrieval as optional text-only runtime enhancements. They are not prerequisites for the core reasoning goal.
+- Keep the C inference engine small and portable. Do not turn Minima into an agent framework.
+
+**Primary success criterion:** given a short text problem and its stated premises, Minima should identify what follows, what does not follow, and what cannot be determined, then explain the distinction accurately.
+
+---
+
 ## Hardware target: Lenovo Ryzen 7 5700U / 16 GiB RAM
 
 The first known development target is a Lenovo laptop with:
@@ -57,6 +92,21 @@ The current code also rejects corpus byte/token lengths above `INT_MAX`. Consequ
 5. Add stage profiling before attempting SIMD, blocked matrix multiplication, or GPU work. The current code parallelizes only selected kernels; profiling will show whether attention, optimizer, corpus/tokenizer work, or memory traffic is limiting the whole step.
 
 The first goal is a reliable performance baseline on this laptop. Model width, layer count, vocabulary, and corpus size should not be changed during that baseline experiment.
+
+## 0. First behavioral milestone: measure before teaching
+
+Before changing model architecture or launching a large fine-tuning run, establish a small, held-out reasoning evaluation set. This is the first priority because current training loss and fluent-looking generation do not measure whether Minima can solve logic questions.
+
+- [ ] Create a text-only evaluation set covering deduction, conditionals, constraints/order, classification, causal reasoning, consistency, simple counting, ambiguity, and insufficient-information cases.
+- [ ] Keep evaluation prompts and reference answers out of all training/tokenizer corpora. They must remain held out.
+- [ ] Record a baseline from the current checkpoint using fixed prompts, deterministic decoding, and saved outputs.
+- [ ] Score conclusions and explanations separately with a simple, documented rubric. Do not rely only on exact string matching.
+- [ ] Add a separate curated reasoning-training dataset only after the baseline exists. Keep its format and provenance documented.
+- [ ] Compare every training change against the same held-out set and retain regressions as well as improvements.
+
+The initial benchmark is a behavioral smoke test, not a claim of broad reasoning ability. Expand it gradually and include paraphrases so Minima cannot pass by memorizing question wording.
+
+---
 
 ## 1. Immediate priorities: correctness and CI
 
@@ -372,14 +422,14 @@ Keep the model/inference engine independent from the GUI, persistence, retrieval
 
 | Phase | Deliverable | Main work |
 |---|---|---|
-| I1 | Conversation foundation | Canonical message structure, serializer/parser, role and ending semantics, reserved-token plan, legacy Human/Assistant compatibility, context budgeting, explicit EOS/turn stopping |
-| I2 | Reliable local conversations | Conversation persistence, save/load/export, engine-side clear/reset, separate conversation history from KV cache |
-| I3 | Context and memory | Context manager, output-token reservation, user-controlled long-term memory, relevance/recency retrieval, diagnostics |
-| I4 | Safe tool framework | Tool registry, schemas, parser/validator, permission model, execution interface, tool-result messages, tests |
-| I5 | Local document retrieval | Document ingestion, chunking, metadata/provenance, BM25 index, context injection, source-grounded responses |
-| I6 | Behavior and safety | Few-shot example selection, layered safety checks, prompt-injection tests, output validation, refusal behavior |
-| I7 | Conversational training | Canonical-format SFT corpus, assistant-target loss masking, tool-use examples, held-out behavioral evaluation |
-| I8 | Advanced retrieval and alignment | Embeddings/hybrid search/reranking, preference optimization, and other research only when evaluation justifies them |
+| I1 | Behavioral baseline | Held-out text-only logic evaluation, fixed baseline prompts/decoding, scoring rubric, saved outputs; no training on evaluation data |
+| I2 | Reasoning-focused training data | Curated examples for basic deduction, conditionals, constraints, causal reasoning, uncertainty, and concise explanations; quality review and deduplication |
+| I3 | Conversational training foundation | Versioned text message format, explicit turn endings, compatible chat serialization, assistant-target SFT and loss masking |
+| I4 | Context and conversation reliability | Context budgeting, robust multi-turn history, save/load, clear/reset, separate conversation history from KV cache |
+| I5 | Optional text retrieval and memory | Only if useful after core reasoning improves; local text documents, provenance, user-controlled memory, token-budgeted retrieval |
+| I6 | Safety and reliability | Instruction hierarchy, untrusted text handling, input/output validation, safe runtime boundaries, refusal and uncertainty behavior |
+| I7 | Behavioral refinement | Few-shot examples and preference tuning only when evaluation shows a clear need; continue held-out logic and conversation tests |
+| I8 | Optional text-only extensions | Simple allowlisted tools or advanced text retrieval only when they directly support the intended assistant; no arbitrary code execution |
 
 **Architecture rule:** keep the core C model responsible for tokenization, inference, and training. Put message orchestration, persistence, tool execution, retrieval, and policy enforcement in explicit runtime modules with narrow interfaces. Do not turn the inference engine into a monolith or let model output directly execute host operations.
 
