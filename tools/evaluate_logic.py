@@ -3,7 +3,7 @@
 
 Reference answers and scoring notes are read only by this Python process.
 Only each prompt, wrapped in the normal Human:/Assistant: chat format, is sent
-to Minima. The chat engine's one-shot /test mode keeps cases independent.
+to Minima. The chat engine's /clear command keeps cases independent.
 """
 from __future__ import annotations
 import argparse
