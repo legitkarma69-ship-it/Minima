@@ -102,6 +102,7 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_optimizer (*page_controls->optimizer)
 #define g_weight_decay (*page_controls->weight_decay)
 #define g_threads (*page_controls->threads)
+#define g_arena_budget (*page_controls->arena_budget)
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, parent, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
         12, 34, 520, 105, parent, (HMENU)(INT_PTR)IDC_CORPUS, NULL, NULL);
@@ -264,5 +265,6 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #undef g_optimizer
 #undef g_weight_decay
 #undef g_threads
+#undef g_arena_budget
 #undef REGISTER_ADVANCED
 }
