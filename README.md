@@ -210,8 +210,8 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 
 | ID | Feature | Status / notes |
 |---|---|---|
-| E3.1 | True pause/resume without terminating the engine process. | [ ] |
-| E3.2 | Show ETA, tokens processed, tokens/second, current learning rate, and best-checkpoint status. | [ ] |
+| E3.1 | True pause/resume without terminating the engine process. | [~] Added a GUI pause/resume signal checked between optimizer steps; process stays alive and in-memory state is preserved. Windows CI integration test is being added. |
+| E3.2 | Show ETA, tokens processed, tokens/second, current learning rate, and best-checkpoint status. | [~] Progress logs now report cumulative tokens, steps/second, tokens/second, ETA, and current LR; best-checkpoint status remains. |
 | E3.3 | Automatic checkpoint rotation with keep-best behavior. | [ ] |
 | E3.4 | Compare training runs using recorded configurations and metrics. | [ ] |
 
