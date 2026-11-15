@@ -263,7 +263,7 @@ static void update_resource_monitor(void) {
         double working = (double)memory.WorkingSetSize / (1024.0 * 1024.0 * 1024.0);
         double private_gb = (double)memory.PrivateUsage / (1024.0 * 1024.0 * 1024.0);
         _snwprintf_s(status, _countof(status), _TRUNCATE,
-            L"CPU: %.1f%%   RAM: %.2f GB working / %.2f GB private",
+            L"CPU %.0f%% | WS %.2f GB | Priv %.2f GB",
             cpu_percent, working, private_gb);
         SetWindowTextW(g_resource_status, status);
     } else {
