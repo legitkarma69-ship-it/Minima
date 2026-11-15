@@ -7,9 +7,11 @@
 
 typedef struct {
     size_t limit;      // maximum aggregate committed arena bytes; 0 = unlimited
-    size_t committed;  // current committed bytes across attached arenas
-    size_t peak;       // high-water mark across attached arenas
-    size_t failed;     // number of allocations rejected by the budget
+    size_t committed;          // current arena-backed committed bytes
+    size_t external_committed; // tracked heap allocations outside arenas
+    size_t peak;               // high-water mark across arena + tracked heap
+    size_t failed;             // number of allocations rejected by the budget
+    volatile long lock;        // internal counter lock for parallel tokenizer workers
 } ArenaBudget;
 
 typedef struct {
@@ -29,6 +31,10 @@ bool arena_init(Arena* a, size_t size);
 
 // Shared budget for committed pages across multiple arenas. A zero limit is unlimited.
 void arena_budget_init(ArenaBudget* budget, size_t limit);
+size_t arena_budget_total_committed(const ArenaBudget* budget);
+void* arena_budget_malloc(ArenaBudget* budget, size_t size);
+void* arena_budget_calloc(ArenaBudget* budget, size_t count, size_t size);
+void arena_budget_free(void* allocation);
 bool arena_init_with_budget(Arena* a, size_t size, ArenaBudget* budget);
 
 // Destroy and free the underlying memory.
