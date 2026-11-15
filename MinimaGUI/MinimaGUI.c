@@ -46,7 +46,7 @@ static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_s
 static HWND g_optimizer, g_weight_decay, g_threads;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
-static HANDLE g_process, g_thread, g_stdin_write;
+static HANDLE g_process, g_thread, g_stdin_write, g_eval_job;
 static BOOL g_chat_mode;
 static BOOL g_evaluation_mode;
 static BOOL g_chat_response_active;
@@ -579,15 +579,31 @@ static void start_logic_evaluation(void) {
     SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
     HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (nul == INVALID_HANDLE_VALUE) { CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not open NUL.", L"ProjectMinima", MB_ICONERROR); return; }
+    HANDLE eval_job = CreateJobObjectW(NULL, NULL);
+    if (!eval_job) { CloseHandle(nul); CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not create an evaluation process group.", L"ProjectMinima", MB_ICONERROR); return; }
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits; ZeroMemory(&job_limits, sizeof(job_limits));
+    job_limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!SetInformationJobObject(eval_job, JobObjectExtendedLimitInformation, &job_limits, sizeof(job_limits))) {
+        CloseHandle(eval_job); CloseHandle(nul); CloseHandle(rd); CloseHandle(wr);
+        MessageBoxW(g_window, L"Could not configure evaluation process cleanup.", L"ProjectMinima", MB_ICONERROR); return;
+    }
     STARTUPINFOW si; PROCESS_INFORMATION pi; ZeroMemory(&si, sizeof(si)); ZeroMemory(&pi, sizeof(pi));
     si.cb = sizeof(si); si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
     si.hStdInput = nul; si.hStdOutput = wr; si.hStdError = wr;
-    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, root, &si, &pi)) {
-        CloseHandle(nul); CloseHandle(rd); CloseHandle(wr);
+    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, NULL, root, &si, &pi)) {
+        CloseHandle(eval_job); CloseHandle(nul); CloseHandle(rd); CloseHandle(wr);
         MessageBoxW(g_window, L"Could not launch Python. Install Python 3 and ensure the 'py' launcher is available.", L"24-question evaluation", MB_ICONERROR);
         return;
     }
-    CloseHandle(nul); CloseHandle(wr); g_process = pi.hProcess; CloseHandle(pi.hThread);
+    CloseHandle(nul); CloseHandle(wr);
+    if (!AssignProcessToJobObject(eval_job, pi.hProcess)) {
+        TerminateProcess(pi.hProcess, 1); CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        CloseHandle(eval_job); CloseHandle(rd);
+        MessageBoxW(g_window, L"Could not attach the evaluation process to its cleanup group.", L"ProjectMinima", MB_ICONERROR);
+        return;
+    }
+    ResumeThread(pi.hThread); CloseHandle(pi.hThread);
+    g_eval_job = eval_job; g_process = pi.hProcess;
     g_chat_mode = FALSE; g_evaluation_mode = TRUE;
     gui_layout_select_main_page(g_window, 2); set_running(TRUE);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), FALSE);
@@ -1078,7 +1094,11 @@ static void action_advanced_toggle(HWND hwnd) {
 }
 static void action_chat_send(HWND hwnd) { (void)hwnd; send_chat_message(); }
 static void action_chat_test(HWND hwnd) { (void)hwnd; test_generation_settings(); }
-static void action_chat_stop(HWND hwnd) { (void)hwnd; if (g_evaluation_mode && g_process) { append_log(L"\r\nEvaluation stop requested.\r\n"); TerminateProcess(g_process, 3); } else stop_generation(); }
+static void action_chat_stop(HWND hwnd) { (void)hwnd; if (g_evaluation_mode && g_process) {
+        append_log(L"\r\nEvaluation stop requested.\r\n");
+        if (g_eval_job) { CloseHandle(g_eval_job); g_eval_job = NULL; }
+        else TerminateProcess(g_process, 3);
+    } else stop_generation(); }
 static void action_save_checkpoint(HWND hwnd) { (void)hwnd; request_checkpoint_save(); }
 static void action_clear_chat(HWND hwnd) { (void)hwnd; clear_chat_history(); }
 static void action_clear_logs(HWND hwnd) { (void)hwnd; clear_engine_logs(); }
@@ -1190,6 +1210,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             append_log(L"Fresh model training completed using the prebuilt tokenizer.\r\n");
         }
         g_tokenizer_rebuild_mode=FALSE; g_fresh_used_saved_tokenizer=FALSE;
+        if (g_eval_job) { CloseHandle(g_eval_job); g_eval_job = NULL; }
         if (g_process) { CloseHandle(g_process); g_process = NULL; }
         if (g_thread) { CloseHandle(g_thread); g_thread = NULL; }
         if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write=NULL; }
@@ -1210,7 +1231,11 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (MessageBoxW(hwnd,L"An engine process is running. Stop it and close?",
                 L"ProjectMinima",MB_YESNO|MB_ICONWARNING)!=IDYES) return 0;
             minima_settings_save(&g_settings_context);
-            if(g_chat_mode){g_close_when_done=TRUE;TerminateProcess(g_process,3);}
+            if (g_evaluation_mode) {
+                g_close_when_done = TRUE;
+                if (g_eval_job) { CloseHandle(g_eval_job); g_eval_job = NULL; }
+                else TerminateProcess(g_process, 3);
+            } else if(g_chat_mode){g_close_when_done=TRUE;TerminateProcess(g_process,3);}
             else {if(!request_cooperative_stop())return 0;g_close_when_done=TRUE;}
             return 0;
         }
