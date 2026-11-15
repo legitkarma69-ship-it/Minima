@@ -9,6 +9,7 @@
 #include <string.h>
 #include <limits.h>
 #include <math.h>
+#include <psapi.h>
 #include "gui_protocol.h"
 #include "gui_chat_state.h"
 #include "graph.h"
@@ -20,6 +21,7 @@
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
+#pragma comment(lib, "Psapi.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #define WM_APPEND_LOG    (WM_APP + 1)
@@ -44,9 +46,12 @@ HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
 static HWND g_optimizer, g_weight_decay, g_threads;
+HWND g_cpu_limit, g_ram_limit, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
-static HANDLE g_process, g_thread, g_stdin_write, g_eval_job;
+static HANDLE g_process, g_thread, g_stdin_write, g_eval_job, g_resource_job;
+static ULONGLONG g_last_cpu_100ns, g_last_cpu_tick;
+static DWORD g_last_cpu_pid;
 static BOOL g_chat_mode;
 static BOOL g_evaluation_mode;
 static BOOL g_chat_response_active;
@@ -180,6 +185,92 @@ static void clear_engine_logs(void) {
     if (g_log) SetWindowTextW(g_log, L"");
 }
 
+static BOOL read_bounded_integer(HWND control, DWORD maximum, DWORD* value_out) {
+    wchar_t text[64], *end = NULL;
+    GetWindowTextW(control, text, (int)_countof(text));
+    if (!text[0]) return FALSE;
+    unsigned long value = wcstoul(text, &end, 10);
+    if (!end || *end || value > maximum) return FALSE;
+    *value_out = (DWORD)value;
+    return TRUE;
+}
+
+static BOOL read_resource_limits(DWORD* cpu_percent, DWORD* ram_gb) {
+    return read_bounded_integer(g_cpu_limit, 100, cpu_percent) &&
+        read_bounded_integer(g_ram_limit, 64, ram_gb);
+}
+
+static BOOL configure_resource_job(HANDLE job, DWORD cpu_percent, DWORD ram_gb) {
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
+    ZeroMemory(&limits, sizeof(limits));
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (ram_gb > 0) {
+        limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+        limits.JobMemoryLimit = (SIZE_T)ram_gb * (SIZE_T)1024 * 1024 * 1024;
+    }
+    if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+        &limits, sizeof(limits))) return FALSE;
+
+    if (cpu_percent > 0) {
+        JOBOBJECT_CPU_RATE_CONTROL_INFORMATION cpu;
+        ZeroMemory(&cpu, sizeof(cpu));
+        cpu.ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE |
+            JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP;
+        cpu.CpuRate = cpu_percent * 100;
+        if (!SetInformationJobObject(job, JobObjectCpuRateControlInformation,
+            &cpu, sizeof(cpu))) return FALSE;
+    }
+    return TRUE;
+}
+
+static void update_resource_monitor(void) {
+    if (!g_resource_status) return;
+    if (!g_process || !InterlockedCompareExchange(&g_running, 0, 0)) {
+        SetWindowTextW(g_resource_status, L"CPU: --   RAM: --");
+        g_last_cpu_pid = 0;
+        g_last_cpu_100ns = g_last_cpu_tick = 0;
+        return;
+    }
+
+    PROCESS_MEMORY_COUNTERS_EX memory;
+    ZeroMemory(&memory, sizeof(memory));
+    memory.cb = sizeof(memory);
+    double cpu_percent = 0.0;
+    FILETIME created, exited, kernel, user;
+    if (GetProcessTimes(g_process, &created, &exited, &kernel, &user)) {
+        ULARGE_INTEGER k, u;
+        k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
+        u.LowPart = user.dwLowDateTime; u.HighPart = user.dwHighDateTime;
+        ULONGLONG total = k.QuadPart + u.QuadPart;
+        ULONGLONG now = GetTickCount64();
+        DWORD pid = GetProcessId(g_process);
+        if (pid == g_last_cpu_pid && g_last_cpu_tick && now > g_last_cpu_tick &&
+            total >= g_last_cpu_100ns) {
+            SYSTEM_INFO si; GetSystemInfo(&si);
+            DWORD cores = si.dwNumberOfProcessors ? si.dwNumberOfProcessors : 1;
+            double elapsed = (double)(now - g_last_cpu_tick) / 1000.0;
+            cpu_percent = ((double)(total - g_last_cpu_100ns) / 10000000.0) /
+                (elapsed * (double)cores) * 100.0;
+            if (cpu_percent > 100.0) cpu_percent = 100.0;
+        }
+        g_last_cpu_pid = pid;
+        g_last_cpu_tick = now;
+        g_last_cpu_100ns = total;
+    }
+    if (GetProcessMemoryInfo(g_process, (PROCESS_MEMORY_COUNTERS*)&memory,
+        sizeof(memory))) {
+        wchar_t status[256];
+        double working = (double)memory.WorkingSetSize / (1024.0 * 1024.0 * 1024.0);
+        double private_gb = (double)memory.PrivateUsage / (1024.0 * 1024.0 * 1024.0);
+        _snwprintf_s(status, _countof(status), _TRUNCATE,
+            L"CPU: %.1f%%   RAM: %.2f GB working / %.2f GB private",
+            cpu_percent, working, private_gb);
+        SetWindowTextW(g_resource_status, status);
+    } else {
+        SetWindowTextW(g_resource_status, L"CPU: monitoring   RAM: unavailable");
+    }
+}
+
 static void update_fresh_only_controls(void) {
     BOOL fresh=SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED;
     BOOL enabled=!InterlockedCompareExchange(&g_running,0,0) && fresh;
@@ -205,7 +296,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -452,6 +543,12 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         }
     }
 
+    DWORD cpu_limit_percent = 0, ram_limit_gb = 0;
+    if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb)) {
+        MessageBoxW(g_window, L"CPU cap must be 0-100% and RAM cap must be 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+        return;
+    }
+
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
     HANDLE read_pipe=NULL,write_pipe=NULL,child_stdin=NULL;
     if(!CreatePipe(&read_pipe,&write_pipe,&sa,0)){
@@ -491,19 +588,49 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     wchar_t* slash = wcsrchr(working_dir, L'\\');
     if (slash) *slash = 0;
 
-    if (!CreateProcessW(g_engine_path, command, NULL, NULL, TRUE,
-        CREATE_NO_WINDOW, NULL, working_dir, &si, &pi)) {
+    g_resource_job = CreateJobObjectW(NULL, NULL);
+    if (!g_resource_job || !configure_resource_job(g_resource_job,
+        cpu_limit_percent, ram_limit_gb)) {
+        if (g_resource_job) { CloseHandle(g_resource_job); g_resource_job = NULL; }
         if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
         CloseHandle(read_pipe);CloseHandle(write_pipe);
         if(child_stdin)CloseHandle(child_stdin);
         if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
+        MessageBoxW(g_window,L"Could not configure Windows resource limits. The engine was not started.",L"Resource limits",MB_ICONERROR);
+        return;
+    }
+
+    if (!CreateProcessW(g_engine_path, command, NULL, NULL, TRUE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED, NULL, working_dir, &si, &pi)) {
+        if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
+        CloseHandle(read_pipe);CloseHandle(write_pipe);
+        if(child_stdin)CloseHandle(child_stdin);
+        if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
+        if(g_resource_job){CloseHandle(g_resource_job);g_resource_job=NULL;}
         MessageBoxW(g_window,L"Could not start Minima.exe. Make sure it is beside MinimaGUI.exe.",L"ProjectMinima",MB_ICONERROR);
         return;
     }
     CloseHandle(write_pipe);
     if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
     if(child_stdin)CloseHandle(child_stdin);
+    if (!AssignProcessToJobObject(g_resource_job, pi.hProcess)) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        CloseHandle(read_pipe); CloseHandle(g_resource_job); g_resource_job = NULL;
+        if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write = NULL; }
+        MessageBoxW(g_window,L"Windows refused to apply the resource-control job. The engine was not started.",L"Resource limits",MB_ICONERROR);
+        return;
+    }
+    if (ResumeThread(pi.hThread) == (DWORD)-1) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        CloseHandle(read_pipe); CloseHandle(g_resource_job); g_resource_job = NULL;
+        if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write = NULL; }
+        MessageBoxW(g_window,L"Could not resume Minima after applying resource limits.",L"ProjectMinima",MB_ICONERROR);
+        return;
+    }
     g_process = pi.hProcess;
+    g_last_cpu_pid = 0; g_last_cpu_tick = g_last_cpu_100ns = 0;
     g_tokenizer_rebuild_mode=tokenizer_only;
     g_fresh_used_saved_tokenizer=use_prebuilt_tokenizer;
     CloseHandle(pi.hThread);
@@ -524,6 +651,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         if(g_stdin_write){CloseHandle(g_stdin_write);g_stdin_write=NULL;}
         CloseHandle(g_process);
         g_process = NULL;
+        if (g_resource_job) { CloseHandle(g_resource_job); g_resource_job = NULL; }
         CloseHandle(read_pipe);
         g_chat_mode=FALSE;
         g_tokenizer_rebuild_mode=FALSE;
@@ -899,13 +1027,13 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[26] = {
+    HWND edits[28] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
         g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip,
-        g_weight_decay, g_threads
+        g_weight_decay, g_threads, g_cpu_limit, g_ram_limit
     };
     HWND combos[4] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -968,6 +1096,16 @@ static void create_controls(HWND hwnd) {
         &g_threads,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
+    g_resource_status = CreateWindowW(L"STATIC", L"CPU: --   RAM: --", WS_CHILD | WS_VISIBLE,
+        600, 430, 300, 20, hwnd, NULL, NULL, NULL);
+    CreateWindowW(L"STATIC", L"CPU cap %", WS_CHILD | WS_VISIBLE,
+        600, 455, 76, 18, hwnd, (HMENU)(INT_PTR)1024, NULL, NULL);
+    g_cpu_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        680, 452, 48, 23, hwnd, (HMENU)(INT_PTR)1026, NULL, NULL);
+    CreateWindowW(L"STATIC", L"RAM cap GB", WS_CHILD | WS_VISIBLE,
+        750, 455, 88, 18, hwnd, (HMENU)(INT_PTR)1025, NULL, NULL);
+    g_ram_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        842, 452, 48, 23, hwnd, (HMENU)(INT_PTR)1027, NULL, NULL);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
@@ -975,7 +1113,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_resource_status };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1001,6 +1139,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_optimizer, L"Fresh-run optimizer. Resume automatically uses the optimizer stored in the checkpoint. Lion uses engine defaults of learning rate 0.00003 and weight decay 0.1; adjust those fields when selecting Lion.");
         add_tooltip(g_weight_decay, L"AdamW/Lion weight decay, from 0 to 1. The GUI passes this value explicitly, including when resuming.");
         add_tooltip(g_threads, L"OpenMP worker threads. 0 lets the runtime choose its default; 1-256 explicitly sets the worker count.");
+        add_tooltip(g_cpu_limit, L"Windows Job Object hard CPU cap. 0 disables the cap; 1-100 limits total CPU capacity across all logical processors, not the percentage of one core.");
+        add_tooltip(g_ram_limit, L"Windows Job Object hard memory limit for the Minima process group. 0 disables the limit; 1-64 sets the maximum in GiB. A hard limit can cause allocations to fail if set too low.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -1025,7 +1165,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
@@ -1123,9 +1263,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         SetTimer(hwnd,IDT_GRAPH_REFRESH,1000,NULL);
         return 0;
     case WM_TIMER:
-        if(wp==IDT_GRAPH_REFRESH && g_graph) {
-            minima_graph_refresh();
-            InvalidateRect(g_graph,NULL,FALSE);
+        if(wp==IDT_GRAPH_REFRESH) {
+            if (g_graph) { minima_graph_refresh(); InvalidateRect(g_graph,NULL,FALSE); }
+            update_resource_monitor();
         }
         return 0;
     case WM_GETMINMAXINFO: {
@@ -1200,6 +1340,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         const BOOL was_evaluation = g_evaluation_mode;
         g_evaluation_mode = FALSE;
         SetWindowTextW(GetDlgItem(hwnd, IDC_CHAT_STOP), L"Stop generation");
+        update_resource_monitor();
         if(wp==0 && g_tokenizer_rebuild_mode) {
             g_use_saved_tokenizer=TRUE; remember_prebuilt_tokenizer_settings();
             SendMessageW(g_resume, BM_SETCHECK, BST_UNCHECKED, 0);
@@ -1213,6 +1354,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         g_tokenizer_rebuild_mode=FALSE; g_fresh_used_saved_tokenizer=FALSE;
         if (g_eval_job) { CloseHandle(g_eval_job); g_eval_job = NULL; }
+        if (g_resource_job) { CloseHandle(g_resource_job); g_resource_job = NULL; }
         if (g_process) { CloseHandle(g_process); g_process = NULL; }
         if (g_thread) { CloseHandle(g_thread); g_thread = NULL; }
         if (g_stdin_write) { CloseHandle(g_stdin_write); g_stdin_write=NULL; }
