@@ -1543,7 +1543,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
