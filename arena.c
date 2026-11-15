@@ -139,9 +139,8 @@ void* arena_alloc(Arena* a, size_t n) {
         if (commit_bytes > 0) {
             if (!budget_reserve(a->budget, commit_bytes, false)) {
                 fprintf(stderr,
-                    "Engine memory budget reached: arena request needs %.2f MiB; %.2f MiB arena + %.2f MiB tracked heap is committed against a %.2f MiB limit.\n",
-                    (double)commit_bytes / (1024.0 * 1024.0),
-                    0.0, 0.0, 0.0);
+                    "Engine memory budget reached: arena request needs another %.2f MiB. Increase --memory-budget-gb or reduce the model/batch/corpus workload.\n",
+                    (double)commit_bytes / (1024.0 * 1024.0));
                 return NULL;
             }
             void* committed = VirtualAlloc(a->base + a->committed,
