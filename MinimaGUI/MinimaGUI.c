@@ -47,7 +47,7 @@ HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
 static HWND g_optimizer, g_weight_decay, g_threads;
-HWND g_cpu_limit, g_ram_limit, g_resource_status;
+HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write, g_eval_job, g_resource_job;
@@ -361,7 +361,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -1097,13 +1097,13 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[28] = {
+    HWND edits[29] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
         g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip,
-        g_weight_decay, g_threads, g_cpu_limit, g_ram_limit
+        g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget
     };
     HWND combos[4] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -1164,6 +1164,7 @@ static void create_controls(HWND hwnd) {
         &g_optimizer,
         &g_weight_decay,
         &g_threads,
+        &g_arena_budget
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     g_resource_status = CreateWindowW(L"STATIC", L"CPU: --   RAM: --", WS_CHILD | WS_VISIBLE,
@@ -1176,6 +1177,10 @@ static void create_controls(HWND hwnd) {
         750, 455, 88, 18, hwnd, (HMENU)(INT_PTR)IDC_RAM_LIMIT_LABEL, NULL, NULL);
     g_ram_limit = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
         842, 452, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_RAM_LIMIT, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Arena budget GB", WS_CHILD | WS_VISIBLE,
+        600, 482, 104, 18, hwnd, (HMENU)(INT_PTR)IDC_ARENA_BUDGET_LABEL, NULL, NULL);
+    g_arena_budget = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        708, 479, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_ARENA_BUDGET, NULL, NULL);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
@@ -1183,7 +1188,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_resource_status };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_resource_status };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1211,6 +1216,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_threads, L"OpenMP worker threads. 0 lets the runtime choose its default; 1-256 explicitly sets the worker count.");
         add_tooltip(g_cpu_limit, L"Windows Job Object hard CPU cap. 0 disables the cap; 1-100 limits total CPU capacity across all logical processors, not the percentage of one core.");
         add_tooltip(g_ram_limit, L"Windows Job Object hard committed-memory limit for the Minima process group. This is a commit ceiling, not a physical working-set cap. 0 disables it; 1-64 sets GiB. Too low can make allocations fail.");
+        add_tooltip(g_arena_budget, L"Engine-level shared budget for pages committed by Minima's permanent, temporary, and corpus arenas. 0 disables it; 1-64 sets GiB. This budget rejects arena allocations cleanly before Windows runs out of commit.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -1235,7 +1241,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
