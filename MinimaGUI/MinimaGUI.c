@@ -445,6 +445,56 @@ static BOOL engine_sidecar_path(const wchar_t* filename, wchar_t* path, size_t c
     return wcscpy_s(slash + 1, capacity - (size_t)(slash + 1 - path), filename) == 0;
 }
 
+static void save_configuration_profile(void) {
+    wchar_t filename[MAX_PATH] = L"MinimaProfile.ini";
+    static const wchar_t filter[] =
+        L"Minima GUI profile (*.ini)\0*.ini\0All files (*.*)\0*.*\0";
+    OPENFILENAMEW dialog;
+    ZeroMemory(&dialog, sizeof(dialog));
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = g_window;
+    dialog.lpstrFilter = filter;
+    dialog.lpstrFile = filename;
+    dialog.nMaxFile = (DWORD)_countof(filename);
+    dialog.lpstrDefExt = L"ini";
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+    if (!GetSaveFileNameW(&dialog)) return;
+
+    minima_settings_save(&g_settings_context);
+    if (_wcsicmp(filename, g_settings_path) != 0 &&
+        !CopyFileW(g_settings_path, filename, FALSE)) {
+        MessageBoxW(g_window, L"Could not export the current configuration profile.", L"ProjectMinima", MB_ICONERROR);
+        return;
+    }
+    MessageBoxW(g_window, L"Configuration profile saved.", L"ProjectMinima", MB_ICONINFORMATION);
+}
+
+static void load_configuration_profile(void) {
+    wchar_t filename[MAX_PATH] = L"";
+    static const wchar_t filter[] =
+        L"Minima GUI profile (*.ini)\0*.ini\0All files (*.*)\0*.*\0";
+    OPENFILENAMEW dialog;
+    ZeroMemory(&dialog, sizeof(dialog));
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = g_window;
+    dialog.lpstrFilter = filter;
+    dialog.lpstrFile = filename;
+    dialog.nMaxFile = (DWORD)_countof(filename);
+    dialog.lpstrDefExt = L"ini";
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    if (!GetOpenFileNameW(&dialog)) return;
+
+    if (_wcsicmp(filename, g_settings_path) != 0 &&
+        !CopyFileW(filename, g_settings_path, FALSE)) {
+        MessageBoxW(g_window, L"Could not import the selected configuration profile.", L"ProjectMinima", MB_ICONERROR);
+        return;
+    }
+    minima_settings_load(&g_settings_context);
+    apply_resource_profile();
+    update_fresh_only_controls();
+    MessageBoxW(g_window, L"Configuration profile loaded.", L"ProjectMinima", MB_ICONINFORMATION);
+}
+
 static void toggle_training_pause(void) {
     if (!InterlockedCompareExchange(&g_running, 0, 0) ||
         g_chat_mode || g_evaluation_mode || g_tokenizer_rebuild_mode) return;
@@ -481,6 +531,8 @@ static void set_running(BOOL running) {
     InterlockedExchange(&g_running, running ? 1 : 0);
     EnableWindow(GetDlgItem(g_window, IDC_START), !running);
     EnableWindow(GetDlgItem(g_window, IDC_STOP), running);
+    EnableWindow(GetDlgItem(g_window, IDC_SAVE_PROFILE), !running);
+    EnableWindow(GetDlgItem(g_window, IDC_LOAD_PROFILE), !running);
     EnableWindow(GetDlgItem(g_window, IDC_PAUSE), running && !g_chat_mode && !g_evaluation_mode && !g_tokenizer_rebuild_mode);
     if (!running) {
         g_training_paused = FALSE;
@@ -1373,6 +1425,10 @@ static void create_controls(HWND hwnd) {
     SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Training");
     SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Chat");
     SendMessageW(g_resource_profile, CB_SETCURSEL, 0, 0);
+    CreateWindowW(L"BUTTON", L"Save profile", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        600, 570, 112, 24, hwnd, (HMENU)(INT_PTR)IDC_SAVE_PROFILE, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"Load profile", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        720, 570, 112, 24, hwnd, (HMENU)(INT_PTR)IDC_LOAD_PROFILE, NULL, NULL);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
@@ -1380,7 +1436,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE) };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE) };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1438,7 +1494,7 @@ static void create_controls(HWND hwnd) {
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
         g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
-        GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_PAUSE),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
+        GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
         g_group_advanced,g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP),g_eval_button
     };
@@ -1574,6 +1630,14 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         break;
     case WM_COMMAND:
+        if (LOWORD(wp) == IDC_SAVE_PROFILE && HIWORD(wp) == BN_CLICKED) {
+            save_configuration_profile();
+            return 0;
+        }
+        if (LOWORD(wp) == IDC_LOAD_PROFILE && HIWORD(wp) == BN_CLICKED) {
+            load_configuration_profile();
+            return 0;
+        }
         if (LOWORD(wp) == IDC_PAUSE && HIWORD(wp) == BN_CLICKED) {
             toggle_training_pause();
             return 0;
