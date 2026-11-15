@@ -159,8 +159,28 @@ static void save_chat_text(const wchar_t* text) {
     free(utf8);
 }
 
+static void capture_tokens_per_second(const wchar_t* text) {
+    if (!text) return;
+    const wchar_t* cursor = text;
+    while ((cursor = wcsstr(cursor, L"tok/s")) != NULL) {
+        const wchar_t* number = cursor;
+        while (number > text &&
+            ((number[-1] >= L'0' && number[-1] <= L'9') || number[-1] == L'.'))
+            --number;
+        if (number < cursor) {
+            wchar_t* end = NULL;
+            const double value = wcstod(number, &end);
+            if (end != number && isfinite(value) && value >= 0.0)
+                g_last_tokens_per_second = value;
+        }
+        cursor += 5;
+    }
+}
+
 static void append_log(const wchar_t* text) {
-    if (!g_log || !text) return;
+    if (!text) return;
+    capture_tokens_per_second(text);
+    if (!g_log) return;
     int end=GetWindowTextLengthW(g_log);
     SendMessageW(g_log,EM_SETSEL,(WPARAM)end,(LPARAM)end);
     SendMessageW(g_log,EM_REPLACESEL,FALSE,(LPARAM)text);
@@ -1879,7 +1899,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_chat_response_active = TRUE;
                 append_chat_text(L"Minima: ");
                 append_chat_text(line + 5);
-            } else if (g_chat_response_active) {
+            } else if (g_chat_response_active && !wcsstr(line, L"CHAT_STATS:")) {
                 append_chat_text(line);
             }
         }
