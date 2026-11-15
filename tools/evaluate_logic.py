@@ -49,32 +49,29 @@ def load_cases(path: Path) -> list[dict[str, Any]]:
     return cases
 
 def build_chat_input(cases: list[dict[str, Any]], max_new_tokens: int) -> str:
-    """Build input without ever serializing reference answers or scoring notes."""
+    """Build normal chat turns, clearing history before every independent case."""
+    del max_new_tokens  # The executable's CLI controls the generation budget.
     chunks: list[str] = []
     for case in cases:
-        chunks.append(
-            f"/test 1.0 1 1.0 1.0 {max_new_tokens}\n"
-            f"Human: {case['prompt']}\n"
-            "Assistant:\n"
-        )
+        chunks.append(f"/clear\n{case['prompt']}\n")
     chunks.append("/quit\n")
     return "".join(chunks)
 
-def parse_test_responses(stdout: str) -> list[str]:
-    """Extract multiline TEST responses, ending at the chat-ready protocol line."""
+def parse_chat_responses(stdout: str) -> list[str]:
+    """Extract multiline BOT responses, ending at the chat-ready protocol line."""
     responses: list[str] = []
     current: list[str] | None = None
     for line in stdout.splitlines():
         if current is None:
-            if line.startswith("TEST: "):
-                current = [line[len("TEST: "):]]
+            if line.startswith("BOT: "):
+                current = [line[len("BOT: "):]]
         elif line == "CHAT_READY":
             responses.append("\n".join(current).strip())
             current = None
         else:
             current.append(line)
     if current is not None:
-        raise ValueError("Minima output ended before CHAT_READY after a TEST response")
+        raise ValueError("Minima output ended before CHAT_READY after a BOT response")
     return responses
 
 def run(args: argparse.Namespace) -> int:
@@ -110,7 +107,7 @@ def run(args: argparse.Namespace) -> int:
         if completed.stderr:
             print(completed.stderr, file=sys.stderr)
         raise RuntimeError(f"Minima exited with status {completed.returncode}")
-    responses = parse_test_responses(completed.stdout)
+    responses = parse_chat_responses(completed.stdout)
     if len(responses) != len(cases):
         raise RuntimeError(
             f"Expected {len(cases)} TEST responses, received {len(responses)}.\n"
