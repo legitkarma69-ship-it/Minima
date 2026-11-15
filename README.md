@@ -203,7 +203,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 | E2.1 | Expose optimizer selection (AdamW / Lion), weight decay, and advanced beta1/beta2/epsilon settings where applicable. | [~] Optimizer selection and weight decay are exposed; beta1/beta2/epsilon controls remain. AdamW now excludes RMSNorm scales from decoupled weight decay. |
 | E2.2 | Allow individual corpus-source weights, not only global mix modes. | [ ] |
 | E2.3 | Add generation controls: min-p, frequency/presence penalties, no-repeat n-gram, sampling seed, stop sequences, and minimum new tokens. | [ ] |
-| E2.4 | Configuration profiles with save, load, export, and import. | [ ] |
+| E2.4 | Configuration profiles with save, load, export, and import. | [x] Save profile exports the current persisted GUI settings to an INI file; Load profile imports an INI and immediately applies its controls. |
 | E2.5 | Show a pre-training memory estimate covering weights, gradients, optimizer state, activations, tokenizer, and corpus; compare it with the configured resource budget. | [~] Existing working-set estimate now runs alongside the shared arena budget, but tokenizer, mapped corpus IDs, and process/runtime overhead are still excluded from the estimate. |
 
 ### 5.3 Training monitor
