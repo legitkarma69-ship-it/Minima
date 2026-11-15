@@ -28,6 +28,7 @@
 typedef struct { HWND hwnd; RECT rect; } GuiInitialRect;
 extern HWND g_window, g_corpus, g_log, g_main_tabs, g_chat_display, g_log_label;
 extern HWND g_chat_input, g_chat_test, g_graph;
+extern HWND g_cpu_limit, g_ram_limit, g_resource_status;
 extern HWND g_clear_chat, g_clear_logs, g_eval_button;
 extern HWND g_group_corpus, g_group_model, g_group_training;
 extern HWND g_group_advanced, g_group_monitor, g_group_output, g_output_label;
