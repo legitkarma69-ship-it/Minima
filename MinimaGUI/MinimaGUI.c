@@ -608,9 +608,15 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         }
     }
 
-    DWORD cpu_limit_percent = 0, ram_limit_gb = 0;
-    if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb)) {
-        MessageBoxW(g_window, L"CPU cap must be 0-100% and RAM cap must be 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+    DWORD cpu_limit_percent = 0, ram_limit_gb = 0, arena_budget_gb = 0;
+    if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb) ||
+        !read_bounded_integer(g_arena_budget, 64, &arena_budget_gb)) {
+        MessageBoxW(g_window, L"CPU cap must be 0-100%, process commit cap 0-64 GB, and arena budget 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+        return;
+    }
+    if (arena_budget_gb > 0 &&
+        !append_option(command, _countof(command), L"--memory-budget-gb", g_arena_budget)) {
+        MessageBoxW(g_window, L"Could not add the arena memory budget to the process command.", L"Resource limits", MB_ICONERROR);
         return;
     }
 
@@ -766,9 +772,15 @@ static void start_logic_evaluation(void) {
         return;
     }
     wcscat_s(command, _countof(command), L" --max-new-tokens 64");
-    DWORD cpu_limit_percent = 0, ram_limit_gb = 0;
-    if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb)) {
-        MessageBoxW(g_window, L"CPU cap must be 0-100% and RAM cap must be 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+    DWORD cpu_limit_percent = 0, ram_limit_gb = 0, arena_budget_gb = 0;
+    if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb) ||
+        !read_bounded_integer(g_arena_budget, 64, &arena_budget_gb)) {
+        MessageBoxW(g_window, L"CPU cap must be 0-100%, process commit cap 0-64 GB, and arena budget 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+        return;
+    }
+    if (arena_budget_gb > 0 &&
+        !append_option(command, _countof(command), L"--memory-budget-gb", g_arena_budget)) {
+        MessageBoxW(g_window, L"Could not add the arena memory budget to the process command.", L"Resource limits", MB_ICONERROR);
         return;
     }
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
