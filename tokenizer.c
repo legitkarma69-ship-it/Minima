@@ -152,6 +152,7 @@ bool tokenizer_train_reference_segments(Tokenizer* tok, Arena* arena,
         return false;
 
     memset(tok, 0, sizeof(*tok));
+    tok->memory_budget = arena->budget;
 
     // 1. Special tokens
     add_token(tok, arena, "<bos>", 5);
@@ -669,6 +670,7 @@ bool tokenizer_train_incremental_segments(Tokenizer* tok, Arena* arena,
 
     const size_t arena_used_before = arena->used;
     memset(tok, 0, sizeof(*tok));
+    tok->memory_budget = arena->budget;
     add_token(tok, arena, "<bos>", 5);
     add_token(tok, arena, "<eos>", 5);
     add_token(tok, arena, "<pad>", 5);
@@ -1032,12 +1034,12 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
         text_len > SIZE_MAX / sizeof(uint32_t))
         return -2;
 
-    BpeEncodeNode* nodes = (BpeEncodeNode*)malloc(
+    BpeEncodeNode* nodes = (BpeEncodeNode*)arena_budget_malloc(tok->memory_budget, 
         text_len * sizeof(BpeEncodeNode));
-    uint32_t* heap = (uint32_t*)malloc(text_len * sizeof(uint32_t));
+    uint32_t* heap = (uint32_t*)arena_budget_malloc(tok->memory_budget, text_len * sizeof(uint32_t));
     if (!nodes || !heap) {
-        free(nodes);
-        free(heap);
+        arena_budget_free(nodes);
+        arena_budget_free(heap);
         return -2;
     }
 
@@ -1073,16 +1075,16 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
         if (right_index == ENCODE_NONE ||
             nodes[left_index].id == UINT16_MAX ||
             nodes[right_index].id == UINT16_MAX) {
-            free(nodes);
-            free(heap);
+            arena_budget_free(nodes);
+            arena_budget_free(heap);
             return -1;
         }
 
         const uint16_t rank = tokenizer_find_merge_rank(tok,
             nodes[left_index].id, nodes[right_index].id);
         if (rank == ENCODE_NO_RANK || rank != nodes[left_index].rank) {
-            free(nodes);
-            free(heap);
+            arena_budget_free(nodes);
+            arena_budget_free(heap);
             return -1;
         }
 
@@ -1110,15 +1112,15 @@ static int tokenizer_encode_heap(const Tokenizer* tok,
     int output_count = 0;
     for (uint32_t i = 0; i != ENCODE_NONE; i = nodes[i].next) {
         if (output_count >= (int)text_len) {
-            free(nodes);
-            free(heap);
+            arena_budget_free(nodes);
+            arena_budget_free(heap);
             return -1;
         }
         out[output_count++] = nodes[i].id;
     }
 
-    free(nodes);
-    free(heap);
+    arena_budget_free(nodes);
+    arena_budget_free(heap);
     return output_count;
 }
 
@@ -1137,11 +1139,11 @@ static int tokenizer_encode_chunked(const Tokenizer* tok,
         return -1;
     const int chunk_count = (int)chunk_count_size;
 
-    int* chunk_counts = (int*)calloc((size_t)chunk_count, sizeof(int));
-    int* chunk_errors = (int*)calloc((size_t)chunk_count, sizeof(int));
+    int* chunk_counts = (int*)arena_budget_calloc(tok->memory_budget, (size_t)chunk_count, sizeof(int));
+    int* chunk_errors = (int*)arena_budget_calloc(tok->memory_budget, (size_t)chunk_count, sizeof(int));
     if (!chunk_counts || !chunk_errors) {
-        free(chunk_counts);
-        free(chunk_errors);
+        arena_budget_free(chunk_counts);
+        arena_budget_free(chunk_errors);
         return -1;
     }
 
@@ -1163,7 +1165,7 @@ static int tokenizer_encode_chunked(const Tokenizer* tok,
         const size_t window_end = core_end + right_context;
         const size_t window_len = window_end - window_start;
 
-        uint16_t* scratch = (uint16_t*)malloc(
+        uint16_t* scratch = (uint16_t*)arena_budget_malloc(tok->memory_budget, 
             window_len * sizeof(uint16_t));
         if (!scratch) {
             chunk_errors[chunk_index] = 1;
@@ -1176,7 +1178,7 @@ static int tokenizer_encode_chunked(const Tokenizer* tok,
             encoded = tokenizer_encode_reference(tok, text + window_start,
                 window_len, scratch, (int)window_len);
         if (encoded < 0) {
-            free(scratch);
+            arena_budget_free(scratch);
             chunk_errors[chunk_index] = 1;
             continue;
         }
@@ -1208,13 +1210,13 @@ static int tokenizer_encode_chunked(const Tokenizer* tok,
             chunk_errors[chunk_index] = 1;
         if (!chunk_errors[chunk_index])
             chunk_counts[chunk_index] = (int)local_count;
-        free(scratch);
+        arena_budget_free(scratch);
     }
 
     for (int i = 0; i < chunk_count; i++) {
         if (chunk_errors[i]) {
-            free(chunk_counts);
-            free(chunk_errors);
+            arena_budget_free(chunk_counts);
+            arena_budget_free(chunk_errors);
             return -1;
         }
     }
@@ -1224,8 +1226,8 @@ static int tokenizer_encode_chunked(const Tokenizer* tok,
         const size_t source_offset = (size_t)i * chunk_bytes;
         const size_t count = (size_t)chunk_counts[i];
         if (count > (size_t)out_cap - output_count) {
-            free(chunk_counts);
-            free(chunk_errors);
+            arena_budget_free(chunk_counts);
+            arena_budget_free(chunk_errors);
             return -1;
         }
         memmove(out + output_count, out + source_offset,
@@ -1233,8 +1235,8 @@ static int tokenizer_encode_chunked(const Tokenizer* tok,
         output_count += count;
     }
 
-    free(chunk_counts);
-    free(chunk_errors);
+    arena_budget_free(chunk_counts);
+    arena_budget_free(chunk_errors);
     return (int)output_count;
 }
 
@@ -1356,13 +1358,13 @@ bool tokenizer_save(const Tokenizer* tok, const char* path) {
 
     const size_t path_len = strlen(path);
     if (path_len > SIZE_MAX - 5) return false;
-    char* temp_path = (char*)malloc(path_len + 5);
+    char* temp_path = (char*)arena_budget_malloc(tok->memory_budget, path_len + 5);
     if (!temp_path) return false;
     memcpy(temp_path, path, path_len);
     memcpy(temp_path + path_len, ".tmp", 5);
 
     FILE* f = fopen(temp_path, "wb");
-    if (!f) { free(temp_path); return false; }
+    if (!f) { arena_budget_free(temp_path); return false; }
 
     uint32_t magic = 0x42504531;
     bool ok = fwrite(&magic, sizeof(magic), 1, f) == 1 &&
@@ -1395,7 +1397,7 @@ bool tokenizer_save(const Tokenizer* tok, const char* path) {
             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
     }
     if (!ok) remove(temp_path);
-    free(temp_path);
+    arena_budget_free(temp_path);
     return ok;
 }
 
@@ -1418,7 +1420,7 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
         n_merges > vocab_size - 260)
         goto fail;
 
-    loaded = (Tokenizer*)calloc(1, sizeof(*loaded));
+    loaded = (Tokenizer*)arena_budget_calloc(arena->budget, 1, sizeof(*loaded));
     if (!loaded) goto fail;
     loaded->vocab_size = vocab_size;
     loaded->n_merges = n_merges;
@@ -1481,17 +1483,18 @@ bool tokenizer_load(Tokenizer* tok, Arena* arena, const char* path) {
         goto fail;
     if (fclose(f) != 0) {
         arena->used = arena_used_before;
-        free(loaded);
+        arena_budget_free(loaded);
         return false;
     }
     *tok = *loaded;
-    free(loaded);
+    tok->memory_budget = arena->budget;
+    arena_budget_free(loaded);
     return true;
 
 fail:
     fclose(f);
     arena->used = arena_used_before;
-    free(loaded);
+    arena_budget_free(loaded);
     return false;
 }
 
