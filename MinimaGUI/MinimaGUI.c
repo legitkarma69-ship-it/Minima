@@ -326,6 +326,56 @@ static void reset_resource_peaks(void) {
     g_ram_warning_issued = FALSE;
 }
 
+static void update_status_bar(double cpu_percent, SIZE_T committed_bytes,
+    BOOL have_memory) {
+    if (!g_status_bar) return;
+    wchar_t cpu_limit_text[32] = L"0", ram_limit_text[32] = L"0";
+    wchar_t threads_text[32] = L"0";
+    if (g_cpu_limit) GetWindowTextW(g_cpu_limit, cpu_limit_text, (int)_countof(cpu_limit_text));
+    if (g_ram_limit) GetWindowTextW(g_ram_limit, ram_limit_text, (int)_countof(ram_limit_text));
+    if (g_threads) GetWindowTextW(g_threads, threads_text, (int)_countof(threads_text));
+    const unsigned long cpu_cap = wcstoul(cpu_limit_text, NULL, 10);
+    const unsigned long ram_cap = wcstoul(ram_limit_text, NULL, 10);
+    const unsigned long thread_count = wcstoul(threads_text, NULL, 10);
+    wchar_t mode[24], cpu_field[40], memory_field[48], threads_field[32], tps_field[32];
+    if (!g_running) {
+        wcscpy_s(mode, _countof(mode), L"Idle");
+        wcscpy_s(cpu_field, _countof(cpu_field), L"--");
+        wcscpy_s(memory_field, _countof(memory_field), L"--");
+        wcscpy_s(tps_field, _countof(tps_field), L"--");
+    } else {
+        const wchar_t* mode_text = g_training_paused ? L"Paused" :
+            (g_evaluation_mode ? L"Evaluation" :
+            (g_tokenizer_rebuild_mode ? L"Tokenizer" :
+            (g_chat_mode ? L"Chat" : L"Training")));
+        wcscpy_s(mode, _countof(mode), mode_text);
+        _snwprintf_s(cpu_field, _countof(cpu_field), _TRUNCATE,
+            L"%.0f/%s", cpu_percent, cpu_cap ? L"capped" : L"uncapped");
+        if (have_memory) {
+            const double committed_gb = (double)committed_bytes /
+                (1024.0 * 1024.0 * 1024.0);
+            _snwprintf_s(memory_field, _countof(memory_field), _TRUNCATE,
+                L"%.2f/%s", committed_gb, ram_cap ? L"GB cap" : L"GB");
+        } else {
+            wcscpy_s(memory_field, _countof(memory_field), L"--");
+        }
+        if (g_last_tokens_per_second > 0.0)
+            _snwprintf_s(tps_field, _countof(tps_field), _TRUNCATE,
+                L"%.0f", g_last_tokens_per_second);
+        else
+            wcscpy_s(tps_field, _countof(tps_field), L"--");
+    }
+    if (thread_count > 0)
+        _snwprintf_s(threads_field, _countof(threads_field), _TRUNCATE, L"%lu", thread_count);
+    else
+        wcscpy_s(threads_field, _countof(threads_field), L"Auto");
+    wchar_t status[256];
+    _snwprintf_s(status, _countof(status), _TRUNCATE,
+        L"%s | CPU %s | Commit %s | Threads %s | tok/s %s",
+        mode, cpu_field, memory_field, threads_field, tps_field);
+    SetWindowTextW(g_status_bar, status);
+}
+
 static void update_resource_monitor(void) {
     if (!g_resource_status) return;
     if (!g_process || !InterlockedCompareExchange(&g_running, 0, 0)) {
@@ -335,6 +385,7 @@ static void update_resource_monitor(void) {
             g_peak_cpu_percent,
             (double)g_peak_working_bytes / (1024.0 * 1024.0 * 1024.0));
         SetWindowTextW(g_resource_status, idle_status);
+        update_status_bar(0.0, 0, FALSE);
         g_last_cpu_pid = 0;
         g_last_cpu_100ns = g_last_cpu_tick = 0;
         return;
@@ -430,6 +481,7 @@ static void update_resource_monitor(void) {
     } else {
         SetWindowTextW(g_resource_status, L"CPU monitoring | memory unavailable");
     }
+    update_status_bar(cpu_percent, private_bytes, have_memory);
 }
 
 static void update_fresh_only_controls(void) {
