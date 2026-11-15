@@ -325,7 +325,7 @@ jobs:
       - name: Verify role-tagged conversational chat format
         shell: pwsh
         run: |
-          $chatInput = "Hello there.`r`nWhat is your name?`r`n/quit`r`n"
+          $chatInput = "Hello there.`r`nWhat is your name?`r`n/clear`r`nWhat is your name?`r`n/quit`r`n"
           [System.IO.File]::WriteAllText(
             "minima_role_chat_input.txt",
             $chatInput,
@@ -340,11 +340,14 @@ jobs:
           if ($text -notmatch "CHAT_FORMAT: Human:/Assistant:") {
             throw "Chat engine did not announce the role-tagged conversation format."
           }
-          if (([regex]::Matches($text, "BOT:")).Count -ne 2) {
-            throw "Role-tagged chat did not produce two assistant turns."
+          if (([regex]::Matches($text, "BOT:")).Count -ne 3) {
+            throw "Role-tagged chat did not produce three assistant turns."
           }
-          if (([regex]::Matches($text, "CHAT_READY")).Count -lt 3) {
-            throw "Chat protocol did not return to ready state after both turns."
+          if (([regex]::Matches($text, "CHAT_HISTORY_CLEARED")).Count -ne 1) {
+            throw "The /clear command did not acknowledge the history reset."
+          }
+          if (([regex]::Matches($text, "CHAT_READY")).Count -lt 5) {
+            throw "Chat protocol did not return to ready state after each turn and reset."
           }
       - name: Publish Windows executables
         uses: actions/upload-artifact@v4
