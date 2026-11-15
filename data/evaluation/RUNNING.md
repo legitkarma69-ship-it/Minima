@@ -33,7 +33,7 @@ python tools/evaluate_logic.py --max-new-tokens 64
 ## What the runner does
 
 - Loads the checkpoint and tokenizer once.
-- Sends every case as an independent `Human: ...` / `Assistant:` prompt through the chat engine's one-shot `/test` path. No earlier test response is included in a later prompt.
+- Sends each case through normal conversational chat, issuing `/clear` before every prompt. The new command resets history, so no earlier test response is included in a later prompt.
 - Uses greedy decoding (`temperature=1`, `top-k=1`, `top-p=1`, repetition penalty `1`) so the same checkpoint and prompt produce repeatable token choices.
 - Sends only the `prompt` field to Minima. `reference_answer` and `scoring_notes` are read by the runner for the result file and are never sent to the model.
 - Writes one result per line to `logic_results.jsonl` by default. Each record includes the prompt, generated response, reference answer, scoring notes, decoding settings, and SHA-256 fingerprints of the model and tokenizer.
