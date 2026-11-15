@@ -234,7 +234,6 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
         SendMessageW(chat_combo_info.hwndItem, EM_SETCUEBANNER, TRUE,
             (LPARAM)L"Type a message and press Enter to start or send; the arrow shows examples.");
     g_chat_test=CreateWindowW(L"BUTTON",L"Test settings",WS_CHILD|WS_VISIBLE|WS_DISABLED,620,665,100,26,parent,(HMENU)(INT_PTR)IDC_CHAT_TEST,NULL,NULL);
-    REGISTER_ADVANCED(g_chat_test);
     CreateWindowW(L"BUTTON",L"Send",WS_CHILD|WS_VISIBLE|WS_DISABLED,730,665,110,26,parent,(HMENU)(INT_PTR)IDC_CHAT_SEND,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop generation",WS_CHILD|WS_VISIBLE|WS_DISABLED,850,665,100,26,parent,(HMENU)(INT_PTR)IDC_CHAT_STOP,NULL,NULL);
 #undef g_corpus
