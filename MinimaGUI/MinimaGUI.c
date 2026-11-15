@@ -47,12 +47,16 @@ HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
 static HWND g_optimizer, g_weight_decay, g_threads;
-HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_resource_status;
+HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write, g_eval_job, g_resource_job;
 static ULONGLONG g_last_cpu_100ns, g_last_cpu_tick;
 static DWORD g_last_cpu_pid;
+static double g_peak_cpu_percent;
+static SIZE_T g_peak_working_bytes, g_peak_private_bytes;
+static DWORD g_cpu_warning_limit, g_ram_warning_limit_gb;
+static BOOL g_cpu_warning_issued, g_ram_warning_issued;
 static BOOL g_chat_mode;
 static BOOL g_evaluation_mode;
 static BOOL g_chat_response_active;
@@ -262,10 +266,23 @@ static BOOL query_job_memory_usage(HANDLE job, SIZE_T* working_bytes,
     return TRUE;
 }
 
+static void reset_resource_peaks(void) {
+    g_peak_cpu_percent = 0.0;
+    g_peak_working_bytes = 0;
+    g_peak_private_bytes = 0;
+    g_cpu_warning_issued = FALSE;
+    g_ram_warning_issued = FALSE;
+}
+
 static void update_resource_monitor(void) {
     if (!g_resource_status) return;
     if (!g_process || !InterlockedCompareExchange(&g_running, 0, 0)) {
-        SetWindowTextW(g_resource_status, L"CPU: --   RAM: --");
+        wchar_t idle_status[160];
+        _snwprintf_s(idle_status, _countof(idle_status), _TRUNCATE,
+            L"Last peak: CPU %.0f%% | RAM %.2f GB",
+            g_peak_cpu_percent,
+            (double)g_peak_working_bytes / (1024.0 * 1024.0 * 1024.0));
+        SetWindowTextW(g_resource_status, idle_status);
         g_last_cpu_pid = 0;
         g_last_cpu_100ns = g_last_cpu_tick = 0;
         return;
@@ -314,6 +331,7 @@ static void update_resource_monitor(void) {
         g_last_cpu_tick = now;
         g_last_cpu_100ns = total;
     }
+    if (cpu_percent > g_peak_cpu_percent) g_peak_cpu_percent = cpu_percent;
     SIZE_T working_bytes = 0, private_bytes = 0;
     BOOL have_memory = active_job &&
         query_job_memory_usage(active_job, &working_bytes, &private_bytes);
@@ -324,13 +342,39 @@ static void update_resource_monitor(void) {
         have_memory = TRUE;
     }
     if (have_memory) {
+        if (working_bytes > g_peak_working_bytes) g_peak_working_bytes = working_bytes;
+        if (private_bytes > g_peak_private_bytes) g_peak_private_bytes = private_bytes;
         wchar_t status[256];
         double working = (double)working_bytes / (1024.0 * 1024.0 * 1024.0);
+        double peak_working = (double)g_peak_working_bytes / (1024.0 * 1024.0 * 1024.0);
         double private_gb = (double)private_bytes / (1024.0 * 1024.0 * 1024.0);
+        double peak_private = (double)g_peak_private_bytes / (1024.0 * 1024.0 * 1024.0);
         _snwprintf_s(status, _countof(status), _TRUNCATE,
-            L"CPU %.0f%% | WS %.2f GB | Priv %.2f GB",
-            cpu_percent, working, private_gb);
+            L"CPU %.0f/%.0f%% | WS %.2f/%.2f GB | Commit %.2f/%.2f GB",
+            cpu_percent, g_peak_cpu_percent, working, peak_working,
+            private_gb, peak_private);
         SetWindowTextW(g_resource_status, status);
+
+        if (!g_cpu_warning_issued && g_cpu_warning_limit > 0 &&
+            cpu_percent >= (double)g_cpu_warning_limit) {
+            wchar_t warning[160];
+            _snwprintf_s(warning, _countof(warning), _TRUNCATE,
+                L"Resource warning: CPU utilization reached %.0f%% (configured threshold %lu%%).\r\n",
+                cpu_percent, (unsigned long)g_cpu_warning_limit);
+            append_log(warning);
+            g_cpu_warning_issued = TRUE;
+        }
+        const SIZE_T ram_warning_bytes =
+            (SIZE_T)g_ram_warning_limit_gb * (SIZE_T)1024 * 1024 * 1024;
+        if (!g_ram_warning_issued && ram_warning_bytes > 0 &&
+            working_bytes >= ram_warning_bytes) {
+            wchar_t warning[160];
+            _snwprintf_s(warning, _countof(warning), _TRUNCATE,
+                L"Resource warning: process-group working set reached %.2f GiB (configured threshold %lu GiB).\r\n",
+                working, (unsigned long)g_ram_warning_limit_gb);
+            append_log(warning);
+            g_ram_warning_issued = TRUE;
+        }
     } else {
         SetWindowTextW(g_resource_status, L"CPU monitoring | memory unavailable");
     }
@@ -361,7 +405,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -702,6 +746,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     }
     g_process = pi.hProcess;
     g_last_cpu_pid = 0; g_last_cpu_tick = g_last_cpu_100ns = 0;
+    reset_resource_peaks();
     g_tokenizer_rebuild_mode=tokenizer_only;
     g_fresh_used_saved_tokenizer=use_prebuilt_tokenizer;
     CloseHandle(pi.hThread);
@@ -813,6 +858,7 @@ static void start_logic_evaluation(void) {
     ResumeThread(pi.hThread); CloseHandle(pi.hThread);
     g_eval_job = eval_job; g_process = pi.hProcess;
     g_last_cpu_pid = 0; g_last_cpu_tick = g_last_cpu_100ns = 0;
+    reset_resource_peaks();
     update_resource_monitor();
     g_chat_mode = FALSE; g_evaluation_mode = TRUE;
     gui_layout_select_main_page(g_window, 2); set_running(TRUE);
@@ -1109,13 +1155,14 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[29] = {
+    HWND edits[31] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
         g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip,
-        g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget
+        g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget,
+        g_cpu_warning, g_ram_warning
     };
     HWND combos[4] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -1176,7 +1223,9 @@ static void create_controls(HWND hwnd) {
         &g_optimizer,
         &g_weight_decay,
         &g_threads,
-        &g_arena_budget
+        &g_arena_budget,
+        &g_cpu_warning,
+        &g_ram_warning
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     g_resource_status = CreateWindowW(L"STATIC", L"CPU: --   RAM: --", WS_CHILD | WS_VISIBLE,
@@ -1193,6 +1242,14 @@ static void create_controls(HWND hwnd) {
         600, 482, 104, 18, hwnd, (HMENU)(INT_PTR)IDC_ARENA_BUDGET_LABEL, NULL, NULL);
     g_arena_budget = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
         708, 479, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_ARENA_BUDGET, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Warn CPU %", WS_CHILD | WS_VISIBLE,
+        600, 512, 78, 18, hwnd, (HMENU)(INT_PTR)IDC_CPU_WARNING_LABEL, NULL, NULL);
+    g_cpu_warning = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        680, 509, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_CPU_WARNING, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Warn RAM GB", WS_CHILD | WS_VISIBLE,
+        750, 512, 88, 18, hwnd, (HMENU)(INT_PTR)IDC_RAM_WARNING_LABEL, NULL, NULL);
+    g_ram_warning = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
+        842, 509, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_RAM_WARNING, NULL, NULL);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
@@ -1200,7 +1257,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_resource_status };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_status };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1229,6 +1286,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_cpu_limit, L"Windows Job Object hard CPU cap. 0 disables the cap; 1-100 limits total CPU capacity across all logical processors, not the percentage of one core.");
         add_tooltip(g_ram_limit, L"Windows Job Object hard committed-memory limit for the Minima process group. This is a commit ceiling, not a physical working-set cap. 0 disables it; 1-64 sets GiB. Too low can make allocations fail.");
         add_tooltip(g_arena_budget, L"Engine-level shared budget for pages committed by Minima's permanent, temporary, and corpus arenas. 0 disables it; 1-64 sets GiB. This budget rejects arena allocations cleanly before Windows runs out of commit.");
+        add_tooltip(g_cpu_warning, L"Log one warning per run when measured process-group CPU utilization reaches this percentage. 0 disables the warning; 1-100 is normalized to total logical-processor capacity.");
+        add_tooltip(g_ram_warning, L"Log one warning per run when the process-group working set reaches this GiB threshold. 0 disables the warning; 1-64 is allowed.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -1253,7 +1312,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
