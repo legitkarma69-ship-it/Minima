@@ -391,23 +391,24 @@ bool generation_inspect_next_tokens(Model* model, const Tokenizer* tok,
 // Sampling helpers
 // ------------------------------------------------------------------
 
-static bool repeats_ngram(const uint16_t* history, int history_len,
-    uint16_t candidate, int ngram_size) {
-    if (ngram_size <= 0 || history_len < ngram_size - 1) return false;
+static void mark_repeated_ngrams(const uint16_t* history, int history_len,
+    int ngram_size, uint8_t* banned, int vocab) {
+    if (ngram_size <= 0 || !history || !banned || history_len <= 0) return;
     if (ngram_size == 1) {
         for (int i = 0; i < history_len; ++i)
-            if (history[i] == candidate) return true;
-        return false;
+            if (history[i] < (uint16_t)vocab) banned[history[i]] = 1;
+        return;
     }
     const int prefix_len = ngram_size - 1;
+    if (history_len < prefix_len) return;
     const int current_start = history_len - prefix_len;
     for (int start = 0; start + prefix_len < history_len; ++start) {
         if (memcmp(history + start, history + current_start,
-                (size_t)prefix_len * sizeof(uint16_t)) == 0 &&
-            history[start + prefix_len] == candidate)
-            return true;
+                (size_t)prefix_len * sizeof(uint16_t)) == 0) {
+            const uint16_t next = history[start + prefix_len];
+            if (next < (uint16_t)vocab) banned[next] = 1;
+        }
     }
-    return false;
 }
 
 static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
@@ -418,10 +419,13 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
     float vals[256];
     int n = 0;
     uint8_t seen[TOK_MAX_VOCAB] = {0};
+    uint8_t banned[TOK_MAX_VOCAB] = {0};
     uint16_t counts[TOK_MAX_VOCAB] = {0};
     if (top_k < 1) top_k = 1;
     if (top_k > vocab) top_k = vocab;
     if (top_k > 256) top_k = 256;
+    if (no_repeat_ngram_size > 0)
+        mark_repeated_ngrams(history, history_len, no_repeat_ngram_size, banned, vocab);
     if (repetition_penalty > 1.0f || frequency_penalty != 0.0f ||
         presence_penalty != 0.0f) {
         for (int j = 0; j < history_len; ++j) {
@@ -438,9 +442,7 @@ static int sample_top_k_top_p(const float* logits, int vocab, float temperature,
                 value * repetition_penalty;
         if (counts[id] > 0)
             value -= frequency_penalty * (float)counts[id] + presence_penalty;
-        if (no_repeat_ngram_size > 0 &&
-            repeats_ngram(history, history_len, (uint16_t)id, no_repeat_ngram_size))
-            value = -INFINITY;
+        if (banned[id]) value = -INFINITY;
         value /= temperature;
         if (n < top_k) {
             idx[n] = id;
