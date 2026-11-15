@@ -678,6 +678,7 @@ static void set_running(BOOL running) {
     EnableWindow(g_eval_button,!running);
     SetWindowTextW(g_status,running?(g_chat_mode?L"Starting chat":L"Training running"):L"Idle");
     update_fresh_only_controls();
+    update_resource_monitor();
 }
 
 static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* arg) {
