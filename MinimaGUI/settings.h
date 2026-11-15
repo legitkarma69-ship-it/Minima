@@ -6,7 +6,7 @@
 
 typedef struct MinimaSettingsContext {
     const wchar_t* path;
-    HWND edit_controls[26];
+    HWND edit_controls[28];
     HWND combo_controls[4];
     HWND resume_control;
     HWND corpus_control;
