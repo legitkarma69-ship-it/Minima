@@ -182,7 +182,210 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 | E5.3 | Add model/checkpoint integrity checks, fingerprints, and compatibility validation. | [ ] |
 | E5.4 | Record structured benchmark results: commit, dimensions, vocabulary, corpus fingerprint, losses, peak RAM, milliseconds/step, tokens/second, and fixed-prompt generations. | [ ] |
 
-## 6. Practical implementation roadmap
+## 6. Conversation, memory, retrieval, tools, and safety architecture
+
+This section records the intended direction for Minima's interaction/runtime architecture. These are design requirements and roadmap items, **not claims that the features already exist**. Keep the implementation incremental and preserve a small, dependable C inference core.
+
+### 6.1 Current interaction baseline
+
+The current chat path is deliberately simple:
+
+- Training conversation data uses only `Human:` and `Assistant:` labels. See `data/README.md`.
+- Interactive chat builds a plain-text prompt from the retained conversation plus the latest `Human:` turn and an `Assistant:` generation prefix.
+- The console chat implementation currently keeps conversation history in a fixed-size in-process buffer. It removes the oldest complete user turn when the prompt no longer fits, and may shorten an oversized current user message.
+- Chat prompt encoding is constrained by the model's configured context length. The current default context is 128 tokens; inference and KV-cache workspaces have implementation limits documented in `data/README.md` and enforced in code.
+- The KV cache is temporary inference state. It is reset/reused for generation and is not persistent conversation memory.
+- Generation currently suppresses the four reserved token IDs because the training pipeline does not yet teach their intended conversational semantics. EOS is not currently an active stopping marker.
+- Saved conversations, long-term user memory, retrieval-augmented generation (RAG), structured tool calls, and a general safety/policy layer are not yet implemented as complete systems.
+
+Keep the existing Human/Assistant format working until a versioned message format and migration path are implemented. Do not silently add a `System:` role to the current training corpus and assume the model understands it.
+
+### 6.2 Canonical message protocol
+
+**Planned:** replace ad hoc prompt-string construction with one canonical message representation shared by training-data preparation, inference, conversation persistence, and tool interaction.
+
+The conceptual roles are:
+
+- `system`: high-priority runtime behavior and policy instructions.
+- `developer`: application-level instructions and task configuration.
+- `user`: the human's input.
+- `assistant`: model-generated content, including structured tool requests.
+- `tool`: results returned by an explicitly registered tool.
+
+A message should carry at least a role, content, and an explicit ending/type where needed. The protocol must distinguish an ordinary assistant message, an assistant turn-final message, a refusal, and a tool-call request. Tool replies must be associated with the call that produced them.
+
+Requirements:
+
+1. Define a versioned message structure and canonical serializer/parser. Use the same implementation wherever prompts are assembled or conversations are saved/loaded.
+2. Introduce dedicated reserved token IDs for structural markers and train the model on their actual semantics. Do not rely on visible strings that merely look like special tokens.
+3. Define unambiguous message boundaries and end-of-message, end-of-turn, and handoff-to-tool semantics. EOS/end-of-turn behavior must be tested, not inferred from text.
+4. Preserve UTF-8 content exactly through serialization and round trips.
+5. Version the format and provide compatibility handling for existing Human/Assistant chat logs and saved conversations.
+6. Keep raw text continuation in Generation Lab separate from structured conversational inference.
+
+The initial implementation should support plain text messages first. Multimodal payloads and complex content blocks are future extensions, not prerequisites.
+
+### 6.3 Context assembly and budgeting
+
+**Planned:** add a context manager that assembles the model input in a predictable order and accounts for the actual tokenized size of every component.
+
+Candidate context components:
+
+1. System instructions.
+2. Developer/application instructions.
+3. Relevant persistent user preferences or memory.
+4. A small set of selected few-shot examples, when useful.
+5. Retrieved document/context passages, when relevant.
+6. Recent conversation messages.
+7. The current user message.
+8. An assistant-generation prefix and a reserved output-token budget.
+
+Requirements:
+
+- Tokenize the assembled context before generation and enforce the model's real context limit.
+- Reserve output capacity before accepting optional context. Never let retrieved text or examples consume the entire generation budget.
+- Preserve message boundaries and instruction priority when trimming.
+- Prefer removing low-relevance retrieved passages and examples first; then summarize or remove older conversation turns while preserving recent turns and the current request.
+- Never silently truncate the middle of a message or corrupt UTF-8. If the current request alone is too large, report the limit clearly or apply an explicit, visible truncation policy.
+- Record which context components were included and their token costs in diagnostics.
+- Make context assembly deterministic where possible so prompt bugs can be reproduced.
+
+A future context manager may summarize older history, retrieve relevant past turns, and use recency plus relevance. Summaries must be treated as lossy derived context, not as an exact replacement for the original conversation.
+
+### 6.4 Memory model and persistence
+
+Keep these concepts separate; they solve different problems:
+
+| Memory layer | Purpose | Lifetime / storage |
+|---|---|---|
+| Active context | Messages and context currently supplied to the model | One generation / current context window |
+| KV cache | Cached attention keys and values for incremental decoding | Temporary; reset between unrelated prompts |
+| Conversation history | Exact user and assistant messages | Persistent, per conversation |
+| Long-term user memory | Small, useful preferences or facts that can improve future interactions | Persistent, separately managed records |
+| Knowledge documents | External reference material used through retrieval | Persistent document store and index |
+
+**Planned requirements:**
+
+- Persist conversations independently of model weights. SQLite is a candidate for a small local-first store; keep the storage interface replaceable.
+- Store message role, content, order, timestamps, conversation ID, format version, and relevant metadata.
+- Keep long-term memory distinct from raw chat logs. Do not automatically promote every conversation detail into permanent memory.
+- Provide user-visible controls to inspect, edit, disable, and delete long-term memories and conversations.
+- Make deletion meaningful: remove the stored record and its derived indexes/summaries, not merely hide it from the UI.
+- Keep memory retrieval selective and token-budgeted. A memory item is context, not a new instruction with higher priority than system/developer policy.
+- Do not bake private user memory or changing external knowledge into model weights as the default persistence mechanism.
+
+The model's weights represent learned general patterns; they are not a reliable database of a particular user's current preferences or conversation history.
+
+### 6.5 Function and tool calling
+
+**Planned:** support controlled, structured tool use through an application-owned registry. Tool execution must remain outside the model's arbitrary text-generation process.
+
+The intended cycle is:
+
+1. The runtime selects the tools available for the current task and supplies concise descriptions plus argument schemas in context.
+2. The model emits a structured tool-call request naming a registered tool and providing arguments.
+3. The runtime parses the request and validates the tool name, argument types, required fields, bounds, and permissions.
+4. The application executes only the registered implementation.
+5. The result is appended as a `tool` message associated with the call.
+6. The model resumes with the tool result in context and either makes another permitted call or responds to the user.
+
+Requirements:
+
+- Use an allowlisted registry. A model-generated name or argument must never cause arbitrary C functions, shell commands, scripts, or executable code to run.
+- Validate every argument at the runtime boundary, even if the model was trained to produce valid calls.
+- Apply per-tool permissions, timeouts, output-size limits, and resource limits.
+- Treat tool output as untrusted data. It may contain malicious instructions or malformed content.
+- Require explicit user confirmation for consequential or externally visible actions, such as deleting files, sending messages, making purchases, or changing system settings.
+- Keep tool execution and platform-specific integrations behind interfaces so the core model remains portable.
+- Log tool name, validated arguments, result status, and errors without unnecessarily recording secrets.
+- Add deterministic tests for valid calls, malformed arguments, unknown tools, denied permissions, timeouts, and tool failures.
+
+Start with a few harmless local tools (for example, calculator and read-only time/date utilities). File access, network access, process execution, and write operations require stricter permission design. Never treat prompt instructions as a security boundary.
+
+### 6.6 Retrieval-augmented generation (RAG)
+
+**Planned:** let Minima consult external documents at runtime instead of expecting all factual knowledge to fit in its weights.
+
+Initial pipeline:
+
+1. Ingest documents and preserve provenance (source, title, origin/path, license where applicable, retrieval date, and document metadata).
+2. Extract text and normalize encoding/formatting without discarding meaningful structure.
+3. Split content into bounded chunks, preferably respecting headings, paragraphs, and document boundaries. Store chunk-to-document references and page/section metadata where available.
+4. Build a lexical index. BM25 is a sensible first implementation because it is useful without requiring a separate embedding model.
+5. Retrieve candidate chunks for the current query, rank them, and select only those that fit the context budget.
+6. Add selected passages as clearly delimited reference context, separate from system/developer instructions.
+7. Preserve source references so the assistant can identify which documents support its answer and say when the available material does not support a claim.
+
+Later experiments may add local embeddings, vector search, hybrid lexical/vector retrieval, and reranking. Measure retrieval quality before adding complexity.
+
+Security and quality requirements:
+
+- Retrieved documents are untrusted reference data, never instructions that override system/developer policy.
+- Defend against prompt injection in documents and tool output. Delimit quoted/retrieved material and instruct the model/runtime to treat it as data.
+- Avoid presenting unsupported guesses as sourced facts. Support abstention when retrieval is weak or conflicting.
+- Deduplicate near-identical chunks and avoid flooding context with overlapping passages.
+- Keep document storage and indexes separate from conversation memory, and provide a way to rebuild indexes when chunking or ranking changes.
+
+### 6.7 Few-shot examples
+
+**Planned:** maintain a small library of curated examples for tasks where a demonstration improves format-following or tool-use behavior.
+
+- Select examples by task or capability, not by blindly appending a large static block to every prompt.
+- Keep examples short, high quality, and consistent with the canonical message/tool protocol.
+- Include examples for structured outputs, tool-call/response cycles, clarification, refusal, and citing retrieved sources as those capabilities are implemented.
+- Count example tokens against the same context budget as all other context.
+- Keep examples versioned and testable. Remove examples that teach obsolete formats or unsafe behavior.
+- Distinguish runtime few-shot prompting from supervised fine-tuning: examples in context guide one request; SFT changes model parameters.
+
+### 6.8 Safety and trust boundaries
+
+**Planned:** use defense in depth. A prompt or keyword filter alone is not a security system.
+
+Safety responsibilities should be split across layers:
+
+- **Input boundary:** validate encoding, lengths, malformed protocol data, and resource limits. Apply policy checks where appropriate.
+- **Instruction hierarchy:** preserve system/developer/user/tool roles and prevent lower-trust content from being reinterpreted as higher-priority instructions.
+- **Untrusted context:** clearly mark retrieved documents, user-provided files, and tool results as data. Guard against prompt injection and instruction spoofing.
+- **Tool boundary:** enforce allowlists, schemas, permissions, path restrictions, timeouts, output limits, and confirmation requirements in application code.
+- **Output boundary:** validate structured outputs before use; safely render text and escape content where needed. A refusal marker or safety phrase generated by the model is not itself enforcement.
+- **Resource boundary:** limit context size, generation length, memory, CPU time, and tool execution to protect the host application.
+- **Auditability:** record useful diagnostic events while minimizing sensitive data collection.
+
+Use policy tests and adversarial cases as regression tests. Keyword/rule-based filters may be a supplemental signal, but should not be the only safeguard and should not be mistaken for model understanding.
+
+### 6.9 Training implications
+
+The runtime architecture and model training format must evolve together.
+
+- Keep general language pretraining separate from conversational supervised fine-tuning (SFT).
+- Build SFT examples using the canonical message serialization, including the roles and structural tokens the runtime actually uses.
+- During SFT, calculate loss on the intended assistant targets. Normally mask system, developer, user, and tool-result tokens from the assistant-response objective; define and document any deliberate exceptions.
+- Include examples of complete multi-turn conversations, assistant turn endings, refusals, and tool handoffs/results once those behaviors exist in the runtime.
+- Tool schemas and tool-use demonstrations must agree with the runtime registry and validation rules.
+- Evaluate on held-out conversations and tasks, not only training loss. Track instruction following, response relevance, formatting validity, tool-call validity, retrieval grounding, refusal behavior, and context handling.
+- Preference optimization (for example, DPO) is a later experiment after the SFT data and evaluation set are reliable. More advanced reward-based methods are research directions, not prerequisites for a useful local assistant.
+- Do not assume RAG or persistent memory requires retraining the base model; these are primarily runtime capabilities.
+
+### 6.10 Suggested implementation sequence
+
+Keep the model/inference engine independent from the GUI, persistence, retrieval, and external integrations. The GUI, CLI, and any future local API should call the same runtime interfaces.
+
+| Phase | Deliverable | Main work |
+|---|---|---|
+| I1 | Conversation foundation | Canonical message structure, serializer/parser, role and ending semantics, reserved-token plan, legacy Human/Assistant compatibility, context budgeting, explicit EOS/turn stopping |
+| I2 | Reliable local conversations | Conversation persistence, save/load/export, engine-side clear/reset, separate conversation history from KV cache |
+| I3 | Context and memory | Context manager, output-token reservation, user-controlled long-term memory, relevance/recency retrieval, diagnostics |
+| I4 | Safe tool framework | Tool registry, schemas, parser/validator, permission model, execution interface, tool-result messages, tests |
+| I5 | Local document retrieval | Document ingestion, chunking, metadata/provenance, BM25 index, context injection, source-grounded responses |
+| I6 | Behavior and safety | Few-shot example selection, layered safety checks, prompt-injection tests, output validation, refusal behavior |
+| I7 | Conversational training | Canonical-format SFT corpus, assistant-target loss masking, tool-use examples, held-out behavioral evaluation |
+| I8 | Advanced retrieval and alignment | Embeddings/hybrid search/reranking, preference optimization, and other research only when evaluation justifies them |
+
+**Architecture rule:** keep the core C model responsible for tokenization, inference, and training. Put message orchestration, persistence, tool execution, retrieval, and policy enforcement in explicit runtime modules with narrow interfaces. Do not turn the inference engine into a monolith or let model output directly execute host operations.
+
+---
+
+## 7. Practical implementation roadmap
 
 ### Phase 0 — Safety net
 
@@ -224,7 +427,7 @@ Explore adaptive or hierarchical segmentation, SuperBPE-style vocabulary constru
 
 ---
 
-## 7. Completed work: do not re-implement
+## 8. Completed work: do not re-implement
 
 This is a compact reminder of important work already present. Reopen the relevant code/tests if behavior is in doubt, but do not add a second implementation simply because an old note still exists.
 
@@ -241,7 +444,7 @@ This is a compact reminder of important work already present. Reopen the relevan
 
 ---
 
-## 8. Roadmap maintenance rules
+## 9. Roadmap maintenance rules
 
 - Keep this file as the project-level source of truth for planned work, known issues, and accepted research directions.
 - Update an item's status when implementation begins, lands, or is verified. Do not mark something Done merely because code exists; run the relevant tests or benchmark.
