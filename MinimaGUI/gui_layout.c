@@ -113,7 +113,7 @@ void gui_layout_layout_controls(HWND hwnd) {
     MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(586),actions_y,scale_px(112),action_h,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
     if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
-    if(g_output_label)MoveWindow(g_output_label,pad+scale_px(8),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
+    if(g_output_label)MoveWindow(g_output_label,pad+(g_active_page==2?scale_px(112):scale_px(8)),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
     if(g_log_label)MoveWindow(g_log_label,pad+scale_px(8),output_top+scale_px(4),scale_px(520),scale_px(18),TRUE);
     if(g_active_page==2)
         MoveWindow(GetDlgItem(hwnd,IDC_STATUS),width-pad-scale_px(150),
