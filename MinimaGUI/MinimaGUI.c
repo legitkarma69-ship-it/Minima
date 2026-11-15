@@ -1592,6 +1592,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_min_new_tokens, L"Minimum generated tokens before the stop sequence can end generation. 0 disables the minimum.");
         add_tooltip(g_sampling_seed, L"Sampling seed. 0 uses a varying seed; a nonzero value makes generation repeatable for the same prompt and settings.");
         add_tooltip(g_stop_sequence, L"Optional text sequence that stops generation when emitted. The stop sequence is removed from the displayed response.");
+        add_tooltip(g_chat_test, L"Run one response using the current Generation tab settings. These settings do not change an already-running normal chat session; restart Chat to apply them to normal replies.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
