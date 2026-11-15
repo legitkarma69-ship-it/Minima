@@ -237,6 +237,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path ".\minima.bpe")) { throw "Tokenizer-only rebuild did not produce minima.bpe." }
 
+      - name: Test cooperative training pause and resume
+        shell: pwsh
+        run: |
+          python tools/test_training_pause.py --exe .\x64\Release\Minima.exe --corpus .\minima_ci_corpus.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Run fresh-training smoke test (non-default configuration A)
         shell: pwsh
         run: |
