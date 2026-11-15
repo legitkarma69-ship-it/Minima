@@ -17,7 +17,7 @@ static BOOL is_advanced_page_control(HWND child) {
 
 static BOOL is_chat_page_control(HWND child) {
     return child == g_group_output || child == g_output_label ||
-        child == g_chat_display || child == g_chat_input || child == g_clear_chat ||
+        child == g_chat_display || child == g_chat_input || child == g_clear_chat || child == g_eval_button ||
         child == GetDlgItem(g_window, IDC_STATUS) ||
         child == GetDlgItem(g_window, IDC_CHAT_START) ||
         child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
@@ -86,11 +86,11 @@ void gui_layout_layout_controls(HWND hwnd) {
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
            child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_main_tabs||child==g_corpus||
-           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_log_label)continue;
+           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
-           id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG||id==IDC_CLEAR_CHAT||id==IDC_CLEAR_LOGS)continue;
+           id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG||id==IDC_CLEAR_CHAT||id==IDC_CLEAR_LOGS||id==IDC_RUN_EVAL)continue;
         int oy=r.top;
         if(oy>=scale_px(168)&&oy<scale_px(250)){
             int x=pad+scale_px(8)+(int)((r.left-scale_px(12))*xs);
@@ -121,9 +121,10 @@ void gui_layout_layout_controls(HWND hwnd) {
     if(g_chat_display)MoveWindow(g_chat_display,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     if(g_log)MoveWindow(g_log,pad,output_top+scale_px(24),inner,output_h-scale_px(68),TRUE);
     const int chat_y=height-bottom_h+scale_px(4);
-    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(112):pad,chat_y,inner-scale_px(340)-scale_px(112),scale_px(180),TRUE);
+    if(g_chat_input)MoveWindow(g_chat_input,g_active_page==2?pad+scale_px(270):pad,chat_y,inner-scale_px(500),scale_px(180),TRUE);
     if(g_active_page==2) {
         MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad,chat_y,scale_px(104),scale_px(28),TRUE);
+        MoveWindow(g_eval_button,pad+scale_px(112),chat_y,scale_px(150),scale_px(28),TRUE);
         MoveWindow(g_clear_chat,pad+scale_px(8),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
     }
     if(g_active_page==3)

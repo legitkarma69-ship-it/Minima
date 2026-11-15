@@ -23,6 +23,7 @@ BOOL gui_actions_dispatch(HWND hwnd, UINT command_id,
     case IDC_SAVE_NOW: if (handlers->save_checkpoint) handlers->save_checkpoint(hwnd); return TRUE;
     case IDC_CLEAR_CHAT: if (handlers->clear_chat) handlers->clear_chat(hwnd); return TRUE;
     case IDC_CLEAR_LOGS: if (handlers->clear_logs) handlers->clear_logs(hwnd); return TRUE;
+    case IDC_RUN_EVAL: if (handlers->run_evaluation) handlers->run_evaluation(hwnd); return TRUE;
     default: return FALSE;
     }
 }

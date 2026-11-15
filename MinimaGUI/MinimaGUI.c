@@ -28,7 +28,7 @@
 #define IDT_GRAPH_REFRESH 1
 
 HWND g_window, g_corpus, g_log, g_chat_display, g_log_label;
-HWND g_clear_chat, g_clear_logs;
+HWND g_clear_chat, g_clear_logs, g_eval_button;
 static HWND g_steps, g_resume, g_status;
 HWND g_main_tabs;
 static MinimaSettingsContext g_settings_context;
@@ -48,6 +48,7 @@ static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write;
 static BOOL g_chat_mode;
+static BOOL g_evaluation_mode;
 static BOOL g_chat_response_active;
 static BOOL g_chat_send_when_ready;
 static volatile LONG g_running;
@@ -214,6 +215,7 @@ static void set_running(BOOL running) {
     EnableWindow(g_repetition,!running || g_chat_mode);
     EnableWindow(g_max_tokens,!running || g_chat_mode);
     EnableWindow(g_chat_test,FALSE);
+    EnableWindow(g_eval_button,!running);
     SetWindowTextW(g_status,running?(g_chat_mode?L"Starting chat":L"Training running"):L"Idle");
     update_fresh_only_controls();
 }
@@ -528,6 +530,76 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         g_fresh_used_saved_tokenizer=FALSE;
         set_running(FALSE);
         MessageBoxW(g_window, L"Could not create the output-reader thread.", L"ProjectMinima", MB_ICONERROR);
+    }
+}
+
+static void start_logic_evaluation(void) {
+    if (InterlockedCompareExchange(&g_running, 0, 0)) return;
+    if (!engine_sidecar_exists(L"minima.model") || !engine_sidecar_exists(L"minima.bpe")) {
+        MessageBoxW(g_window, L"Train a model and create minima.bpe before running the evaluation.", L"24-question evaluation", MB_ICONWARNING);
+        return;
+    }
+    wchar_t engine_dir[MAX_PATH], root[MAX_PATH];
+    wcscpy_s(engine_dir, _countof(engine_dir), g_engine_path);
+    wchar_t* p = wcsrchr(engine_dir, L'\\'); if (!p) return; *p = 0;
+    wcscpy_s(root, _countof(root), engine_dir);
+    p = wcsrchr(root, L'\\'); if (!p) return; *p = 0;
+    p = wcsrchr(root, L'\\'); if (!p) return; *p = 0;
+    wchar_t script[MAX_PATH], dataset[MAX_PATH], output[MAX_PATH];
+    _snwprintf_s(script, _countof(script), _TRUNCATE, L"%s\\tools\\evaluate_logic.py", root);
+    _snwprintf_s(dataset, _countof(dataset), _TRUNCATE, L"%s\\data\\evaluation\\logic.jsonl", root);
+    _snwprintf_s(output, _countof(output), _TRUNCATE, L"%s\\logic_results.jsonl", engine_dir);
+    if (GetFileAttributesW(script) == INVALID_FILE_ATTRIBUTES || GetFileAttributesW(dataset) == INVALID_FILE_ATTRIBUTES) {
+        MessageBoxW(g_window, L"Could not find the evaluation script or dataset. Keep the repository folders beside the x64 build folder.", L"24-question evaluation", MB_ICONERROR);
+        return;
+    }
+    wchar_t command[8192] = L"py -3";
+    if (!append_argument(command, _countof(command), script) ||
+        !append_argument(command, _countof(command), L"--exe") ||
+        !append_argument(command, _countof(command), g_engine_path) ||
+        !append_argument(command, _countof(command), L"--workdir") ||
+        !append_argument(command, _countof(command), engine_dir) ||
+        !append_argument(command, _countof(command), L"--dataset") ||
+        !append_argument(command, _countof(command), dataset) ||
+        !append_argument(command, _countof(command), L"--output") ||
+        !append_argument(command, _countof(command), output) ||
+        !append_option(command, _countof(command), L"--vocab-size", g_vocab) ||
+        !append_option(command, _countof(command), L"--dim", g_dim) ||
+        !append_option(command, _countof(command), L"--layers", g_layers) ||
+        !append_option(command, _countof(command), L"--heads", g_heads) ||
+        !append_option(command, _countof(command), L"--ffn-dim", g_ffn) ||
+        !append_option(command, _countof(command), L"--max-seq", g_max_seq)) {
+        MessageBoxW(g_window, L"Check the model settings and evaluation command length.", L"24-question evaluation", MB_ICONWARNING);
+        return;
+    }
+    wcscat_s(command, _countof(command), L" --max-new-tokens 64");
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    HANDLE rd = NULL, wr = NULL;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) { MessageBoxW(g_window, L"Could not create evaluation output pipe.", L"ProjectMinima", MB_ICONERROR); return; }
+    SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+    HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (nul == INVALID_HANDLE_VALUE) { CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not open NUL.", L"ProjectMinima", MB_ICONERROR); return; }
+    STARTUPINFOW si; PROCESS_INFORMATION pi; ZeroMemory(&si, sizeof(si)); ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si); si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+    si.hStdInput = nul; si.hStdOutput = wr; si.hStdError = wr;
+    if (!CreateProcessW(NULL, command, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, root, &si, &pi)) {
+        CloseHandle(nul); CloseHandle(rd); CloseHandle(wr);
+        MessageBoxW(g_window, L"Could not launch Python. Install Python 3 and ensure the 'py' launcher is available.", L"24-question evaluation", MB_ICONERROR);
+        return;
+    }
+    CloseHandle(nul); CloseHandle(wr); g_process = pi.hProcess; CloseHandle(pi.hThread);
+    g_chat_mode = FALSE; g_evaluation_mode = TRUE;
+    gui_layout_select_main_page(g_window, 2); set_running(TRUE);
+    EnableWindow(GetDlgItem(g_window, IDC_STOP), FALSE);
+    EnableWindow(GetDlgItem(g_window, IDC_CHAT_STOP), TRUE);
+    SetWindowTextW(GetDlgItem(g_window, IDC_CHAT_STOP), L"Stop evaluation");
+    SetWindowTextW(g_status, L"Evaluation running");
+    append_log(L"\r\n--- Starting 24-question logic evaluation (greedy decoding) ---\r\n");
+    g_thread = minima_engine_start_reader(rd, g_window, g_process, WM_APPEND_LOG, WM_ENGINE_EXIT, WM_CHAT_READY);
+    if (!g_thread) {
+        TerminateProcess(g_process, 1); CloseHandle(g_process); g_process = NULL; CloseHandle(rd);
+        g_evaluation_mode = FALSE; set_running(FALSE);
+        MessageBoxW(g_window, L"Could not create evaluation output-reader thread.", L"ProjectMinima", MB_ICONERROR);
     }
 }
 
@@ -878,9 +950,10 @@ static void create_controls(HWND hwnd) {
         &g_threads,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
+    g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
-
-    HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_chat_display,g_clear_chat,g_clear_logs,g_log_label,g_lr,g_warmup,g_log_interval,
+    HWND controls[] = { g_corpus,g_steps,g_resume,g_log,g_chat_display,g_clear_chat,g_clear_logs,g_eval_button,g_log_label,g_lr,g_warmup,g_log_interval,
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
@@ -938,7 +1011,7 @@ static void create_controls(HWND hwnd) {
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
-        g_group_advanced,g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP)
+        g_group_advanced,g_chat_input,GetDlgItem(hwnd,IDC_CHAT_SEND),GetDlgItem(hwnd,IDC_CHAT_STOP),g_eval_button
     };
     g_tab_control_count=(int)_countof(tab_controls);
     for(int i=0;i<g_tab_control_count;i++) {
@@ -1005,17 +1078,18 @@ static void action_advanced_toggle(HWND hwnd) {
 }
 static void action_chat_send(HWND hwnd) { (void)hwnd; send_chat_message(); }
 static void action_chat_test(HWND hwnd) { (void)hwnd; test_generation_settings(); }
-static void action_chat_stop(HWND hwnd) { (void)hwnd; stop_generation(); }
+static void action_chat_stop(HWND hwnd) { (void)hwnd; if (g_evaluation_mode && g_process) { append_log(L"\r\nEvaluation stop requested.\r\n"); TerminateProcess(g_process, 3); } else stop_generation(); }
 static void action_save_checkpoint(HWND hwnd) { (void)hwnd; request_checkpoint_save(); }
 static void action_clear_chat(HWND hwnd) { (void)hwnd; clear_chat_history(); }
 static void action_clear_logs(HWND hwnd) { (void)hwnd; clear_engine_logs(); }
+static void action_run_evaluation(HWND hwnd) { (void)hwnd; start_logic_evaluation(); }
 
 static const GuiActionHandlers g_action_handlers = {
     action_add_corpus, action_remove_corpus, action_resume_changed,
     action_start_training, action_stop_training, action_start_chat,
     action_rebuild_tokenizer, action_auto_settings, action_basic_defaults,
     action_advanced_toggle, action_chat_send, action_chat_test,
-    action_chat_stop, action_save_checkpoint, action_clear_chat, action_clear_logs
+    action_chat_stop, action_save_checkpoint, action_clear_chat, action_clear_logs, action_run_evaluation
 };
 
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1100,7 +1174,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         free((void*)lp);
         return 0;
     }
-    case WM_ENGINE_EXIT:
+    case WM_ENGINE_EXIT: {
+        const BOOL was_evaluation = g_evaluation_mode;
+        g_evaluation_mode = FALSE;
+        SetWindowTextW(GetDlgItem(hwnd, IDC_CHAT_STOP), L"Stop generation");
         if(wp==0 && g_tokenizer_rebuild_mode) {
             g_use_saved_tokenizer=TRUE; remember_prebuilt_tokenizer_settings();
             SendMessageW(g_resume, BM_SETCHECK, BST_UNCHECKED, 0);
@@ -1122,9 +1199,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_chat_send_when_ready=FALSE;
         g_chat_mode=FALSE;
         set_running(FALSE);
-        append_log(wp == 0 ? L"\r\n--- Engine exited successfully ---\r\n" : L"\r\n--- Engine exited with an error ---\r\n");
+        append_log(was_evaluation
+            ? (wp == 0 ? L"\r\n--- Evaluation completed ---\r\n" : L"\r\n--- Evaluation stopped or failed ---\r\n")
+            : (wp == 0 ? L"\r\n--- Engine exited successfully ---\r\n" : L"\r\n--- Engine exited with an error ---\r\n"));
         if (g_close_when_done) DestroyWindow(hwnd);
         return 0;
+    }
     case WM_CLOSE:
         if (g_process && InterlockedCompareExchange(&g_running,0,0)) {
             if (MessageBoxW(hwnd,L"An engine process is running. Stop it and close?",
