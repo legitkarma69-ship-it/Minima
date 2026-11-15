@@ -767,6 +767,12 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
            !append_option(command,_countof(command),L"--top-k",g_top_k) ||
            !append_option(command,_countof(command),L"--top-p",g_top_p) ||
            !append_option(command,_countof(command),L"--repetition-penalty",g_repetition) ||
+           !append_option(command,_countof(command),L"--min-p",g_min_p) ||
+           !append_option(command,_countof(command),L"--frequency-penalty",g_frequency_penalty) ||
+           !append_option(command,_countof(command),L"--presence-penalty",g_presence_penalty) ||
+           !append_option(command,_countof(command),L"--no-repeat-ngram",g_no_repeat_ngram) ||
+           !append_option(command,_countof(command),L"--min-new-tokens",g_min_new_tokens) ||
+           !append_option(command,_countof(command),L"--sampling-seed",g_sampling_seed) ||
            !append_option(command,_countof(command),L"--max-new-tokens",g_max_tokens) ||
            !append_option(command,_countof(command),L"--vocab-size",g_vocab) ||
            !append_option(command,_countof(command),L"--dim",g_dim) ||
@@ -775,6 +781,10 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
            !append_option(command,_countof(command),L"--ffn-dim",g_ffn) ||
                  !append_option(command,_countof(command),L"--max-seq",g_max_seq)){
             MessageBoxW(g_window,L"Check the generation settings.",L"ProjectMinima",MB_ICONWARNING);return;
+        }
+        if (GetWindowTextLengthW(g_stop_sequence) > 0 &&
+            !append_option(command,_countof(command),L"--stop-sequence",g_stop_sequence)) {
+            MessageBoxW(g_window,L"Check the stop sequence text.",L"ProjectMinima",MB_ICONWARNING);return;
         }
     } else if(tokenizer_only) {
         _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%s\" --retrain-tokenizer-only",g_engine_path);
