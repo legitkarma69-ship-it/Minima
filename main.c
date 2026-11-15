@@ -112,7 +112,7 @@ static void print_usage(const char* exe) {
     printf("  --corpus-mix proportional|sqrt|equal (default: sqrt)\n");
     printf("  --optimizer adamw|lion (Lion uses less optimizer memory; tune --lr)\n");
     printf("  --weight-decay FLOAT --beta1 FLOAT --beta2 FLOAT --epsilon FLOAT\n");
-    printf("  --memory-budget-gb N (aggregate committed arena budget; 0 disables)\n");
+    printf("  --memory-budget-gb N (aggregate arena + tracked heap budget; 0 disables)\n");
     printf("  --grad-clip FLOAT (global gradient norm; 0 disables clipping)\n");
     printf("  --temperature F --top-k N --top-p F --min-p F --repetition-penalty F\n");
     printf("  --frequency-penalty F --presence-penalty F --no-repeat-ngram N\n");
@@ -462,9 +462,9 @@ int main(int argc, char** argv) {
         !arena_init_with_budget(&corpus_arena, 8ull * 1024 * 1024 * 1024, &memory_budget))
         die("corpus arena failed");
 
-    printf("Arena memory budget: %s\n", options.memory_budget_gb > 0 ? "enabled" : "unlimited");
+    printf("Engine memory budget: %s\n", options.memory_budget_gb > 0 ? "enabled" : "unlimited");
     if (options.memory_budget_gb > 0)
-        printf("  Aggregate committed arena limit: %d GiB\n", options.memory_budget_gb);
+        printf("  Aggregate arena + tracked heap limit: %d GiB\n", options.memory_budget_gb);
 
     // ------------------------------------------------------------------
     // 2. Select corpus sources and sample the tokenizer directly from disk
@@ -834,8 +834,10 @@ int main(int argc, char** argv) {
     if (!gradients_check_layout(&grads, &model, &arena))
         die("gradient allocation layout does not match runtime model configuration");
     printf("Gradient allocation layout: PASS (runtime configuration, all 9 tensors)\n");
-    printf("Arena committed memory: %.2f GiB (peak %.2f GiB)\n",
+    printf("Engine budget at model setup: %.2f GiB arena + %.2f GiB tracked heap = %.2f GiB (peak %.2f GiB)\n",
         (double)memory_budget.committed / (1024.0*1024.0*1024.0),
+        (double)memory_budget.external_committed / (1024.0*1024.0*1024.0),
+        (double)arena_budget_total_committed(&memory_budget) / (1024.0*1024.0*1024.0),
         (double)memory_budget.peak / (1024.0*1024.0*1024.0));
 
     
@@ -849,7 +851,20 @@ int main(int argc, char** argv) {
         "optimizer %.1f + activations/logits %.1f = %.1f MiB\n",
         weight_mib, gradient_mib, optimizer_mib, activation_mib,
         weight_mib + gradient_mib + optimizer_mib + activation_mib);
-    printf("  Excludes tokenizer workspace, mapped corpus token IDs, and process/runtime overhead.\n");
+    const double mapped_token_mib = (double)token_ids_mapping.size / (1024.0 * 1024.0);
+    const double budgeted_now_mib = (double)arena_budget_total_committed(&memory_budget) / (1024.0 * 1024.0);
+    const double budgeted_projected_mib = budgeted_now_mib + activation_mib;
+    const double tracked_peak_mib = (double)memory_budget.peak / (1024.0 * 1024.0);
+    const double estimated_process_peak_mib =
+        (tracked_peak_mib > budgeted_projected_mib ? tracked_peak_mib : budgeted_projected_mib) +
+        mapped_token_mib + 256.0;
+    printf("Pre-training memory estimate: %.1f MiB budgeted peak + %.1f MiB disk-backed token map + 256 MiB runtime reserve = about %.1f MiB.\n",
+        tracked_peak_mib > budgeted_projected_mib ? tracked_peak_mib : budgeted_projected_mib,
+        mapped_token_mib, estimated_process_peak_mib);
+    printf("  Token-map size is backing-file capacity, not an assertion that the entire map stays resident. Runtime reserve is a planning allowance, not a hard guarantee.\n");
+    if (memory_budget.limit > 0 && budgeted_projected_mib >
+        (double)memory_budget.limit / (1024.0 * 1024.0))
+        printf("WARNING: projected arena + tracked-heap allocations exceed --memory-budget-gb; the run may stop cleanly at a later allocation.\n");
     // ------------------------------------------------------------------
     // 6. Numerical gradient check
     // ------------------------------------------------------------------
@@ -1066,7 +1081,7 @@ int main(int argc, char** argv) {
     printf("\nSmoke test finished.\n");
     printf("Training, validation, persistence, and generation checks completed.\n");
 
-    printf("Arena memory high-water mark: %.2f GiB; rejected allocations: %zu\n",
+    printf("Engine budget high-water mark: %.2f GiB (arena + tracked heap); rejected allocations: %zu\n",
         (double)memory_budget.peak / (1024.0*1024.0*1024.0), memory_budget.failed);
     mapped_buffer_destroy(&token_ids_mapping);
     arena_free(&corpus_arena);
