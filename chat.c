@@ -16,6 +16,8 @@ static const char* skip_setting_space(const char* p) {
     return p;
 }
 
+static char g_test_stop_sequence[257];
+
 static bool parse_test_settings(const char* line, ChatOptions* settings) {
     if (!line || !settings || strncmp(line, "/test ", 6) != 0)
         return false;
@@ -29,8 +31,7 @@ static bool parse_test_settings(const char* line, ChatOptions* settings) {
 
     errno = 0;
     const long top_k = strtol(p, &end, 10);
-    if (end == p || errno == ERANGE || top_k < 1 || top_k > 256)
-        return false;
+    if (end == p || errno == ERANGE || top_k < 1 || top_k > 256) return false;
     p = skip_setting_space(end);
 
     errno = 0;
@@ -45,14 +46,49 @@ static bool parse_test_settings(const char* line, ChatOptions* settings) {
 
     errno = 0;
     const long max_tokens = strtol(p, &end, 10);
-    if (end == p || errno == ERANGE || max_tokens < 1 || max_tokens > 512)
-        return false;
+    if (end == p || errno == ERANGE || max_tokens < 1 || max_tokens > 512) return false;
     p = skip_setting_space(end);
-    if (*p != '\0') return false;
+
+    errno = 0;
+    const float min_p = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(min_p)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const float frequency = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(frequency)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const float presence = strtof(p, &end);
+    if (end == p || errno == ERANGE || !isfinite(presence)) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long no_repeat_ngram = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || no_repeat_ngram < 0 || no_repeat_ngram > 16) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long min_tokens = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || min_tokens < 0 || min_tokens > max_tokens) return false;
+    p = skip_setting_space(end);
+
+    errno = 0;
+    const long sampling_seed = strtol(p, &end, 10);
+    if (end == p || errno == ERANGE || sampling_seed < 0 || sampling_seed > LONG_MAX) return false;
+    p = end;
+    if (*p == ' ') ++p;
+    const size_t stop_len = strlen(p);
+    if (stop_len >= sizeof(g_test_stop_sequence)) return false;
+    memcpy(g_test_stop_sequence, p, stop_len + 1);
 
     if (temperature < 0.05f || temperature > 5.0f ||
         top_p < 0.01f || top_p > 1.0f ||
-        repetition < 1.0f || repetition > 3.0f)
+        repetition < 1.0f || repetition > 3.0f ||
+        min_p < 0.0f || min_p > 1.0f ||
+        frequency < -2.0f || frequency > 2.0f ||
+        presence < -2.0f || presence > 2.0f)
         return false;
 
     settings->temperature = temperature;
@@ -60,6 +96,13 @@ static bool parse_test_settings(const char* line, ChatOptions* settings) {
     settings->top_p = top_p;
     settings->repetition_penalty = repetition;
     settings->max_new_tokens = (int)max_tokens;
+    settings->min_p = min_p;
+    settings->frequency_penalty = frequency;
+    settings->presence_penalty = presence;
+    settings->no_repeat_ngram_size = (int)no_repeat_ngram;
+    settings->min_new_tokens = (int)min_tokens;
+    settings->sampling_seed = (uint64_t)sampling_seed;
+    settings->stop_sequence = g_test_stop_sequence;
     return true;
 }
 
