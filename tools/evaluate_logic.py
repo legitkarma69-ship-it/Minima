@@ -58,20 +58,20 @@ def build_chat_input(cases: list[dict[str, Any]], max_new_tokens: int) -> str:
     return "".join(chunks)
 
 def parse_chat_responses(stdout: str) -> list[str]:
-    """Extract multiline BOT responses, ending at the chat-ready protocol line."""
+    """Extract multiline BOT responses using the explicit response-end marker."""
     responses: list[str] = []
     current: list[str] | None = None
     for line in stdout.splitlines():
         if current is None:
             if line.startswith("BOT: "):
                 current = [line[len("BOT: "):]]
-        elif line == "CHAT_READY":
+        elif line == "CHAT_RESPONSE_END":
             responses.append("\n".join(current).strip())
             current = None
         else:
             current.append(line)
     if current is not None:
-        raise ValueError("Minima output ended before CHAT_READY after a BOT response")
+        raise ValueError("Minima output ended before CHAT_RESPONSE_END after a BOT response")
     return responses
 
 def run(args: argparse.Namespace) -> int:
