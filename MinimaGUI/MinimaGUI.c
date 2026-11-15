@@ -653,11 +653,16 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
     }
 
     DWORD cpu_limit_percent = 0, ram_limit_gb = 0, arena_budget_gb = 0;
+    DWORD cpu_warning_percent = 0, ram_warning_gb = 0;
     if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb) ||
-        !read_bounded_integer(g_arena_budget, 64, &arena_budget_gb)) {
-        MessageBoxW(g_window, L"CPU cap must be 0-100%, process commit cap 0-64 GB, and arena budget 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+        !read_bounded_integer(g_arena_budget, 64, &arena_budget_gb) ||
+        !read_bounded_integer(g_cpu_warning, 100, &cpu_warning_percent) ||
+        !read_bounded_integer(g_ram_warning, 64, &ram_warning_gb)) {
+        MessageBoxW(g_window, L"CPU cap/warning must be 0-100%, process commit cap/arena budget/RAM warning must be 0-64 GB. Use 0 to disable each setting.", L"Resource limits", MB_ICONWARNING);
         return;
     }
+    g_cpu_warning_limit = cpu_warning_percent;
+    g_ram_warning_limit_gb = ram_warning_gb;
     if (arena_budget_gb > 0 &&
         !append_option(command, _countof(command), L"--memory-budget-gb", g_arena_budget)) {
         MessageBoxW(g_window, L"Could not add the arena memory budget to the process command.", L"Resource limits", MB_ICONERROR);
@@ -818,11 +823,16 @@ static void start_logic_evaluation(void) {
     }
     wcscat_s(command, _countof(command), L" --max-new-tokens 64");
     DWORD cpu_limit_percent = 0, ram_limit_gb = 0, arena_budget_gb = 0;
+    DWORD cpu_warning_percent = 0, ram_warning_gb = 0;
     if (!read_resource_limits(&cpu_limit_percent, &ram_limit_gb) ||
-        !read_bounded_integer(g_arena_budget, 64, &arena_budget_gb)) {
-        MessageBoxW(g_window, L"CPU cap must be 0-100%, process commit cap 0-64 GB, and arena budget 0-64 GB. Use 0 to disable a limit.", L"Resource limits", MB_ICONWARNING);
+        !read_bounded_integer(g_arena_budget, 64, &arena_budget_gb) ||
+        !read_bounded_integer(g_cpu_warning, 100, &cpu_warning_percent) ||
+        !read_bounded_integer(g_ram_warning, 64, &ram_warning_gb)) {
+        MessageBoxW(g_window, L"CPU cap/warning must be 0-100%, process commit cap/arena budget/RAM warning must be 0-64 GB. Use 0 to disable each setting.", L"Resource limits", MB_ICONWARNING);
         return;
     }
+    g_cpu_warning_limit = cpu_warning_percent;
+    g_ram_warning_limit_gb = ram_warning_gb;
     if (arena_budget_gb > 0 &&
         !append_option(command, _countof(command), L"--memory-budget-gb", g_arena_budget)) {
         MessageBoxW(g_window, L"Could not add the arena memory budget to the process command.", L"Resource limits", MB_ICONERROR);
