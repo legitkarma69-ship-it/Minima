@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DEFAULT_DATASET = Path(__file__).resolve().parents[1] / "data" / "evaluation" / "logic.jsonl"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATASET = REPOSITORY_ROOT / "data" / "evaluation" / "logic.jsonl"
+DEFAULT_EXE = REPOSITORY_ROOT / "x64" / "Release" / "Minima.exe"
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -76,8 +78,17 @@ def parse_chat_responses(stdout: str) -> list[str]:
 
 def run(args: argparse.Namespace) -> int:
     executable = args.exe.resolve()
-    workdir = args.workdir.resolve()
     dataset = args.dataset.resolve()
+    if args.workdir is not None:
+        workdir = args.workdir.resolve()
+    else:
+        candidates = (Path.cwd(), Path.cwd() / "Minima")
+        workdir = next(
+            (candidate.resolve() for candidate in candidates
+             if (candidate / "minima.model").is_file()
+             and (candidate / "minima.bpe").is_file()),
+            Path.cwd().resolve(),
+        )
     output = args.output.resolve()
     if not executable.is_file():
         raise FileNotFoundError(f"Minima executable not found: {executable}")
@@ -152,10 +163,10 @@ def run(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run Minima's held-out basic-logic evaluation.")
-    parser.add_argument("--exe", type=Path, default=Path("x64/Release/Minima.exe"),
+    parser.add_argument("--exe", type=Path, default=DEFAULT_EXE,
                         help="Path to Minima.exe (default: x64/Release/Minima.exe)")
-    parser.add_argument("--workdir", type=Path, default=Path.cwd(),
-                        help="Working directory containing minima.model and minima.bpe")
+    parser.add_argument("--workdir", type=Path, default=None,
+                        help="Directory containing minima.model and minima.bpe (auto-detected in the current directory or ./Minima by default)")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET,
                         help="Evaluation JSONL file (default: data/evaluation/logic.jsonl)")
     parser.add_argument("--output", type=Path, default=Path("logic_results.jsonl"),
