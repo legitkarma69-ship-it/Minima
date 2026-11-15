@@ -97,9 +97,9 @@ The first goal is a reliable performance baseline on this laptop. Model width, l
 
 Before changing model architecture or launching a large fine-tuning run, establish a small, held-out reasoning evaluation set. This is the first priority because current training loss and fluent-looking generation do not measure whether Minima can solve logic questions.
 
-- [ ] Create a text-only evaluation set covering deduction, conditionals, constraints/order, classification, causal reasoning, consistency, simple counting, ambiguity, and insufficient-information cases.
+- [x] Create an initial text-only evaluation set covering deduction, conditionals, constraints/order, classification, causal reasoning, consistency, simple counting, ambiguity, and insufficient-information cases. See `data/evaluation/logic.jsonl` (24 cases).
 - [ ] Keep evaluation prompts and reference answers out of all training/tokenizer corpora. They must remain held out.
-- [ ] Record a baseline from the current checkpoint using fixed prompts, deterministic decoding, and saved outputs.
+- [ ] Record a baseline from the current checkpoint using fixed prompts, deterministic decoding, and saved outputs. The evaluation set exists, but no baseline has been recorded yet.
 - [ ] Score conclusions and explanations separately with a simple, documented rubric. Do not rely only on exact string matching.
 - [ ] Add a separate curated reasoning-training dataset only after the baseline exists. Keep its format and provenance documented.
 - [ ] Compare every training change against the same held-out set and retain regressions as well as improvements.
@@ -273,7 +273,7 @@ Requirements:
 5. Version the format and provide compatibility handling for existing Human/Assistant chat logs and saved conversations.
 6. Keep raw text continuation in Generation Lab separate from structured conversational inference.
 
-The initial implementation should support plain text messages first. Multimodal payloads and complex content blocks are future extensions, not prerequisites.
+The implementation is text-only. Multimodal payloads and media support are explicitly out of scope, not future extensions.
 
 ### 6.3 Context assembly and budgeting
 
