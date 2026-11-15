@@ -251,6 +251,7 @@ int chat_run_console(Model* model, Tokenizer* tok, KVCache* cache,
 
         if (!is_test) strip_generated_next_role(decoded);
         printf("%s: %s\n", is_test ? "TEST" : "BOT", decoded);
+        puts("CHAT_RESPONSE_END");
 
         if (is_test) {
             /* A lab test is isolated and does not alter conversational history. */
