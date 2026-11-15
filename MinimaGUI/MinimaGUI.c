@@ -47,6 +47,9 @@ HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
 static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights, g_beta1, g_beta2, g_epsilon;
+static HWND g_min_p, g_frequency_penalty, g_presence_penalty, g_no_repeat_ngram;
+static HWND g_min_new_tokens, g_sampling_seed, g_stop_sequence;
+HWND g_group_generation;
 HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_profile, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
@@ -1356,14 +1359,16 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[35] = {
+    HWND edits[42] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
         g_checkpoint_interval, g_seed, g_tokenizer_bytes, g_temperature,
         g_top_k, g_top_p, g_repetition, g_max_tokens, g_grad_clip,
         g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget,
-        g_cpu_warning, g_ram_warning, g_source_weights, g_beta1, g_beta2, g_epsilon
+        g_cpu_warning, g_ram_warning, g_source_weights, g_beta1, g_beta2, g_epsilon,
+        g_min_p, g_frequency_penalty, g_presence_penalty, g_no_repeat_ngram,
+        g_min_new_tokens, g_sampling_seed, g_stop_sequence
     };
     HWND combos[5] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer, g_resource_profile };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -1380,6 +1385,8 @@ static void create_controls(HWND hwnd) {
     gui_pages_create_shell(hwnd, &g_main_tabs, &g_group_corpus,
         &g_group_model, &g_group_training, &g_group_advanced,
         &g_group_monitor, &g_group_output);
+    g_group_generation = CreateWindowW(L"BUTTON", L"Generation and sampling", WS_CHILD | WS_VISIBLE | BS_GROUPBOX,
+        12, 150, 900, 190, hwnd, (HMENU)(INT_PTR)IDC_GROUP_GENERATION, NULL, NULL);
     HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     GuiPageControls page_controls = {
         &g_corpus,
@@ -1430,9 +1437,31 @@ static void create_controls(HWND hwnd) {
         &g_source_weights,
         &g_beta1,
         &g_beta2,
-        &g_epsilon
+        &g_epsilon,
+        &g_min_p,
+        &g_frequency_penalty,
+        &g_presence_penalty,
+        &g_no_repeat_ngram,
+        &g_min_new_tokens,
+        &g_sampling_seed,
+        &g_stop_sequence
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
+    CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
+    g_min_p = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 62, 177, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Frequency", WS_CHILD | WS_VISIBLE, 12, 218, 82, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_FREQ_LABEL, NULL, NULL);
+    g_frequency_penalty = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 96, 215, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_FREQ, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Presence", WS_CHILD | WS_VISIBLE, 165, 218, 75, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_PRES_LABEL, NULL, NULL);
+    g_presence_penalty = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 242, 215, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_PRES, NULL, NULL);
+    CreateWindowW(L"STATIC", L"No-repeat n-gram", WS_CHILD | WS_VISIBLE, 315, 218, 110, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_NGRAM_LABEL, NULL, NULL);
+    g_no_repeat_ngram = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 428, 215, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_NGRAM, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Min new tokens", WS_CHILD | WS_VISIBLE, 500, 218, 100, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINTOK_LABEL, NULL, NULL);
+    g_min_new_tokens = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 602, 215, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINTOK, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Sampling seed", WS_CHILD | WS_VISIBLE, 12, 256, 90, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_SEED_LABEL, NULL, NULL);
+    g_sampling_seed = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, 105, 253, 100, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_SEED, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Stop sequence", WS_CHILD | WS_VISIBLE, 220, 256, 95, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_STOP_LABEL, NULL, NULL);
+    g_stop_sequence = CreateWindowW(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 318, 253, 450, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_STOP, NULL, NULL);
+    SendMessageW(g_stop_sequence, EM_SETLIMITTEXT, 256, 0);
     CreateWindowW(L"BUTTON", L"Pause training", WS_CHILD | WS_VISIBLE | WS_DISABLED,
         142, 340, 84, 30, hwnd, (HMENU)(INT_PTR)IDC_PAUSE, NULL, NULL);
     g_resource_status = CreateWindowW(L"STATIC", L"CPU: --   RAM: --", WS_CHILD | WS_VISIBLE,
@@ -1479,7 +1508,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1515,6 +1544,13 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_beta1, L"Optimizer beta1. AdamW default: 0.9; Lion default: 0.95. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(g_beta2, L"Optimizer beta2. AdamW default: 0.95; Lion default: 0.98. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(g_epsilon, L"AdamW numerical stability epsilon. Default 1e-8. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
+        add_tooltip(g_min_p, L"Min-p sampling threshold, 0-1. Candidates below this fraction of the most likely token's probability are filtered. 0 disables min-p.");
+        add_tooltip(g_frequency_penalty, L"Frequency penalty from -2 to 2. Subtracts a multiple of each token's occurrence count from its logit.");
+        add_tooltip(g_presence_penalty, L"Presence penalty from -2 to 2. Subtracts a fixed amount from logits for tokens already present in the context.");
+        add_tooltip(g_no_repeat_ngram, L"No-repeat n-gram size, 0-16. 0 disables it; 3 prevents repeating an existing three-token sequence.");
+        add_tooltip(g_min_new_tokens, L"Minimum generated tokens before the stop sequence can end generation. 0 disables the minimum.");
+        add_tooltip(g_sampling_seed, L"Sampling seed. 0 uses a varying seed; a nonzero value makes generation repeatable for the same prompt and settings, with each subsequent turn using the next seed.");
+        add_tooltip(g_stop_sequence, L"Optional text sequence that stops generation when emitted. The stop sequence is removed from the displayed response.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -1539,7 +1575,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
