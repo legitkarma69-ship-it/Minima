@@ -236,14 +236,32 @@ static void update_resource_monitor(void) {
     ZeroMemory(&memory, sizeof(memory));
     memory.cb = sizeof(memory);
     double cpu_percent = 0.0;
-    FILETIME created, exited, kernel, user;
-    if (GetProcessTimes(g_process, &created, &exited, &kernel, &user)) {
-        ULARGE_INTEGER k, u;
-        k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
-        u.LowPart = user.dwLowDateTime; u.HighPart = user.dwHighDateTime;
-        ULONGLONG total = k.QuadPart + u.QuadPart;
-        ULONGLONG now = GetTickCount64();
-        DWORD pid = GetProcessId(g_process);
+    HANDLE active_job = g_resource_job ? g_resource_job : g_eval_job;
+    ULONGLONG total = 0;
+    BOOL have_cpu_time = FALSE;
+    if (active_job) {
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+        ZeroMemory(&accounting, sizeof(accounting));
+        if (QueryInformationJobObject(active_job, JobObjectBasicAccountingInformation,
+            &accounting, sizeof(accounting), NULL)) {
+            total = (ULONGLONG)accounting.TotalKernelTime.QuadPart +
+                (ULONGLONG)accounting.TotalUserTime.QuadPart;
+            have_cpu_time = TRUE;
+        }
+    }
+    if (!have_cpu_time) {
+        FILETIME created, exited, kernel, user;
+        if (GetProcessTimes(g_process, &created, &exited, &kernel, &user)) {
+            ULARGE_INTEGER k, u;
+            k.LowPart = kernel.dwLowDateTime; k.HighPart = kernel.dwHighDateTime;
+            u.LowPart = user.dwLowDateTime; u.HighPart = user.dwHighDateTime;
+            total = k.QuadPart + u.QuadPart;
+            have_cpu_time = TRUE;
+        }
+    }
+    ULONGLONG now = GetTickCount64();
+    DWORD pid = GetProcessId(g_process);
+    if (have_cpu_time) {
         if (pid == g_last_cpu_pid && g_last_cpu_tick && now > g_last_cpu_tick &&
             total >= g_last_cpu_100ns) {
             SYSTEM_INFO si; GetSystemInfo(&si);
@@ -261,13 +279,21 @@ static void update_resource_monitor(void) {
         sizeof(memory))) {
         wchar_t status[256];
         double working = (double)memory.WorkingSetSize / (1024.0 * 1024.0 * 1024.0);
-        double private_gb = (double)memory.PrivateUsage / (1024.0 * 1024.0 * 1024.0);
+        SIZE_T committed_bytes = memory.PrivateUsage;
+        if (active_job) {
+            JOBOBJECT_MEMORY_USAGE_INFORMATION job_memory;
+            ZeroMemory(&job_memory, sizeof(job_memory));
+            if (QueryInformationJobObject(active_job, JobObjectMemoryUsageInformation,
+                &job_memory, sizeof(job_memory), NULL))
+                committed_bytes = (SIZE_T)job_memory.JobMemory;
+        }
+        double committed_gb = (double)committed_bytes / (1024.0 * 1024.0 * 1024.0);
         _snwprintf_s(status, _countof(status), _TRUNCATE,
-            L"CPU %.0f%% | WS %.2f GB | Priv %.2f GB",
-            cpu_percent, working, private_gb);
+            L"CPU %.0f%% | WS %.2f GB | Job %.2f GB",
+            cpu_percent, working, committed_gb);
         SetWindowTextW(g_resource_status, status);
     } else {
-        SetWindowTextW(g_resource_status, L"CPU: monitoring   RAM: unavailable");
+        SetWindowTextW(g_resource_status, L"CPU monitoring | memory unavailable");
     }
 }
 
