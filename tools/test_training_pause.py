@@ -6,6 +6,7 @@ import argparse
 import queue
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 
@@ -79,13 +80,15 @@ def main() -> int:
             if line == "TRAIN_RESUMED":
                 observed_resumed = True
 
-        remaining = list(captured)
+        deadline = time.monotonic() + 120
         while True:
             try:
                 line = lines.get(timeout=1)
             except queue.Empty:
                 if process.poll() is not None:
                     break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Minima did not finish the resumed training segment within 120 seconds")
                 continue
             if line is None:
                 break
