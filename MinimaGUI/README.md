@@ -35,6 +35,8 @@ Changing vocabulary or model architecture makes an existing checkpoint incompati
 
 ## Results and monitoring
 
+Resource profiles are available as **Eco**, **Balanced**, **Performance**, **Training**, and **Chat**. They set CPU cap, Windows committed-memory cap, arena budget, OpenMP threads, and process priority. Editing one of those values changes the profile to Custom. The presets are starting points, not hardware detection or guarantees.
+
 The Monitor panel displays live process-group CPU utilization, working-set RAM, and private committed memory, along with per-run CPU and memory peaks. Configure CPU and RAM warning thresholds in the same panel; each threshold logs one warning per run when reached. CPU and RAM caps are applied by Windows Job Objects. The Windows memory cap is a hard job-wide committed-memory limit, not a physical working-set cap. The engine arena budget is a separate allocation-level ceiling shared by permanent, temporary, and corpus arenas; it rejects arena allocations before they are committed and prints a diagnostic. It does not currently account for all ordinary heap allocations or memory-mapped token IDs. A value of 0 disables either cap. CPU thread count and CPU utilization are separate controls: limiting threads does not impose a CPU percentage ceiling.
 
 The GUI displays engine output, including:
