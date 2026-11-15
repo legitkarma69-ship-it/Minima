@@ -118,12 +118,13 @@ void gui_layout_layout_controls(HWND hwnd) {
         }
     }
     const int actions_y=work_top+scale_px(320);
-    MoveWindow(GetDlgItem(hwnd,IDC_START),pad,actions_y,scale_px(116),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_STOP),pad+scale_px(122),actions_y,scale_px(100),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad+scale_px(228),actions_y,scale_px(96),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_SAVE_NOW),pad+scale_px(330),actions_y,scale_px(112),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),pad+scale_px(448),actions_y,scale_px(132),action_h,TRUE);
-    MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(586),actions_y,scale_px(112),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_START),pad,actions_y,scale_px(104),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_STOP),pad+scale_px(110),actions_y,scale_px(84),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_PAUSE),pad+scale_px(200),actions_y,scale_px(84),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_CHAT_START),pad+scale_px(290),actions_y,scale_px(84),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_SAVE_NOW),pad+scale_px(380),actions_y,scale_px(98),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),pad+scale_px(484),actions_y,scale_px(120),action_h,TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_AUTO_SETTINGS),pad+scale_px(610),actions_y,scale_px(90),action_h,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_STATUS),pad+scale_px(706),actions_y+scale_px(8),scale_px(150),scale_px(22),TRUE);
     if(g_group_output)MoveWindow(g_group_output,pad,output_top,inner,output_h,TRUE);
     if(g_output_label)MoveWindow(g_output_label,pad+(g_active_page==2?scale_px(112):scale_px(8)),output_top+scale_px(4),scale_px(300),scale_px(18),TRUE);
