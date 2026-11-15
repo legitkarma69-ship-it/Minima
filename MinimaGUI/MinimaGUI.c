@@ -1483,13 +1483,6 @@ static void create_controls(HWND hwnd) {
         &g_beta1,
         &g_beta2,
         &g_epsilon,
-        &g_min_p,
-        &g_frequency_penalty,
-        &g_presence_penalty,
-        &g_no_repeat_ngram,
-        &g_min_new_tokens,
-        &g_sampling_seed,
-        &g_stop_sequence
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
