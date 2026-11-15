@@ -47,7 +47,7 @@ HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
 static HWND g_optimizer, g_weight_decay, g_threads;
-HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_status;
+HWND g_cpu_limit, g_ram_limit, g_arena_budget, g_cpu_warning, g_ram_warning, g_resource_profile, g_resource_status;
 static wchar_t g_metrics_path[MAX_PATH];
 static wchar_t g_settings_path[MAX_PATH];
 static HANDLE g_process, g_thread, g_stdin_write, g_eval_job, g_resource_job;
@@ -57,6 +57,7 @@ static double g_peak_cpu_percent;
 static SIZE_T g_peak_working_bytes, g_peak_private_bytes;
 static DWORD g_cpu_warning_limit, g_ram_warning_limit_gb;
 static BOOL g_cpu_warning_issued, g_ram_warning_issued;
+static BOOL g_applying_resource_profile;
 static BOOL g_chat_mode;
 static BOOL g_evaluation_mode;
 static BOOL g_chat_response_active;
@@ -205,10 +206,45 @@ static BOOL read_resource_limits(DWORD* cpu_percent, DWORD* ram_gb) {
         read_bounded_integer(g_ram_limit, 64, ram_gb);
 }
 
-static BOOL configure_resource_job(HANDLE job, DWORD cpu_percent, DWORD ram_gb) {
+static DWORD selected_resource_priority(void) {
+    wchar_t profile[32];
+    GetWindowTextW(g_resource_profile, profile, (int)_countof(profile));
+    if (wcscmp(profile, L"Eco") == 0) return BELOW_NORMAL_PRIORITY_CLASS;
+    if (wcscmp(profile, L"Performance") == 0) return ABOVE_NORMAL_PRIORITY_CLASS;
+    return NORMAL_PRIORITY_CLASS;
+}
+
+static void apply_resource_profile(void) {
+    if (!g_resource_profile || g_applying_resource_profile) return;
+    wchar_t profile[32];
+    GetWindowTextW(g_resource_profile, profile, (int)_countof(profile));
+    g_applying_resource_profile = TRUE;
+    if (wcscmp(profile, L"Eco") == 0) {
+        SetWindowTextW(g_cpu_limit, L"35");
+        SetWindowTextW(g_ram_limit, L"4");
+        SetWindowTextW(g_arena_budget, L"3");
+        SetWindowTextW(g_threads, L"2");
+    } else if (wcscmp(profile, L"Balanced") == 0) {
+        SetWindowTextW(g_cpu_limit, L"65");
+        SetWindowTextW(g_ram_limit, L"8");
+        SetWindowTextW(g_arena_budget, L"6");
+        SetWindowTextW(g_threads, L"4");
+    } else if (wcscmp(profile, L"Performance") == 0) {
+        SetWindowTextW(g_cpu_limit, L"100");
+        SetWindowTextW(g_ram_limit, L"12");
+        SetWindowTextW(g_arena_budget, L"10");
+        SetWindowTextW(g_threads, L"8");
+    }
+    g_applying_resource_profile = FALSE;
+}
+
+static BOOL configure_resource_job(HANDLE job, DWORD cpu_percent, DWORD ram_gb,
+    DWORD priority_class) {
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
     ZeroMemory(&limits, sizeof(limits));
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+        JOB_OBJECT_LIMIT_PRIORITY_CLASS;
+    limits.BasicLimitInformation.PriorityClass = priority_class;
     if (ram_gb > 0) {
         limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
         limits.JobMemoryLimit = (SIZE_T)ram_gb * (SIZE_T)1024 * 1024 * 1024;
@@ -405,7 +441,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -710,7 +746,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
 
     g_resource_job = CreateJobObjectW(NULL, NULL);
     if (!g_resource_job || !configure_resource_job(g_resource_job,
-        cpu_limit_percent, ram_limit_gb)) {
+        cpu_limit_percent, ram_limit_gb, selected_resource_priority())) {
         if (g_resource_job) { CloseHandle(g_resource_job); g_resource_job = NULL; }
         if(null_input!=INVALID_HANDLE_VALUE)CloseHandle(null_input);
         CloseHandle(read_pipe);CloseHandle(write_pipe);
@@ -846,7 +882,7 @@ static void start_logic_evaluation(void) {
     if (nul == INVALID_HANDLE_VALUE) { CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not open NUL.", L"ProjectMinima", MB_ICONERROR); return; }
     HANDLE eval_job = CreateJobObjectW(NULL, NULL);
     if (!eval_job) { CloseHandle(nul); CloseHandle(rd); CloseHandle(wr); MessageBoxW(g_window, L"Could not create an evaluation process group.", L"ProjectMinima", MB_ICONERROR); return; }
-    if (!configure_resource_job(eval_job, cpu_limit_percent, ram_limit_gb)) {
+    if (!configure_resource_job(eval_job, cpu_limit_percent, ram_limit_gb, selected_resource_priority())) {
         CloseHandle(eval_job); CloseHandle(nul); CloseHandle(rd); CloseHandle(wr);
         MessageBoxW(g_window, L"Could not configure evaluation process cleanup.", L"ProjectMinima", MB_ICONERROR); return;
     }
@@ -1174,7 +1210,7 @@ static void initialize_settings_context(HWND hwnd) {
         g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget,
         g_cpu_warning, g_ram_warning
     };
-    HWND combos[4] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer };
+    HWND combos[5] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer, g_resource_profile };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
     CopyMemory(g_settings_context.combo_controls, combos, sizeof(combos));
     g_settings_context.resume_control = g_resume;
@@ -1260,6 +1296,15 @@ static void create_controls(HWND hwnd) {
         750, 512, 88, 18, hwnd, (HMENU)(INT_PTR)IDC_RAM_WARNING_LABEL, NULL, NULL);
     g_ram_warning = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER,
         842, 509, 48, 23, hwnd, (HMENU)(INT_PTR)IDC_RAM_WARNING, NULL, NULL);
+    CreateWindowW(L"STATIC", L"Profile", WS_CHILD | WS_VISIBLE,
+        600, 542, 76, 18, hwnd, (HMENU)(INT_PTR)IDC_RESOURCE_PROFILE_LABEL, NULL, NULL);
+    g_resource_profile = CreateWindowW(L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | CBS_DROPDOWNLIST | WS_VSCROLL,
+        680, 539, 140, 100, hwnd, (HMENU)(INT_PTR)IDC_RESOURCE_PROFILE, NULL, NULL);
+    SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Custom");
+    SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Eco");
+    SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Balanced");
+    SendMessageW(g_resource_profile, CB_ADDSTRING, 0, (LPARAM)L"Performance");
+    SendMessageW(g_resource_profile, CB_SETCURSEL, 0, 0);
     g_eval_button = CreateWindowW(L"BUTTON", L"Run 24-question test", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         12, 665, 150, 26, hwnd, (HMENU)(INT_PTR)IDC_RUN_EVAL, NULL, NULL);
 
@@ -1267,7 +1312,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_status };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1298,6 +1343,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_arena_budget, L"Engine-level shared budget for pages committed by Minima's permanent, temporary, and corpus arenas. 0 disables it; 1-64 sets GiB. This budget rejects arena allocations cleanly before Windows runs out of commit.");
         add_tooltip(g_cpu_warning, L"Log one warning per run when measured process-group CPU utilization reaches this percentage. 0 disables the warning; 1-100 is normalized to total logical-processor capacity.");
         add_tooltip(g_ram_warning, L"Log one warning per run when the process-group working set reaches this GiB threshold. 0 disables the warning; 1-64 is allowed.");
+        add_tooltip(g_resource_profile, L"Eco, Balanced, and Performance presets set CPU cap, process commit cap, arena budget, OpenMP threads, and Windows process priority. Any manual edit to those controls switches the selection back to Custom.");
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
@@ -1322,7 +1368,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
@@ -1460,6 +1506,17 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         break;
     case WM_COMMAND:
+        if (LOWORD(wp) == IDC_RESOURCE_PROFILE && HIWORD(wp) == CBN_SELCHANGE) {
+            apply_resource_profile();
+            return 0;
+        }
+        if (HIWORD(wp) == EN_CHANGE && !g_applying_resource_profile &&
+            ((HWND)lp == g_cpu_limit || (HWND)lp == g_ram_limit ||
+             (HWND)lp == g_arena_budget || (HWND)lp == g_threads)) {
+            LRESULT custom = SendMessageW(g_resource_profile, CB_FINDSTRINGEXACT,
+                (WPARAM)-1, (LPARAM)L"Custom");
+            if (custom >= 0) SendMessageW(g_resource_profile, CB_SETCURSEL, (WPARAM)custom, 0);
+        }
         if (gui_actions_dispatch(hwnd, LOWORD(wp), &g_action_handlers))
             return 0;
         break;
