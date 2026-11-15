@@ -27,8 +27,9 @@ def main() -> int:
     stop_file = workdir / "minima_ci_pause.stop"
     metrics_file = workdir / "minima_ci_pause_metrics.csv"
     second_corpus = workdir / "minima_ci_pause_corpus_copy.txt"
+    best_checkpoint = workdir / "minima.segment_best.model"
     shutil.copyfile(corpus, second_corpus)
-    for path in (pause_file, stop_file, metrics_file):
+    for path in (pause_file, stop_file, metrics_file, best_checkpoint):
         path.unlink(missing_ok=True)
 
     pause_file.write_text("pause\n", encoding="ascii")
@@ -113,6 +114,10 @@ def main() -> int:
             raise RuntimeError("Pause/resume protocol was incomplete")
         if not any("beta1=0.91 beta2=0.96 epsilon=1e-07" in line for line in captured):
             raise RuntimeError("Configured optimizer beta/epsilon values were not applied or reported")
+        if not best_checkpoint.is_file() or best_checkpoint.stat().st_size == 0:
+            raise RuntimeError("The best-validation checkpoint was not saved")
+        if not any("Best segment checkpoint saved" in line for line in captured):
+            raise RuntimeError("Training did not report its best-segment checkpoint");
         print("Training pause/resume integration: PASS", flush=True)
         return 0
     except Exception:
@@ -128,6 +133,7 @@ def main() -> int:
         pause_file.unlink(missing_ok=True)
         stop_file.unlink(missing_ok=True)
         second_corpus.unlink(missing_ok=True)
+        best_checkpoint.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
