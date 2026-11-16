@@ -110,6 +110,7 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_beta2 (*page_controls->beta2)
 #define g_epsilon (*page_controls->epsilon)
 #define g_checkpoint_retention (*page_controls->checkpoint_retention)
+#define g_compare_runs_button (*page_controls->compare_runs_button)
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, parent, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
         12, 34, 520, 105, parent, (HMENU)(INT_PTR)IDC_CORPUS, NULL, NULL);
@@ -221,6 +222,7 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     SendMessageW(g_log,EM_SETLIMITTEXT,4*1024*1024,0);
     g_clear_chat=CreateWindowW(L"BUTTON",L"Clear chat",WS_CHILD|WS_VISIBLE,12,665,100,26,parent,(HMENU)(INT_PTR)IDC_CLEAR_CHAT,NULL,NULL);
     g_clear_logs=CreateWindowW(L"BUTTON",L"Clear logs",WS_CHILD|WS_VISIBLE,12,665,100,26,parent,(HMENU)(INT_PTR)IDC_CLEAR_LOGS,NULL,NULL);
+    g_compare_runs_button=CreateWindowW(L"BUTTON",L"Compare runs",WS_CHILD|WS_VISIBLE,120,665,120,26,parent,(HMENU)(INT_PTR)IDC_COMPARE_RUNS,NULL,NULL);
     g_chat_input=CreateWindowExW(WS_EX_CLIENTEDGE,L"COMBOBOX",L"",
         WS_CHILD|WS_VISIBLE|WS_BORDER|CBS_DROPDOWN|CBS_AUTOHSCROLL|WS_VSCROLL,
         12,665,600,180,parent,(HMENU)(INT_PTR)IDC_CHAT_INPUT,NULL,NULL);
