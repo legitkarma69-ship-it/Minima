@@ -928,6 +928,65 @@ static BOOL engine_sidecar_exists(const wchar_t* filename) {
     return attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY);
 }
 
+static BOOL archive_existing_metrics(void) {
+    const DWORD attributes = GetFileAttributesW(g_metrics_path);
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY) return FALSE;
+
+    wchar_t stem[MAX_PATH];
+    if (wcscpy_s(stem, _countof(stem), g_metrics_path) != 0) return FALSE;
+    wchar_t* extension = wcsrchr(stem, L'.');
+    if (extension) *extension = 0;
+
+    wchar_t metadata_source[MAX_PATH * 2], metadata_destination[MAX_PATH * 2];
+    if (_snwprintf_s(metadata_source, _countof(metadata_source), _TRUNCATE,
+            L"%s.meta.json", g_metrics_path) < 0)
+        return FALSE;
+    const DWORD metadata_attributes = GetFileAttributesW(metadata_source);
+    const BOOL have_metadata = metadata_attributes != INVALID_FILE_ATTRIBUTES &&
+        !(metadata_attributes & FILE_ATTRIBUTE_DIRECTORY);
+
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    for (unsigned int attempt = 0; attempt < 100; ++attempt) {
+        wchar_t suffix[16] = L"";
+        if (attempt > 0)
+            _snwprintf_s(suffix, _countof(suffix), _TRUNCATE, L"_%02u", attempt);
+        wchar_t archive_path[MAX_PATH];
+        if (_snwprintf_s(archive_path, _countof(archive_path), _TRUNCATE,
+                L"%s_%04u%02u%02u_%02u%02u%02u%s.csv", stem,
+                now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+                now.wSecond, suffix) < 0)
+            return FALSE;
+        const DWORD archive_attributes = GetFileAttributesW(archive_path);
+        if (archive_attributes != INVALID_FILE_ATTRIBUTES) continue;
+
+        if (have_metadata) {
+            if (_snwprintf_s(metadata_destination, _countof(metadata_destination),
+                    _TRUNCATE, L"%s.meta.json", archive_path) < 0)
+                return FALSE;
+            if (GetFileAttributesW(metadata_destination) != INVALID_FILE_ATTRIBUTES)
+                continue;
+            if (!MoveFileExW(metadata_source, metadata_destination, MOVEFILE_WRITE_THROUGH))
+                return FALSE;
+        }
+        if (!MoveFileExW(g_metrics_path, archive_path, MOVEFILE_WRITE_THROUGH)) {
+            if (have_metadata)
+                MoveFileExW(metadata_destination, metadata_source, MOVEFILE_REPLACE_EXISTING);
+            return FALSE;
+        }
+        wchar_t message[MAX_PATH + 64];
+        _snwprintf_s(message, _countof(message), _TRUNCATE,
+            L"Archived previous training metrics: %s\r\n", archive_path);
+        append_log(message);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static BOOL prebuilt_tokenizer_settings_match(void) {
     wchar_t vocab[64],bytes[64],sampling[64];
     GetWindowTextW(g_vocab,vocab,_countof(vocab));
@@ -1101,8 +1160,13 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         wchar_t* save_slash=wcsrchr(save_path,L'\\');
         if(save_slash)wcscpy_s(save_slash+1,_countof(save_path)-(size_t)(save_slash+1-save_path),L"minima.save");
         DeleteFileW(save_path);
-        if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED)
-            DeleteFileW(g_metrics_path); /* A fresh model starts a fresh loss graph. */
+        if(SendMessageW(g_resume,BM_GETCHECK,0,0)!=BST_CHECKED &&
+            !archive_existing_metrics()) {
+            MessageBoxW(g_window,
+                L"Could not archive the previous metrics CSV. The existing run history was left untouched; move or rename it before starting a fresh run.",
+                L"Metrics archive failed", MB_ICONERROR);
+            return;
+        }
     }
     int corpus_count = chat_mode ? 0 : (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
     for (int i = 0; i < corpus_count; ++i) {
