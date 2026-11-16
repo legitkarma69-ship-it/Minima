@@ -1986,8 +1986,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
-        add_tooltip(GetDlgItem(hwnd, IDC_RELIABLE_DEFAULTS), L"Apply a conservative fresh-run configuration: approximately 541,312 parameters, 2,048 vocabulary entries, short training sequences, and safe resource limits. Keeps the selected corpus.");
-        add_tooltip(GetDlgItem(hwnd, IDC_VOCAB4096_DEFAULTS), L"Apply a fresh-run configuration with 4,096 vocabulary entries and approximately 663,936 parameters. Keeps the selected corpus and disables Resume.");
+        add_tooltip(GetDlgItem(hwnd, IDC_RELIABLE_DEFAULTS), L"Apply a conservative fresh-run configuration: approximately 557,696 parameters, 2,048 vocabulary entries, short training sequences, and safe resource limits. Keeps the selected corpus.");
+        add_tooltip(GetDlgItem(hwnd, IDC_VOCAB4096_DEFAULTS), L"Apply a fresh-run configuration with 4,096 vocabulary entries and approximately 672,128 parameters. Keeps the selected corpus and disables Resume.");
         add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
         add_tooltip(g_chat_input, L"Type a message and press Enter to start chat and send it. While chatting, Enter sends each message. Use the dropdown for sample prompts.");
         add_tooltip(GetDlgItem(hwnd, IDC_CHAT_START), L"Start the checkpoint chat. You can also type a message below and press Enter.");
@@ -2100,7 +2100,7 @@ static void apply_reliable_training_preset(HWND hwnd, int vocab_size) {
     if (MessageBoxW(hwnd, prompt, L"Minima training preset",
         MB_YESNO | MB_ICONQUESTION) != IDYES) return;
 
-    /* Model: ~541,312 parameters at 2,048 vocab; ~663,936 at 4,096 vocab. */
+    /* Model: 557,696 parameters at 2,048 vocab; 672,128 at 4,096 vocab. */
     set_preset_text(g_steps, segment_steps);
     set_preset_text(g_vocab, model_vocab);
     set_preset_text(g_dim, L"128");
