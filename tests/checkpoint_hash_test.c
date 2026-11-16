@@ -21,6 +21,53 @@ static bool write_checkpoint_bytes(const char* path,
     return fclose(file) == 0 && ok;
 }
 
+static int first_byte_is(const char* path, unsigned char expected) {
+    FILE* file = fopen(path, "rb");
+    if (!file) return 0;
+    const int value = fgetc(file);
+    fclose(file);
+    return value == expected;
+}
+
+static bool test_checkpoint_rotation(void) {
+    const char* current = "checkpoint_rotation_test.model";
+    const char* one = "checkpoint_rotation_test.model.prev.1";
+    const char* two = "checkpoint_rotation_test.model.prev.2";
+    const char* three = "checkpoint_rotation_test.model.prev.3";
+    const char* stale = "checkpoint_rotation_test.model.prev.4";
+    const char* temporary = "checkpoint_rotation_test.model.archive.tmp";
+    remove(current); remove(one); remove(two); remove(three);
+    remove(stale); remove(temporary);
+
+    const unsigned char a[] = { 'A' }, b[] = { 'B' };
+    const unsigned char c[] = { 'C' }, d[] = { 'D' };
+    if (!write_checkpoint_bytes(current, a, sizeof(a)) ||
+        !checkpoint_archive_previous(current, 3) ||
+        !first_byte_is(one, 'A')) return false;
+    if (!write_checkpoint_bytes(current, b, sizeof(b)) ||
+        !checkpoint_archive_previous(current, 3) ||
+        !first_byte_is(one, 'B') || !first_byte_is(two, 'A')) return false;
+    if (!write_checkpoint_bytes(current, c, sizeof(c)) ||
+        !checkpoint_archive_previous(current, 3) ||
+        !first_byte_is(one, 'C') || !first_byte_is(two, 'B') ||
+        !first_byte_is(three, 'A')) return false;
+    if (!write_checkpoint_bytes(current, d, sizeof(d)) ||
+        !checkpoint_archive_previous(current, 3) ||
+        !first_byte_is(one, 'D') || !first_byte_is(two, 'C') ||
+        !first_byte_is(three, 'B')) return false;
+
+    /* Reducing retention removes stale slots; zero leaves archives untouched. */
+    if (!checkpoint_archive_previous(current, 1) ||
+        !first_byte_is(one, 'D') || first_byte_is(two, 'C')) return false;
+    if (!write_checkpoint_bytes(current, a, sizeof(a)) ||
+        !checkpoint_archive_previous(current, 0) ||
+        !first_byte_is(one, 'D')) return false;
+
+    remove(current); remove(one); remove(two); remove(three);
+    remove(stale); remove(temporary);
+    return true;
+}
+
 static bool expect_rejected_without_mutation(const char* path,
     const unsigned char* bytes, size_t length, uint64_t tokenizer_hash,
     Model* model, Optim* opt, Rng* rng) {
@@ -44,6 +91,7 @@ static bool expect_rejected_without_mutation(const char* path,
 
 int main(void) {
     const char* path = "checkpoint_hash_test.model";
+    CHECK(test_checkpoint_rotation());
     const ModelConfig config = { 260, 8, 1, 2, 16, 32 };
     Arena model_arena, optimizer_arena;
     CHECK(arena_init(&model_arena, 1024u * 1024u));
