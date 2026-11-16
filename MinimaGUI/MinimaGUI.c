@@ -725,12 +725,22 @@ static DWORD WINAPI compare_runs_wait_thread(LPVOID parameter) {
 static BOOL get_repository_root(wchar_t* root, size_t capacity) {
     if (!root || capacity == 0 || !g_engine_path[0]) return FALSE;
     if (wcscpy_s(root, capacity, g_engine_path) != 0) return FALSE;
-    for (int i = 0; i < 3; ++i) {
-        wchar_t* slash = wcsrchr(root, L'\\');
-        if (!slash) return FALSE;
+    wchar_t* slash = wcsrchr(root, L'\\');
+    if (!slash) return FALSE;
+    *slash = 0;
+
+    /* Walk upward so Debug/Release, published, and custom output folders work. */
+    for (int depth = 0; depth < 6; ++depth) {
+        wchar_t candidate[MAX_PATH * 2];
+        if (_snwprintf_s(candidate, _countof(candidate), _TRUNCATE,
+                L"%s\\tools\\compare_runs.py", root) >= 0 &&
+            GetFileAttributesW(candidate) != INVALID_FILE_ATTRIBUTES)
+            return TRUE;
+        slash = wcsrchr(root, L'\\');
+        if (!slash) break;
         *slash = 0;
     }
-    return TRUE;
+    return FALSE;
 }
 
 static void start_run_comparison(void) {
