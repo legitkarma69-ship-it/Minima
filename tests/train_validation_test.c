@@ -124,6 +124,10 @@ int main(void) {
     CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
     bad = options; bad.checkpoint_interval = 0;
     CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
+    bad = options; bad.checkpoint_retention = -1;
+    CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
+    bad = options; bad.checkpoint_retention = 21;
+    CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
     bad = options; bad.validation_batches = 0;
     CHECK_INVALID(&model, &opt, &grads, &temp, token_ids, 64, 32, &rng, bad);
     bad = options; bad.batch_size = 0;
