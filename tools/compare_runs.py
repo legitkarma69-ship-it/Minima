@@ -66,8 +66,9 @@ def load_run(metrics_path: str | Path) -> dict[str, Any]:
             f"FF{model.get('ffn_dim', '?')}"
         )
 
+    run_label = path.stem if path.stem != "minima_metrics" else (path.parent.name or path.stem)
     return {
-        "run": path.parent.name or path.stem,
+        "run": run_label,
         "metrics_file": str(path),
         "metadata_file": str(metadata_path) if metadata else "",
         "optimizer": training.get("optimizer", "unknown"),
