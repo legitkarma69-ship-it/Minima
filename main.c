@@ -47,7 +47,7 @@ typedef struct {
     float grad_clip_norm;
     int total_steps;
     bool total_steps_explicit;
-    int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval;
+    int warmup_steps, log_interval, validation_batches, validation_interval, checkpoint_interval, checkpoint_retention;
     int batch_size, sequence_length;
     uint64_t seed;
     size_t tokenizer_sample_bytes;
@@ -118,6 +118,7 @@ static void print_usage(const char* exe) {
     printf("  --frequency-penalty F --presence-penalty F --no-repeat-ngram N\n");
     printf("  --min-new-tokens N --sampling-seed N --stop-sequence TEXT\n");
     printf("  --max-new-tokens N --chat (requires --resume) --metrics PATH\n");
+    printf("  --checkpoint-retention N (0-20 archived checkpoints; default 3)\n");
     printf("  --stop-file PATH --pause-file PATH --save-file PATH (cooperative training controls)\n");
     printf("  --source-weights CSV (positive multipliers, one per non-empty corpus file)\n");
     printf("  --retrain-tokenizer-only (rebuild minima.bpe from corpus and exit)\n");
@@ -165,7 +166,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
     o->grad_clip_norm=1.0f;
     o->log_interval=DEFAULT_LOG_INTERVAL; o->validation_batches=DEFAULT_VALIDATION_BATCHES;
     o->validation_interval=DEFAULT_LOG_INTERVAL;
-    o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->seed=1234;
+    o->checkpoint_interval=DEFAULT_CHECKPOINT_INTERVAL; o->checkpoint_retention=3; o->seed=1234;
     o->tokenizer_sample_bytes=DEFAULT_TOKENIZER_SAMPLE_BYTES;
     o->threads=0; o->memory_budget_gb=0;
     o->metrics_path="minima_metrics.csv"; o->stop_file=NULL; o->pause_file=NULL; o->source_weights=NULL; o->save_file=NULL;
@@ -205,6 +206,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             strcmp(argv[i], "--validation-batches") == 0 ||
             strcmp(argv[i], "--validation-interval") == 0 ||
             strcmp(argv[i], "--checkpoint-interval") == 0 ||
+            strcmp(argv[i], "--checkpoint-retention") == 0 ||
             strcmp(argv[i], "--seed") == 0 ||
             strcmp(argv[i], "--tokenizer-sample-bytes") == 0 ||
             strcmp(argv[i], "--threads") == 0 ||
@@ -221,6 +223,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             if (++i >= argc) die("%s requires a value", opt);
             long lo=1, hi=INT_MAX;
             if(strcmp(opt,"--validation-batches")==0)hi=4096;
+            if(strcmp(opt,"--checkpoint-retention")==0) { lo=0; hi=20; }
             if (strcmp(opt,"--seed")==0) { lo=0; hi=LONG_MAX; }
             if (strcmp(opt,"--tokenizer-sample-bytes")==0) { lo=4096; hi=4194304; }
             if (strcmp(opt,"--threads")==0) { lo=0; hi=256; }
@@ -241,6 +244,7 @@ static int parse_arguments(int argc, char** argv, bool* resume,
             else if (strcmp(opt,"--validation-batches")==0) o->validation_batches=(int)v;
             else if (strcmp(opt,"--validation-interval")==0) o->validation_interval=(int)v;
             else if (strcmp(opt,"--checkpoint-interval")==0) o->checkpoint_interval=(int)v;
+            else if (strcmp(opt,"--checkpoint-retention")==0) o->checkpoint_retention=(int)v;
             else if (strcmp(opt,"--seed")==0) o->seed=(uint64_t)v;
             else if (strcmp(opt,"--vocab-size")==0) o->model.vocab_size=(int)v;
             else if (strcmp(opt,"--dim")==0) o->model.dim=(int)v;
@@ -898,9 +902,12 @@ int main(int argc, char** argv) {
             ? options.warmup_steps : (total_steps > 1 ? total_steps - 1 : 0);
         opt.schedule_type = strcmp(options.lr_schedule,"constant")==0 ? 1 : 0;
     }
-    if (!diagnostics_only && !resume && !checkpoint_save("minima.model", &model, &opt,
-        &rng, tokenizer_hash))
-        die("initial checkpoint save failed");
+    if (!diagnostics_only && !resume) {
+        if (!checkpoint_archive_previous("minima.model", options.checkpoint_retention))
+            printf("WARNING: could not rotate the previous checkpoint archive.\\n");
+        if (!checkpoint_save("minima.model", &model, &opt, &rng, tokenizer_hash))
+            die("initial checkpoint save failed");
+    }
 
     TrainRunOptions train_options = {
         .steps = steps_to_run,
@@ -908,6 +915,7 @@ int main(int argc, char** argv) {
         .validation_batches = options.validation_batches,
         .validation_interval = options.validation_interval,
         .checkpoint_interval = options.checkpoint_interval,
+        .checkpoint_retention = options.checkpoint_retention,
         .batch_size = options.batch_size,
         .sequence_length = options.sequence_length,
         .grad_clip_norm = options.grad_clip_norm,
