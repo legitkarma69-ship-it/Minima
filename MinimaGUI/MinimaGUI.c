@@ -1986,6 +1986,8 @@ static void create_controls(HWND hwnd) {
         add_tooltip(GetDlgItem(hwnd, IDC_REBUILD_TOKENIZER), L"Rebuild minima.bpe without training model weights. The next fresh run can reuse it.");
         add_tooltip(GetDlgItem(hwnd, IDC_AUTO_SETTINGS), L"Estimate training and tokenizer settings from the selected corpus size.");
         add_tooltip(GetDlgItem(hwnd, IDC_BASIC_DEFAULTS), L"Restore the standard model and training settings without changing the selected corpus files.");
+        add_tooltip(GetDlgItem(hwnd, IDC_RELIABLE_DEFAULTS), L"Apply a conservative fresh-run configuration: approximately 541,312 parameters, 2,048 vocabulary entries, short training sequences, and safe resource limits. Keeps the selected corpus.");
+        add_tooltip(GetDlgItem(hwnd, IDC_VOCAB4096_DEFAULTS), L"Apply a fresh-run configuration with 4,096 vocabulary entries and approximately 663,936 parameters. Keeps the selected corpus and disables Resume.");
         add_tooltip(GetDlgItem(hwnd, IDC_SAVE_NOW), L"Request a checkpoint at the next optimizer update.");
         add_tooltip(g_chat_input, L"Type a message and press Enter to start chat and send it. While chatting, Enter sends each message. Use the dropdown for sample prompts.");
         add_tooltip(GetDlgItem(hwnd, IDC_CHAT_START), L"Start the checkpoint chat. You can also type a message below and press Enter.");
@@ -2001,7 +2003,7 @@ static void create_controls(HWND hwnd) {
     /* Make every interactive control reachable through normal keyboard tab navigation. */
     HWND tab_controls[] = {
         g_corpus, GetDlgItem(hwnd,IDC_ADD), GetDlgItem(hwnd,IDC_REMOVE),
-        GetDlgItem(hwnd,IDC_BASIC_DEFAULTS),
+        GetDlgItem(hwnd,IDC_BASIC_DEFAULTS),GetDlgItem(hwnd,IDC_RELIABLE_DEFAULTS),GetDlgItem(hwnd,IDC_VOCAB4096_DEFAULTS),
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_steps,g_resume,
         g_batch_size,g_sequence_length,g_lr,g_warmup,g_log_interval,
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
@@ -2072,6 +2074,101 @@ static void action_basic_defaults(HWND hwnd) {
         append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\r\n");
     }
 }
+
+static void set_preset_text(HWND control, const wchar_t* value) {
+    if (control && IsWindow(control)) SetWindowTextW(control, value);
+}
+
+static void set_preset_combo(HWND control, const wchar_t* value) {
+    if (!control || !IsWindow(control)) return;
+    LRESULT index = SendMessageW(control, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)value);
+    if (index >= 0) SendMessageW(control, CB_SETCURSEL, (WPARAM)index, 0);
+}
+
+static void apply_reliable_training_preset(HWND hwnd, int vocab_size) {
+    if (InterlockedCompareExchange(&g_running, 0, 0)) return;
+    const BOOL larger_vocab = vocab_size == 4096;
+    const wchar_t* model_vocab = larger_vocab ? L"4096" : L"2048";
+    const wchar_t* model_layers = larger_vocab ? L"1" : L"2";
+    const wchar_t* segment_steps = L"10000";
+
+    wchar_t prompt[512];
+    _snwprintf_s(prompt, _countof(prompt), _TRUNCATE,
+        L"Apply the %s preset? This configures a fresh model with %s vocabulary entries, dim 128, %s layer(s), 4 heads, FFN 256, batch 1 and sequence 128. Resume will be disabled; the selected corpus files will be kept. The existing checkpoint will not be deleted, but it will not be resumed.",
+        larger_vocab ? L"4,096 vocabulary" : L"reliable 2,048 vocabulary",
+        model_vocab, model_layers);
+    if (MessageBoxW(hwnd, prompt, L"Minima training preset",
+        MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+
+    /* Model: ~541,312 parameters at 2,048 vocab; ~663,936 at 4,096 vocab. */
+    set_preset_text(g_steps, segment_steps);
+    set_preset_text(g_vocab, model_vocab);
+    set_preset_text(g_dim, L"128");
+    set_preset_text(g_layers, model_layers);
+    set_preset_text(g_heads, L"4");
+    set_preset_text(g_ffn, L"256");
+    set_preset_text(g_max_seq, L"128");
+    set_preset_text(g_batch_size, L"1");
+    set_preset_text(g_sequence_length, L"128");
+    set_preset_text(g_lr, L"0.0003");
+    set_preset_text(g_warmup, L"500");
+    set_preset_text(g_total_steps, L"100000");
+    set_preset_text(g_log_interval, L"500");
+    set_preset_text(g_validation_interval, L"1000");
+    set_preset_text(g_validation_batches, L"8");
+    set_preset_text(g_checkpoint_interval, L"1000");
+    set_preset_text(g_seed, L"1234");
+    set_preset_text(g_tokenizer_bytes, L"4194304");
+    set_preset_text(g_grad_clip, L"1.0");
+    set_preset_text(g_weight_decay, L"0.01");
+    set_preset_text(g_threads, L"8");
+    set_preset_text(g_cpu_limit, L"85");
+    set_preset_text(g_ram_limit, L"10");
+    set_preset_text(g_arena_budget, L"8");
+    set_preset_text(g_cpu_warning, L"95");
+    set_preset_text(g_ram_warning, L"8");
+    set_preset_text(g_beta1, L"0.9");
+    set_preset_text(g_beta2, L"0.95");
+    set_preset_text(g_epsilon, L"0.00000001");
+    set_preset_text(g_checkpoint_retention, L"3");
+    set_preset_text(g_source_weights, L"");
+
+    /* Generation controls are also restored to known-valid values. */
+    set_preset_text(g_temperature, L"0.8");
+    set_preset_text(g_top_k, L"40");
+    set_preset_text(g_top_p, L"0.9");
+    set_preset_text(g_repetition, L"1.1");
+    set_preset_text(g_max_tokens, L"64");
+    set_preset_text(g_min_p, L"0");
+    set_preset_text(g_frequency_penalty, L"0");
+    set_preset_text(g_presence_penalty, L"0");
+    set_preset_text(g_no_repeat_ngram, L"0");
+    set_preset_text(g_min_new_tokens, L"0");
+    set_preset_text(g_sampling_seed, L"0");
+    set_preset_text(g_stop_sequence, L"");
+
+    set_preset_combo(g_lr_schedule, L"cosine");
+    set_preset_combo(g_tokenizer_sampling, L"spread");
+    set_preset_combo(g_corpus_mix, L"sqrt");
+    set_preset_combo(g_optimizer, L"adamw");
+    set_preset_combo(g_resource_profile, L"Training");
+    SendMessageW(g_resume, BM_SETCHECK, BST_UNCHECKED, 0);
+    g_use_saved_tokenizer = FALSE;
+    g_fresh_used_saved_tokenizer = FALSE;
+    WritePrivateProfileStringW(L"Training", L"prebuilt_tokenizer", L"0", g_settings_path);
+    update_fresh_only_controls();
+    minima_settings_save(&g_settings_context);
+
+    wchar_t summary[320];
+    _snwprintf_s(summary, _countof(summary), _TRUNCATE,
+        L"%s preset applied: %s vocabulary, dim=128, layers=%s, heads=4, FFN=256, batch=1, seq=128, 10,000-step segment. Resume disabled; corpus selection preserved. Rebuild tokenizer is optional: a fresh Start training run builds it automatically.\r\n",
+        larger_vocab ? L"4,096" : L"Reliable",
+        model_vocab, model_layers);
+    append_log(summary);
+}
+
+static void action_reliable_defaults(HWND hwnd) { apply_reliable_training_preset(hwnd, 2048); }
+static void action_vocab4096_defaults(HWND hwnd) { apply_reliable_training_preset(hwnd, 4096); }
 static void action_advanced_toggle(HWND hwnd) {
     set_advanced_expanded(hwnd,
         SendMessageW(g_group_advanced, BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -2092,6 +2189,7 @@ static const GuiActionHandlers g_action_handlers = {
     action_add_corpus, action_remove_corpus, action_resume_changed,
     action_start_training, action_stop_training, action_start_chat,
     action_rebuild_tokenizer, action_auto_settings, action_basic_defaults,
+    action_reliable_defaults, action_vocab4096_defaults,
     action_advanced_toggle, action_chat_send, action_chat_test,
     action_chat_stop, action_save_checkpoint, action_clear_chat, action_clear_logs, action_run_evaluation
 };
