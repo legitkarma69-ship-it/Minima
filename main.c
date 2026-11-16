@@ -994,7 +994,7 @@ int main(int argc, char** argv) {
     }
     if (!diagnostics_only && !resume) {
         if (!checkpoint_archive_previous("minima.model", options.checkpoint_retention))
-            printf("WARNING: could not rotate the previous checkpoint archive.\\n");
+            printf("WARNING: could not rotate the previous checkpoint archive.\n");
         if (!checkpoint_save("minima.model", &model, &opt, &rng, tokenizer_hash))
             die("initial checkpoint save failed");
     }
