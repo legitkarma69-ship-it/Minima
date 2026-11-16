@@ -23,6 +23,7 @@
 #include <math.h>
 #include <errno.h>
 #include <time.h>
+#include <io.h>
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -189,7 +190,7 @@ static bool write_run_metadata(const char* metrics_path,
         source_count > TRAIN_MAX_SOURCES || (source_count && !sources))
         return false;
 
-    char metadata_path[MAX_PATH * 2];
+    char metadata_path[4096];
     if (_snprintf_s(metadata_path, sizeof(metadata_path), _TRUNCATE,
             "%s.meta.json", metrics_path) < 0)
         return false;
