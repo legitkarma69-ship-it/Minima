@@ -215,14 +215,17 @@ static bool write_run_metadata(const char* metrics_path,
     META_PRINT("  \"model\": {\"vocab_size\": %d, \"dim\": %d, \"layers\": %d, \"heads\": %d, \"ffn_dim\": %d, \"max_seq\": %d},\n",
         options->model.vocab_size, options->model.dim, options->model.n_layers,
         options->model.n_heads, options->model.ffn_dim, options->model.max_seq);
-    META_PRINT("  \"training\": {\"optimizer\": \"%s\", \"learning_rate\": %.9g, \"weight_decay\": %.9g, \"beta1\": %.9g, \"beta2\": %.9g, \"epsilon\": %.9g, \"lr_schedule\": \"%s\", \"initial_step\": %lld, \"requested_steps\": %d, \"total_steps\": %lld, \"warmup_steps\": %lld, \"batch_size\": %d, \"sequence_length\": %d, \"seed\": %llu, \"threads\": %d, \"memory_budget_gb\": %d, \"checkpoint_retention\": %d},\n",
+    META_PRINT("  \"training\": {\"optimizer\": \"%s\", \"learning_rate\": %.9g, \"weight_decay\": %.9g, \"beta1\": %.9g, \"beta2\": %.9g, \"epsilon\": %.9g, \"grad_clip_norm\": %.9g, \"lr_schedule\": \"%s\", \"initial_step\": %lld, \"requested_steps\": %d, \"total_steps\": %lld, \"warmup_steps\": %lld, \"batch_size\": %d, \"sequence_length\": %d, \"seed\": %llu, \"threads\": %d, \"memory_budget_gb\": %d, \"checkpoint_retention\": %d, \"log_interval\": %d, \"validation_batches\": %d, \"validation_interval\": %d, \"checkpoint_interval\": %d, \"tokenizer_sample_bytes\": %zu, \"tokenizer_spread\": %s},\n",
         optimizer_name, optimizer->schedule_base_lr, optimizer->weight_decay,
-        optimizer->beta1, optimizer->beta2, optimizer->eps, schedule_name,
-        (long long)optimizer->step, requested_steps,
+        optimizer->beta1, optimizer->beta2, optimizer->eps, options->grad_clip_norm,
+        schedule_name, (long long)optimizer->step, requested_steps,
         (long long)optimizer->schedule_total_steps,
         (long long)optimizer->schedule_warmup_steps, options->batch_size,
         options->sequence_length, (unsigned long long)options->seed, threads,
-        options->memory_budget_gb, options->checkpoint_retention);
+        options->memory_budget_gb, options->checkpoint_retention,
+        options->log_interval, options->validation_batches,
+        options->validation_interval, options->checkpoint_interval,
+        options->tokenizer_sample_bytes, options->tokenizer_spread ? "true" : "false");
     META_PRINT("  \"data\": {\"mix\": \"%s\", \"source_count\": %zu, \"sources\": [",
         corpus_mix_name(options->corpus_mix), source_count);
     for (size_t i = 0; ok && i < source_count; ++i) {
