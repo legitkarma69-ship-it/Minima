@@ -46,7 +46,7 @@ static HWND g_temperature, g_top_k, g_top_p, g_repetition, g_max_tokens;
 HWND g_chat_input, g_chat_test;
 static HWND g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq;
 static HWND g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_batch_size, g_sequence_length;
-static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights, g_beta1, g_beta2, g_epsilon;
+static HWND g_optimizer, g_weight_decay, g_threads, g_source_weights, g_beta1, g_beta2, g_epsilon, g_checkpoint_retention;
 static HWND g_min_p, g_frequency_penalty, g_presence_penalty, g_no_repeat_ngram;
 static HWND g_min_new_tokens, g_sampling_seed, g_stop_sequence;
 HWND g_group_generation, g_status_bar;
@@ -664,7 +664,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -905,6 +905,11 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         if(!end||*end||count<1||count>2147483647L){MessageBoxW(g_window,L"Enter a positive training-step count.",L"ProjectMinima",MB_ICONWARNING);return;}
         _snwprintf_s(command,_countof(command),_TRUNCATE,L"\"%s\" --steps %ld",g_engine_path,count);
         if(SendMessageW(g_resume,BM_GETCHECK,0,0)==BST_CHECKED)wcscat_s(command,_countof(command),L" --resume");
+        DWORD checkpoint_retention = 3;
+        if (!read_bounded_integer(g_checkpoint_retention, 20, &checkpoint_retention)) {
+            MessageBoxW(g_window, L"Checkpoint archive retention must be between 0 and 20.", L"Checkpoint settings", MB_ICONWARNING);
+            return;
+        }
         if(!append_option(command,_countof(command),L"--lr",g_lr) ||
            !append_option(command,_countof(command),L"--grad-clip",g_grad_clip) ||
            !append_option(command,_countof(command),L"--weight-decay",g_weight_decay) ||
@@ -915,6 +920,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
            !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
            !append_option(command,_countof(command),L"--validation-interval",g_validation_interval) ||
            !append_option(command,_countof(command),L"--checkpoint-interval",g_checkpoint_interval) ||
+           !append_option(command,_countof(command),L"--checkpoint-retention",g_checkpoint_retention) ||
            !append_option(command,_countof(command),L"--seed",g_seed) ||
            !append_option(command,_countof(command),L"--tokenizer-sample-bytes",g_tokenizer_bytes) ||
         !append_option(command,_countof(command),L"--vocab-size",g_vocab) ||
@@ -1496,7 +1502,7 @@ static void initialize_settings_context(HWND hwnd) {
     g_settings_context.set_advanced_expanded = set_advanced_expanded;
     g_settings_context.update_fresh_only_controls = update_fresh_only_controls;
 
-    HWND edits[42] = {
+    HWND edits[43] = {
         g_steps, g_vocab, g_dim, g_layers, g_heads, g_ffn, g_max_seq,
         g_batch_size, g_sequence_length, g_lr, g_warmup, g_total_steps,
         g_log_interval, g_validation_interval, g_validation_batches,
@@ -1505,7 +1511,7 @@ static void initialize_settings_context(HWND hwnd) {
         g_weight_decay, g_threads, g_cpu_limit, g_ram_limit, g_arena_budget,
         g_cpu_warning, g_ram_warning, g_source_weights, g_beta1, g_beta2, g_epsilon,
         g_min_p, g_frequency_penalty, g_presence_penalty, g_no_repeat_ngram,
-        g_min_new_tokens, g_sampling_seed, g_stop_sequence
+        g_min_new_tokens, g_sampling_seed, g_stop_sequence, g_checkpoint_retention
     };
     HWND combos[5] = { g_lr_schedule, g_tokenizer_sampling, g_corpus_mix, g_optimizer, g_resource_profile };
     CopyMemory(g_settings_context.edit_controls, edits, sizeof(edits));
@@ -1578,6 +1584,7 @@ static void create_controls(HWND hwnd) {
         &g_beta1,
         &g_beta2,
         &g_epsilon,
+        &g_checkpoint_retention,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
@@ -1641,7 +1648,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation,g_status_bar };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation,g_status_bar };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1674,6 +1681,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_ram_warning, L"Log one warning per run when the process-group working set reaches this GiB threshold. 0 disables the warning; 1-64 is allowed.");
         add_tooltip(g_resource_profile, L"Eco, Balanced, and Performance presets set CPU cap, process commit cap, arena budget, OpenMP threads, and Windows process priority. Any manual edit to those controls switches the selection back to Custom.");
         add_tooltip(g_source_weights, L"Optional comma-separated positive multipliers, one for each non-empty corpus file in the Corpus list order. Example: 1,0.5,2. Global Data mix is applied first, then each source multiplier. Allowed range: 0.001-1000. Leave blank for the normal global mix.");
+        add_tooltip(g_checkpoint_retention, L"Number of previous minima.model checkpoints to archive before each scheduled or manual save. 0 disables archives; 1-20 keeps that many previous versions alongside the current checkpoint. The best-validation checkpoint is kept separately.");
         add_tooltip(g_beta1, L"Optimizer beta1. AdamW default: 0.9; Lion default: 0.95. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(g_beta2, L"Optimizer beta2. AdamW default: 0.95; Lion default: 0.98. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(g_epsilon, L"AdamW numerical stability epsilon. Default 1e-8. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
@@ -1709,7 +1717,7 @@ static void create_controls(HWND hwnd) {
         g_validation_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_temperature,g_top_k,g_top_p,g_repetition,
         g_max_tokens,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,g_total_steps,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,
         GetDlgItem(hwnd,IDC_START),GetDlgItem(hwnd,IDC_STOP),
         GetDlgItem(hwnd,IDC_CHAT_START),GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_chat_test,GetDlgItem(hwnd,IDC_SAVE_NOW),
         GetDlgItem(hwnd,IDC_REBUILD_TOKENIZER),GetDlgItem(hwnd,IDC_AUTO_SETTINGS),
