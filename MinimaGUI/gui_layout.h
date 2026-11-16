@@ -86,4 +86,5 @@ extern HWND g_status_bar;
 #define IDC_GEN_STOP 1063
 #define IDC_GROUP_GENERATION 1064
 #define IDC_STATUS_BAR 1065
+#define IDC_WARMUP 1066
 #endif
