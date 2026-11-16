@@ -158,7 +158,10 @@ void gui_layout_layout_controls(HWND hwnd) {
             MoveWindow(child,x,y,w>scale_px(20)?w:scale_px(20),r.bottom-r.top,TRUE);
         }
     }
-    const int actions_y=work_top+scale_px(320);
+    /* Keep the full-width action row below the monitor group. The previous +320
+       placement crossed the monitor's warning/profile controls, causing the
+       button-on-button overlap visible on the Training page. */
+    const int actions_y=work_top+scale_px(442);
     MoveWindow(GetDlgItem(hwnd,IDC_START),pad,actions_y,scale_px(104),action_h,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_STOP),pad+scale_px(110),actions_y,scale_px(84),action_h,TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_PAUSE),pad+scale_px(200),actions_y,scale_px(84),action_h,TRUE);
