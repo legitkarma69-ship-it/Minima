@@ -212,7 +212,7 @@ Earlier model-size milestones remain useful experiment points: roughly 205k, 1M,
 |---|---|---|
 | E3.1 | True pause/resume without terminating the engine process. | [x] GUI pause/resume signal is checked between optimizer steps; process and in-memory state are preserved. Windows CI integration test passed, including resume and completion. |
 | E3.2 | Show ETA, tokens processed, tokens/second, current learning rate, and best-checkpoint status. | [~] Progress logs report cumulative tokens, steps/second, tokens/second, ETA, current LR, and best validation loss/step. `minima.segment_best.model` saves the best checkpoint observed in each training segment; carrying the best-loss record across resumed segments remains. |
-| E3.3 | Automatic checkpoint rotation with keep-best behavior. | [ ] |
+| E3.3 | Automatic checkpoint rotation with keep-best behavior. | [x] Keep 0-20 previous `minima.model` versions as `.prev.N` archives before scheduled/manual saves; default retention is 3, and the best-validation checkpoint remains separate. Rotation is tested for retention increases/decreases and disabled mode. |
 | E3.4 | Compare training runs using recorded configurations and metrics. | [ ] |
 
 ### 5.4 Generation and chat
