@@ -409,8 +409,12 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
     }
 
     const int64_t final_step = opt->step;
-    if (!options.diagnostics_only && (final_step == initial_step || final_step % options.checkpoint_interval != 0))
-        if (!checkpoint_save("minima.model",model,opt,rng,tokenizer_hash)) die("final checkpoint save failed");
+    if (!options.diagnostics_only && (final_step == initial_step || final_step % options.checkpoint_interval != 0)) {
+        if (!checkpoint_archive_previous("minima.model", options.checkpoint_retention))
+            printf("WARNING: could not rotate checkpoint archives before the final save.\\n");
+        if (!checkpoint_save("minima.model", model, opt, rng, tokenizer_hash))
+            die("final checkpoint save failed");
+    }
     const double training_seconds=(double)(clock()-training_started)/CLOCKS_PER_SEC;
     fclose(metrics);
     printf("\nTraining segment complete: %lld -> %lld\n",
