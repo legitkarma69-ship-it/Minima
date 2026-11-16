@@ -30,6 +30,12 @@ class CompareRunsTests(unittest.TestCase):
             },
             "training": {
                 "optimizer": optimizer, "initial_step": initial_step,
+                "lr_schedule": "cosine", "total_steps": 1000, "warmup_steps": 20,
+                "grad_clip_norm": 1.0, "threads": 4, "memory_budget_gb": 8,
+                "checkpoint_retention": 3, "log_interval": 50,
+                "validation_batches": 4, "validation_interval": 100,
+                "checkpoint_interval": 100, "tokenizer_sample_bytes": 65536,
+                "tokenizer_spread": True,
                 "batch_size": 4, "sequence_length": 128,
                 "seed": 1234, "weight_decay": 0.01,
                 "beta1": 0.9, "beta2": 0.95, "epsilon": 1e-8,
@@ -59,6 +65,10 @@ class CompareRunsTests(unittest.TestCase):
             self.assertEqual(rows[0]["model"], "v2048/d128/L8/H4/FF512")
             self.assertEqual(rows[0]["steps_completed"], 10)
             self.assertEqual(rows[0]["estimated_tokens"], 10 * 4 * 128)
+            self.assertEqual(rows[0]["source_weights"], "books.txt=1.0")
+            self.assertEqual(rows[0]["lr_schedule"], "cosine")
+            self.assertEqual(rows[0]["memory_budget_gb"], 8)
+            self.assertEqual(rows[0]["tokenizer_sample_bytes"], 65536)
             self.assertTrue(output.is_file())
             with output.open("r", newline="", encoding="utf-8") as stream:
                 saved = list(csv.DictReader(stream))
