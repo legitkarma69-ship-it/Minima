@@ -84,6 +84,8 @@ void gui_layout_layout_controls(HWND hwnd) {
     MoveWindow(GetDlgItem(hwnd,IDC_ADD),pad,scale_px(128),scale_px(104),scale_px(26),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_REMOVE),pad+scale_px(112),scale_px(128),scale_px(136),scale_px(26),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_BASIC_DEFAULTS),pad+scale_px(256),scale_px(128),scale_px(132),scale_px(26),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_RELIABLE_DEFAULTS),pad+scale_px(396),scale_px(128),scale_px(132),scale_px(26),TRUE);
+    MoveWindow(GetDlgItem(hwnd,IDC_VOCAB4096_DEFAULTS),pad+scale_px(536),scale_px(128),scale_px(132),scale_px(26),TRUE);
     if(g_group_model)MoveWindow(g_group_model,pad,work_top,left_w,scale_px(48),TRUE);
     if(g_group_training)MoveWindow(g_group_training,pad,work_top+scale_px(54),left_w,scale_px(48),TRUE);
     if(g_group_advanced)MoveWindow(g_group_advanced,pad,advanced_y,scale_px(220),scale_px(24),TRUE);
@@ -142,7 +144,7 @@ void gui_layout_layout_controls(HWND hwnd) {
            child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_group_generation||child==g_status_bar||child==g_main_tabs||child==g_corpus||
            child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_compare_runs_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile||is_generation_page_control(child)||GetDlgCtrlID(child)==IDC_SAVE_PROFILE||GetDlgCtrlID(child)==IDC_LOAD_PROFILE)continue;
         int id=GetDlgCtrlID(child);
-        if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
+        if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_RELIABLE_DEFAULTS||id==IDC_VOCAB4096_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
            id==IDC_CHAT_SEND||id==IDC_CHAT_STOP||id==IDC_LOG||id==IDC_CLEAR_CHAT||id==IDC_CLEAR_LOGS||id==IDC_RUN_EVAL)continue;
         int oy=r.top;
