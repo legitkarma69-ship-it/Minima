@@ -53,6 +53,7 @@ typedef struct {
     HWND* beta2;
     HWND* epsilon;
     HWND* checkpoint_retention;
+    HWND* compare_runs_button;
 } GuiPageControls;
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
