@@ -52,6 +52,7 @@ typedef struct {
     HWND* beta1;
     HWND* beta2;
     HWND* epsilon;
+    HWND* checkpoint_retention;
 } GuiPageControls;
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
