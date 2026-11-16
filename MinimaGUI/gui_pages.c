@@ -117,6 +117,8 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     CreateWindowW(L"BUTTON", L"Add files...", WS_CHILD | WS_VISIBLE, 12, 146, 100, 26, parent, (HMENU)(INT_PTR)IDC_ADD, NULL, NULL);
     CreateWindowW(L"BUTTON", L"Remove selected", WS_CHILD | WS_VISIBLE, 120, 146, 130, 26, parent, (HMENU)(INT_PTR)IDC_REMOVE, NULL, NULL);
     CreateWindowW(L"BUTTON", L"Basic defaults", WS_CHILD | WS_VISIBLE, 260, 146, 132, 26, parent, (HMENU)(INT_PTR)IDC_BASIC_DEFAULTS, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"Reliable >500k", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 400, 146, 132, 26, parent, (HMENU)(INT_PTR)IDC_RELIABLE_DEFAULTS, NULL, NULL);
+    CreateWindowW(L"BUTTON", L"4096 vocabulary", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 540, 146, 132, 26, parent, (HMENU)(INT_PTR)IDC_VOCAB4096_DEFAULTS, NULL, NULL);
 
     CreateWindowW(L"STATIC",L"Model: vocab",WS_CHILD|WS_VISIBLE,12,176,78,18,parent,NULL,NULL,NULL);
     g_vocab=CreateWindowW(L"EDIT",L"30000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,92,173,55,23,parent,NULL,NULL,NULL);
