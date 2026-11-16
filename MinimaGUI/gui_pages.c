@@ -109,6 +109,7 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
 #define g_beta1 (*page_controls->beta1)
 #define g_beta2 (*page_controls->beta2)
 #define g_epsilon (*page_controls->epsilon)
+#define g_checkpoint_retention (*page_controls->checkpoint_retention)
     CreateWindowW(L"STATIC", L"Corpus files", WS_CHILD | WS_VISIBLE, 12, 12, 130, 20, parent, NULL, NULL, NULL);
     g_corpus = CreateWindowW(L"LISTBOX", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | LBS_EXTENDEDSEL | WS_VSCROLL,
         12, 34, 520, 105, parent, (HMENU)(INT_PTR)IDC_CORPUS, NULL, NULL);
@@ -196,6 +197,8 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     g_epsilon=CreateWindowW(L"EDIT",L"0.00000001",WS_CHILD|WS_VISIBLE|WS_BORDER,278,426,75,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_epsilon);
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Source weights CSV (corpus list order)",WS_CHILD|WS_VISIBLE,12,462,220,18,parent,NULL,NULL,NULL));
     g_source_weights=CreateWindowW(L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL,235,459,360,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_source_weights);
+    REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Checkpoint archives to keep (0-20)",WS_CHILD|WS_VISIBLE,12,495,220,18,parent,NULL,NULL,NULL));
+    g_checkpoint_retention=CreateWindowW(L"EDIT",L"3",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,235,492,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_checkpoint_retention);
 
     CreateWindowW(L"BUTTON",L"Start training",WS_CHILD|WS_VISIBLE|BS_DEFPUSHBUTTON,12,340,120,30,parent,(HMENU)(INT_PTR)IDC_START,NULL,NULL);
     CreateWindowW(L"BUTTON",L"Stop training",WS_CHILD|WS_VISIBLE|WS_DISABLED,142,340,105,30,parent,(HMENU)(INT_PTR)IDC_STOP,NULL,NULL);
