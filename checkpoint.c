@@ -91,16 +91,33 @@ bool checkpoint_archive_previous(const char* path, int keep_count) {
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) return false;
 
     char temporary[MAX_PATH];
-    if (_snprintf_s(temporary, _countof(temporary), _TRUNCATE,
+    if (_snprintf_s(temporary, sizeof(temporary), _TRUNCATE,
         "%s.archive.tmp", path) < 0)
         return false;
     if (!CopyFileA(path, temporary, FALSE)) return false;
 
+    /* Drop stale slots when retention is reduced. */
+    for (int index = keep_count + 1; index <= 20; ++index) {
+        char stale[MAX_PATH];
+        if (_snprintf_s(stale, sizeof(stale), _TRUNCATE,
+                "%s.prev.%d", path, index) < 0) {
+            DeleteFileA(temporary);
+            return false;
+        }
+        if (!DeleteFileA(stale)) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+                DeleteFileA(temporary);
+                return false;
+            }
+        }
+    }
+
     for (int index = keep_count; index >= 2; --index) {
         char source[MAX_PATH], destination[MAX_PATH];
-        if (_snprintf_s(source, _countof(source), _TRUNCATE,
+        if (_snprintf_s(source, sizeof(source), _TRUNCATE,
                 "%s.prev.%d", path, index - 1) < 0 ||
-            _snprintf_s(destination, _countof(destination), _TRUNCATE,
+            _snprintf_s(destination, sizeof(destination), _TRUNCATE,
                 "%s.prev.%d", path, index) < 0) {
             DeleteFileA(temporary);
             return false;
@@ -121,7 +138,7 @@ bool checkpoint_archive_previous(const char* path, int keep_count) {
     }
 
     char newest[MAX_PATH];
-    if (_snprintf_s(newest, _countof(newest), _TRUNCATE,
+    if (_snprintf_s(newest, sizeof(newest), _TRUNCATE,
             "%s.prev.1", path) < 0) {
         DeleteFileA(temporary);
         return false;
