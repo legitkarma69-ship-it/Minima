@@ -333,9 +333,12 @@ void train_run(Model* model, Optim* opt, Gradients* grads, Arena* temp,
         optim_step(opt, model, grads);
         const bool manual_save_requested=consume_file_signal(options.save_file);
         if (opt->step % options.checkpoint_interval == 0 || manual_save_requested) {
+            if (!checkpoint_archive_previous("minima.model", options.checkpoint_retention))
+                printf("WARNING: could not rotate checkpoint archives; the current checkpoint will still be saved.\n");
             if (!checkpoint_save("minima.model", model, opt, rng, tokenizer_hash))
                 die("checkpoint save failed");
-            printf("Checkpoint saved at optimizer step %lld\n",(long long)opt->step);
+            printf("Checkpoint saved at optimizer step %lld (archive retention %d)\n",
+                (long long)opt->step, options.checkpoint_retention);
         }
 
         train_loss_sum += loss;
