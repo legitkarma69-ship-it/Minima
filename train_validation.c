@@ -43,6 +43,8 @@ bool train_run_validate_inputs(const Model* model, const Optim* opt,
     if (options.log_interval <= 0 || options.validation_interval <= 0 ||
         options.checkpoint_interval <= 0)
         return validation_fail(reason_out, "log, validation, and checkpoint intervals must be positive");
+    if (options.checkpoint_retention < 0 || options.checkpoint_retention > 20)
+        return validation_fail(reason_out, "checkpoint retention must be between 0 and 20");
     if (options.validation_batches <= 0)
         return validation_fail(reason_out, "validation batch count must be positive");
     if (options.corpus_mix != CORPUS_MIX_PROPORTIONAL &&
