@@ -740,17 +740,21 @@ static void start_run_comparison(void) {
             L"Compare runs", MB_ICONERROR);
         return;
     }
-    _snwprintf_s(script_path, _countof(script_path), _TRUNCATE,
-        L"%s\\tools\\compare_runs.py", root);
-    _snwprintf_s(output_path, _countof(output_path), _TRUNCATE,
-        L"%s\\minima_run_comparison.csv", root);
+    if (_snwprintf_s(script_path, _countof(script_path), _TRUNCATE,
+            L"%s\\tools\\compare_runs.py", root) < 0 ||
+        _snwprintf_s(output_path, _countof(output_path), _TRUNCATE,
+            L"%s\\minima_run_comparison.csv", root) < 0) {
+        MessageBoxW(g_window, L"The repository path is too long for run comparison.",
+            L"Compare runs", MB_ICONERROR);
+        return;
+    }
 
     wchar_t selected[32768] = { 0 };
     OPENFILENAMEW ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = g_window;
-    ofn.lpstrFilter = L"Minima metrics CSV (*.csv)\\0*.csv\\0All files (*.*)\\0*.*\\0";
+    ofn.lpstrFilter = L"Minima metrics CSV (*.csv)\0*.csv\0All files (*.*)\0*.*\0";
     ofn.lpstrFile = selected;
     ofn.nMaxFile = (DWORD)_countof(selected);
     ofn.lpstrInitialDir = root;
