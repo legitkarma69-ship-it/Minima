@@ -145,7 +145,7 @@ void minima_settings_reset_defaults(const MinimaSettingsContext* context) {
     for (int i = 0; i < 28; ++i)
         SetWindowTextW(context->edit_controls[i], g_edit_defaults[i]);
     SetWindowTextW(context->edit_controls[42], g_edit_defaults[42]);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         LRESULT index = SendMessageW(context->combo_controls[i],
             CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)g_combo_defaults[i]);
         if (index >= 0)
