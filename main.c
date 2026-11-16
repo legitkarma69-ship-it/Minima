@@ -152,6 +152,95 @@ static bool parse_source_weights_csv(const char* csv, double* weights,
     return true;
 }
 
+static void write_json_string(FILE* file, const char* value) {
+    fputc('"', file);
+    if (value) {
+        for (const unsigned char* p = (const unsigned char*)value; *p; ++p) {
+            switch (*p) {
+            case '"': fputs("\\\"", file); break;
+            case '\\': fputs("\\\\", file); break;
+            case '\n': fputs("\\n", file); break;
+            case '\r': fputs("\\r", file); break;
+            case '\t': fputs("\\t", file); break;
+            default:
+                if (*p < 0x20) fprintf(file, "\\u%04x", (unsigned int)*p);
+                else fputc(*p, file);
+                break;
+            }
+        }
+    }
+    fputc('"', file);
+}
+
+static const char* corpus_mix_name(CorpusMixMode mode) {
+    switch (mode) {
+    case CORPUS_MIX_PROPORTIONAL: return "proportional";
+    case CORPUS_MIX_EQUAL: return "equal";
+    case CORPUS_MIX_SQRT:
+    default: return "sqrt";
+    }
+}
+
+static bool write_run_metadata(const char* metrics_path,
+    const TrainOptions* options, const Optim* optimizer,
+    const TrainSourceSpan* sources, size_t source_count,
+    int requested_steps, bool resumed, uint64_t tokenizer_hash) {
+    if (!metrics_path || !metrics_path[0] || !options || !optimizer ||
+        source_count > TRAIN_MAX_SOURCES || (source_count && !sources))
+        return false;
+
+    char metadata_path[MAX_PATH * 2];
+    if (_snprintf_s(metadata_path, sizeof(metadata_path), _TRUNCATE,
+            "%s.meta.json", metrics_path) < 0)
+        return false;
+    FILE* file = fopen(metadata_path, "wb");
+    if (!file) return false;
+
+    const char* optimizer_name = optimizer->type == OPTIMIZER_LION ? "lion" : "adamw";
+    const char* schedule_name = optimizer->schedule_type == 1 ? "constant" : "cosine";
+    const time_t started = time(NULL);
+    int threads = options->threads;
+#ifdef _OPENMP
+    if (threads == 0) threads = omp_get_max_threads();
+#endif
+
+    bool ok = true;
+#define META_PRINT(...) do { if (ok && fprintf(file, __VA_ARGS__) < 0) ok = false; } while (0)
+    META_PRINT("{\n  \"schema_version\": 1,\n  \"started_unix\": %lld,\n  \"metrics_path\": ",
+        (long long)started);
+    write_json_string(file, metrics_path);
+    META_PRINT(",\n  \"tokenizer_hash\": \"%016llx\",\n  \"resumed\": %s,\n",
+        (unsigned long long)tokenizer_hash, resumed ? "true" : "false");
+    META_PRINT("  \"model\": {\"vocab_size\": %d, \"dim\": %d, \"layers\": %d, \"heads\": %d, \"ffn_dim\": %d, \"max_seq\": %d},\n",
+        options->model.vocab_size, options->model.dim, options->model.n_layers,
+        options->model.n_heads, options->model.ffn_dim, options->model.max_seq);
+    META_PRINT("  \"training\": {\"optimizer\": \"%s\", \"learning_rate\": %.9g, \"weight_decay\": %.9g, \"beta1\": %.9g, \"beta2\": %.9g, \"epsilon\": %.9g, \"lr_schedule\": \"%s\", \"initial_step\": %lld, \"requested_steps\": %d, \"total_steps\": %lld, \"warmup_steps\": %lld, \"batch_size\": %d, \"sequence_length\": %d, \"seed\": %llu, \"threads\": %d, \"memory_budget_gb\": %d, \"checkpoint_retention\": %d},\n",
+        optimizer_name, optimizer->schedule_base_lr, optimizer->weight_decay,
+        optimizer->beta1, optimizer->beta2, optimizer->eps, schedule_name,
+        (long long)optimizer->step, requested_steps,
+        (long long)optimizer->schedule_total_steps,
+        (long long)optimizer->schedule_warmup_steps, options->batch_size,
+        options->sequence_length, (unsigned long long)options->seed, threads,
+        options->memory_budget_gb, options->checkpoint_retention);
+    META_PRINT("  \"data\": {\"mix\": \"%s\", \"source_count\": %zu, \"sources\": [",
+        corpus_mix_name(options->corpus_mix), source_count);
+    for (size_t i = 0; ok && i < source_count; ++i) {
+        if (i) META_PRINT(",");
+        META_PRINT("{\"name\": ");
+        write_json_string(file, sources[i].name);
+        META_PRINT(", \"weight\": %.9g, \"train_tokens\": %d, \"validation_tokens\": %d}",
+            sources[i].weight, sources[i].train_tokens, sources[i].validation_tokens);
+    }
+    META_PRINT("]}\n}\n");
+#undef META_PRINT
+    if (ok && fflush(file) != 0) ok = false;
+    if (ok && _commit(_fileno(file)) != 0) ok = false;
+    if (fclose(file) != 0) ok = false;
+    if (!ok) { remove(metadata_path); return false; }
+    printf("Run metadata: %s\n", metadata_path);
+    return true;
+}
+
 static int parse_arguments(int argc, char** argv, bool* resume,
     bool* diagnostics_only, int* steps, const char** corpus_paths, TrainOptions* o) {
     int path_count = 0;
@@ -932,6 +1021,9 @@ int main(int argc, char** argv) {
         .pause_file = options.pause_file,
         .save_file = options.save_file
     };
+    if (!write_run_metadata(options.metrics_path, &options, &opt,
+            train_sources, train_source_count, steps_to_run, resume, tokenizer_hash))
+        printf("WARNING: could not write run metadata sidecar for metrics comparison.\\n");
     train_run(&model, &opt, &grads, &temp, all_ids,
         train_tokens, validation_tokens, &rng, tokenizer_hash, train_options);
     const int64_t final_step = opt.step;
