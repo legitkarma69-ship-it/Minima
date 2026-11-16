@@ -51,6 +51,9 @@ jobs:
       - name: Verify evaluation prompts stay isolated from reference answers
         run: python tools/test_evaluate_logic.py
 
+      - name: Test training-run comparison utility
+        run: python tools/test_compare_runs.py
+
       - name: Test GUI reader-to-window readiness integration
         shell: pwsh
         run: |
@@ -258,6 +261,16 @@ jobs:
           }
           if (!(Test-Path ".\minima.model") -or !(Test-Path ".\minima.bpe")) {
             throw "Fresh-training smoke test did not produce a checkpoint and tokenizer."
+          }
+          if (!(Test-Path ".\\minima_ci_metrics.csv.meta.json")) {
+            throw "Fresh-training smoke test did not write its run metadata sidecar."
+          }
+          $metadata = Get-Content ".\\minima_ci_metrics.csv.meta.json" -Raw | ConvertFrom-Json
+          if ($metadata.model.vocab_size -ne 300 -or
+              $metadata.model.dim -ne 96 -or
+              $metadata.training.optimizer -ne "adamw" -or
+              $metadata.training.checkpoint_retention -ne 3) {
+            throw "Run metadata sidecar does not match the requested smoke-test configuration."
           }
 
       - name: Run fresh-training smoke test (non-default configuration B)
