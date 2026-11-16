@@ -2,6 +2,7 @@
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
 #include <commdlg.h>
+#include <shellapi.h>
 #include <commctrl.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -22,6 +23,7 @@
 
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Comdlg32.lib")
+#pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Psapi.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
@@ -31,7 +33,7 @@
 #define IDT_GRAPH_REFRESH 1
 
 HWND g_window, g_corpus, g_log, g_chat_display, g_log_label;
-HWND g_clear_chat, g_clear_logs, g_eval_button;
+HWND g_clear_chat, g_clear_logs, g_eval_button, g_compare_runs_button;
 static HWND g_steps, g_resume, g_status;
 HWND g_main_tabs;
 static MinimaSettingsContext g_settings_context;
@@ -664,7 +666,7 @@ static void set_running(BOOL running) {
     HWND fields[]={g_lr,g_warmup,g_total_steps,g_log_interval,g_validation_batches,g_checkpoint_interval,
         g_seed,g_tokenizer_bytes,g_validation_interval,g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,
         g_batch_size,g_sequence_length,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence};
+        g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_compare_runs_button,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence};
     for(int i=0;i<(int)_countof(fields);i++)if(fields[i])EnableWindow(fields[i],!running);
     EnableWindow(g_chat_input, !running || g_chat_mode);
     /* Sampling controls remain editable during chat; each test uses a one-shot override. */
@@ -701,6 +703,144 @@ static BOOL append_argument(wchar_t* command, size_t capacity, const wchar_t* ar
     command[used] = 0;
     return TRUE;
 }
+
+typedef struct {
+    HANDLE process;
+    wchar_t output_path[MAX_PATH * 2];
+} CompareRunsWaitContext;
+
+static DWORD WINAPI compare_runs_wait_thread(LPVOID parameter) {
+    CompareRunsWaitContext* context = (CompareRunsWaitContext*)parameter;
+    if (!context) return 0;
+    WaitForSingleObject(context->process, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(context->process, &exit_code);
+    CloseHandle(context->process);
+    if (exit_code == 0)
+        ShellExecuteW(NULL, L"open", context->output_path, NULL, NULL, SW_SHOWNORMAL);
+    HeapFree(GetProcessHeap(), 0, context);
+    return 0;
+}
+
+static BOOL get_repository_root(wchar_t* root, size_t capacity) {
+    if (!root || capacity == 0 || !g_engine_path[0]) return FALSE;
+    if (wcscpy_s(root, capacity, g_engine_path) != 0) return FALSE;
+    for (int i = 0; i < 3; ++i) {
+        wchar_t* slash = wcsrchr(root, L'\\');
+        if (!slash) return FALSE;
+        *slash = 0;
+    }
+    return TRUE;
+}
+
+static void start_run_comparison(void) {
+    wchar_t root[MAX_PATH], script_path[MAX_PATH * 2], output_path[MAX_PATH * 2];
+    if (!get_repository_root(root, _countof(root))) {
+        MessageBoxW(g_window, L"Could not locate the Minima repository root from the engine path.",
+            L"Compare runs", MB_ICONERROR);
+        return;
+    }
+    _snwprintf_s(script_path, _countof(script_path), _TRUNCATE,
+        L"%s\\tools\\compare_runs.py", root);
+    _snwprintf_s(output_path, _countof(output_path), _TRUNCATE,
+        L"%s\\minima_run_comparison.csv", root);
+
+    wchar_t selected[32768] = { 0 };
+    OPENFILENAMEW ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = g_window;
+    ofn.lpstrFilter = L"Minima metrics CSV (*.csv)\\0*.csv\\0All files (*.*)\\0*.*\\0";
+    ofn.lpstrFile = selected;
+    ofn.nMaxFile = (DWORD)_countof(selected);
+    ofn.lpstrInitialDir = root;
+    ofn.lpstrTitle = L"Select at least two Minima metrics CSV files";
+    ofn.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST |
+        OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+    if (!GetOpenFileNameW(&ofn)) return;
+
+    wchar_t paths[32][MAX_PATH * 2];
+    size_t path_count = 0;
+    wchar_t* next = selected + wcslen(selected) + 1;
+    if (!*next) {
+        if (wcslen(selected) >= _countof(paths[0])) {
+            MessageBoxW(g_window, L"Selected metrics path is too long.", L"Compare runs", MB_ICONWARNING);
+            return;
+        }
+        wcscpy_s(paths[path_count++], _countof(paths[0]), selected);
+    } else {
+        const wchar_t* directory = selected;
+        while (*next && path_count < _countof(paths)) {
+            if (_snwprintf_s(paths[path_count], _countof(paths[0]), _TRUNCATE,
+                    L"%s\\%s", directory, next) < 0) {
+                MessageBoxW(g_window, L"A selected metrics path is too long.", L"Compare runs", MB_ICONWARNING);
+                return;
+            }
+            ++path_count;
+            next += wcslen(next) + 1;
+        }
+        if (*next) {
+            MessageBoxW(g_window, L"Select no more than 32 metrics files at once.", L"Compare runs", MB_ICONWARNING);
+            return;
+        }
+    }
+    if (path_count < 2) {
+        MessageBoxW(g_window, L"Select at least two metrics CSV files to compare.", L"Compare runs", MB_ICONINFORMATION);
+        return;
+    }
+
+    wchar_t command[32768] = L"py -3";
+    if (!append_argument(command, _countof(command), script_path)) {
+        MessageBoxW(g_window, L"Could not build the comparison script command.", L"Compare runs", MB_ICONERROR);
+        return;
+    }
+    wcscat_s(command, _countof(command), L" --output");
+    if (!append_argument(command, _countof(command), output_path)) {
+        MessageBoxW(g_window, L"Could not add the comparison output path.", L"Compare runs", MB_ICONERROR);
+        return;
+    }
+    for (size_t i = 0; i < path_count; ++i) {
+        if (!append_argument(command, _countof(command), paths[i])) {
+            MessageBoxW(g_window, L"The selected metrics paths exceed the command-line limit.", L"Compare runs", MB_ICONERROR);
+            return;
+        }
+    }
+
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    ZeroMemory(&startup, sizeof(startup));
+    ZeroMemory(&process, sizeof(process));
+    startup.cb = sizeof(startup);
+    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, CREATE_NEW_CONSOLE,
+            NULL, root, &startup, &process)) {
+        wchar_t message[256];
+        _snwprintf_s(message, _countof(message), _TRUNCATE,
+            L"Could not launch the Python comparison utility (Windows error %lu).",
+            (unsigned long)GetLastError());
+        MessageBoxW(g_window, message, L"Compare runs", MB_ICONERROR);
+        return;
+    }
+    CloseHandle(process.hThread);
+    CompareRunsWaitContext* context =
+        (CompareRunsWaitContext*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*context));
+    if (context) {
+        context->process = process.hProcess;
+        wcscpy_s(context->output_path, _countof(context->output_path), output_path);
+        HANDLE waiter = CreateThread(NULL, 0, compare_runs_wait_thread, context, 0, NULL);
+        if (waiter) CloseHandle(waiter);
+        else {
+            CloseHandle(context->process);
+            HeapFree(GetProcessHeap(), 0, context);
+            MessageBoxW(g_window, L"Comparison is running in its console. Open minima_run_comparison.csv when it finishes.",
+                L"Compare runs", MB_ICONINFORMATION);
+        }
+    } else {
+        CloseHandle(process.hProcess);
+        MessageBoxW(g_window, L"Comparison is running in its console. Open minima_run_comparison.csv when it finishes.",
+            L"Compare runs", MB_ICONINFORMATION);
+    }
+}
+
 
 static BOOL add_corpus_path(const wchar_t* path) {
     int count = (int)SendMessageW(g_corpus, LB_GETCOUNT, 0, 0);
@@ -1585,6 +1725,7 @@ static void create_controls(HWND hwnd) {
         &g_beta2,
         &g_epsilon,
         &g_checkpoint_retention,
+        &g_compare_runs_button,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
@@ -1648,7 +1789,7 @@ static void create_controls(HWND hwnd) {
         g_validation_batches,g_validation_interval,g_checkpoint_interval,g_seed,g_tokenizer_bytes,g_graph,
         g_temperature,g_top_k,g_top_p,g_repetition,g_max_tokens,g_chat_input,
         g_vocab,g_dim,g_layers,g_heads,g_ffn,g_max_seq,g_lr_schedule,g_tokenizer_sampling,g_corpus_mix,g_grad_clip,
-        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation,g_status_bar };
+        g_batch_size,g_sequence_length,g_total_steps,g_optimizer,g_weight_decay,g_threads,g_cpu_limit,g_ram_limit,g_arena_budget,g_cpu_warning,g_ram_warning,g_resource_profile,g_resource_status,GetDlgItem(hwnd,IDC_PAUSE),GetDlgItem(hwnd,IDC_SAVE_PROFILE),GetDlgItem(hwnd,IDC_LOAD_PROFILE),g_source_weights,g_beta1,g_beta2,g_epsilon,g_checkpoint_retention,g_compare_runs_button,g_min_p,g_frequency_penalty,g_presence_penalty,g_no_repeat_ngram,g_min_new_tokens,g_sampling_seed,g_stop_sequence,g_group_generation,g_status_bar };
     for (int i = 0; i < (int)_countof(controls); ++i)
         SendMessageW(controls[i], WM_SETFONT, (WPARAM)font, TRUE);
     EnumChildWindows(hwnd, set_child_font, (LPARAM)font);
@@ -1682,6 +1823,7 @@ static void create_controls(HWND hwnd) {
         add_tooltip(g_resource_profile, L"Eco, Balanced, and Performance presets set CPU cap, process commit cap, arena budget, OpenMP threads, and Windows process priority. Any manual edit to those controls switches the selection back to Custom.");
         add_tooltip(g_source_weights, L"Optional comma-separated positive multipliers, one for each non-empty corpus file in the Corpus list order. Example: 1,0.5,2. Global Data mix is applied first, then each source multiplier. Allowed range: 0.001-1000. Leave blank for the normal global mix.");
         add_tooltip(g_checkpoint_retention, L"Number of previous minima.model checkpoints to archive before each scheduled or manual save. 0 disables archives; 1-20 keeps that many previous versions alongside the current checkpoint. The best-validation checkpoint is kept separately.");
+        add_tooltip(g_compare_runs_button, L"Select two or more Minima metrics CSV files. Minima compares validation loss and recorded run configuration, writes minima_run_comparison.csv, and opens the result when finished. Requires Python 3 and the py launcher.");
         add_tooltip(g_beta1, L"Optimizer beta1. AdamW default: 0.9; Lion default: 0.95. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(g_beta2, L"Optimizer beta2. AdamW default: 0.95; Lion default: 0.98. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
         add_tooltip(g_epsilon, L"AdamW numerical stability epsilon. Default 1e-8. Used only for a fresh model; resume restores optimizer hyperparameters from the checkpoint.");
@@ -1861,6 +2003,10 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (LOWORD(wp) == IDC_LOAD_PROFILE && HIWORD(wp) == BN_CLICKED) {
             load_configuration_profile();
+            return 0;
+        }
+        if (LOWORD(wp) == IDC_COMPARE_RUNS && HIWORD(wp) == BN_CLICKED) {
+            start_run_comparison();
             return 0;
         }
         if ((HWND)lp == g_optimizer && HIWORD(wp) == CBN_SELCHANGE) {
