@@ -913,7 +913,7 @@ static BOOL append_option(wchar_t* command, size_t capacity,
         _wcsicmp(class_name, L"Edit") != 0) {
         wchar_t diagnostic[256];
         _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
-            L"Command validation rejected %s: expected an EDIT control (HWND=%p, class=%s).\\r\\n",
+            L"Command validation rejected %s: expected an EDIT control (HWND=%p, class=%s).\r\n",
             name ? name : L"(unnamed option)", (void*)control,
             class_name[0] ? class_name : L"<invalid>");
         append_log(diagnostic);
@@ -923,7 +923,7 @@ static BOOL append_option(wchar_t* command, size_t capacity,
     if (!value[0]) {
         wchar_t diagnostic[160];
         _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
-            L"Command validation rejected %s: its edit field is empty.\\r\\n",
+            L"Command validation rejected %s: its edit field is empty.\r\n",
             name ? name : L"(unnamed option)");
         append_log(diagnostic);
         return FALSE;
@@ -945,7 +945,7 @@ static BOOL append_integer_option(wchar_t* command, size_t capacity,
             GetWindowTextW(control, text, (int)_countof(text));
         }
         _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
-            L"Command validation rejected %s: expected an integer edit value; HWND=%p, class=%s, text=\\\"%s\\\".\\r\\n",
+            L"Command validation rejected %s: expected an integer edit value; HWND=%p, class=%s, text=\\\"%s\\\".\r\n",
             name ? name : L"(unnamed option)", (void*)control,
             class_name[0] ? class_name : L"<invalid>",
             text[0] ? text : L"<empty>");
@@ -1060,7 +1060,7 @@ static BOOL prebuilt_tokenizer_settings_match(void) {
     if (!tokenizer_exists || !vocab_match || !bytes_match || !sampling_match) {
         wchar_t diagnostic[640];
         _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
-            L"Tokenizer reuse mismatch: file=%s; vocab saved/current=%s/%s; sample-bytes saved/current=%s/%s; sampling saved/current=%s/%s.\\r\\n",
+            L"Tokenizer reuse mismatch: file=%s; vocab saved/current=%s/%s; sample-bytes saved/current=%s/%s; sampling saved/current=%s/%s.\r\n",
             tokenizer_exists ? L"present" : L"missing",
             g_prebuilt_vocab, vocab, g_prebuilt_tokenizer_bytes, bytes,
             g_prebuilt_sampling, sampling[0] ? sampling : L"<no selection>");
@@ -1326,7 +1326,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
 
     append_log(L"Engine command: ");
     append_log(command);
-    append_log(L"\\r\\n");
+    append_log(L"\r\n");
 
     if (!CreateProcessW(g_engine_path, command, NULL, NULL, TRUE,
         CREATE_NO_WINDOW | CREATE_SUSPENDED, NULL, working_dir, &si, &pi)) {
@@ -1875,7 +1875,7 @@ static void create_controls(HWND hwnd) {
        example the Stop button) from ever being serialized as --warmup. */
     g_warmup = GetDlgItem(hwnd, IDC_WARMUP);
     if (!g_warmup || !IsWindow(g_warmup))
-        append_log(L"GUI initialization error: the warmup edit control (IDC_WARMUP) was not created.\\r\\n");
+        append_log(L"GUI initialization error: the warmup edit control (IDC_WARMUP) was not created.\r\n");
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
     g_min_p = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 62, 177, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP, NULL, NULL);
     CreateWindowW(L"STATIC", L"Frequency", WS_CHILD | WS_VISIBLE, 12, 218, 82, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_FREQ_LABEL, NULL, NULL);
@@ -2069,7 +2069,7 @@ static void action_basic_defaults(HWND hwnd) {
         MessageBoxW(hwnd,L"Restore all model, training, tokenizer, and generation settings to their basic defaults? The selected corpus files will be kept.",
             L"Basic defaults",MB_YESNO|MB_ICONQUESTION)==IDYES) {
         minima_settings_reset_defaults(&g_settings_context);
-        append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\\r\\n");
+        append_log(L"Basic defaults restored. Selected corpus files were left unchanged.\r\n");
     }
 }
 static void action_advanced_toggle(HWND hwnd) {
