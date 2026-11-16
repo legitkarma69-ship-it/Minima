@@ -12,6 +12,8 @@ typedef struct {
     void (*rebuild_tokenizer)(HWND);
     void (*auto_settings)(HWND);
     void (*basic_defaults)(HWND);
+    void (*reliable_defaults)(HWND);
+    void (*vocab4096_defaults)(HWND);
     void (*advanced_toggle)(HWND);
     void (*chat_send)(HWND);
     void (*chat_test)(HWND);
