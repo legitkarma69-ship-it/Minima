@@ -16,6 +16,8 @@ BOOL gui_actions_dispatch(HWND hwnd, UINT command_id,
     case IDC_REBUILD_TOKENIZER: if (handlers->rebuild_tokenizer) handlers->rebuild_tokenizer(hwnd); return TRUE;
     case IDC_AUTO_SETTINGS: if (handlers->auto_settings) handlers->auto_settings(hwnd); return TRUE;
     case IDC_BASIC_DEFAULTS: if (handlers->basic_defaults) handlers->basic_defaults(hwnd); return TRUE;
+    case IDC_RELIABLE_DEFAULTS: if (handlers->reliable_defaults) handlers->reliable_defaults(hwnd); return TRUE;
+    case IDC_VOCAB4096_DEFAULTS: if (handlers->vocab4096_defaults) handlers->vocab4096_defaults(hwnd); return TRUE;
     case IDC_ADVANCED_TOGGLE: if (handlers->advanced_toggle) handlers->advanced_toggle(hwnd); return TRUE;
     case IDC_CHAT_SEND: if (handlers->chat_send) handlers->chat_send(hwnd); return TRUE;
     case IDC_CHAT_TEST: if (handlers->chat_test) handlers->chat_test(hwnd); return TRUE;
