@@ -34,6 +34,7 @@ typedef struct {
     int validation_batches;
     int validation_interval;
     int checkpoint_interval;
+    int checkpoint_retention; /* archived previous checkpoints; 0 disables */
     int batch_size;
     int sequence_length;
     float grad_clip_norm;
