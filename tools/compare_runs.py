@@ -50,6 +50,10 @@ def load_run(metrics_path: str | Path) -> dict[str, Any]:
     training = metadata.get("training") if isinstance(metadata.get("training"), dict) else {}
     data = metadata.get("data") if isinstance(metadata.get("data"), dict) else {}
     sources = data.get("sources") if isinstance(data.get("sources"), list) else []
+    source_weights = "; ".join(
+        f"{source.get('name', '?')}={source.get('weight', '?')}"
+        for source in sources if isinstance(source, dict)
+    )
 
     final_step, final_train, final_validation, final_row = final
     initial_step = int(_number(training.get("initial_step"), valid_rows[0][0] - 1))
@@ -77,6 +81,20 @@ def load_run(metrics_path: str | Path) -> dict[str, Any]:
         "sequence_length": sequence_length or "",
         "corpus_mix": data.get("mix", "unknown"),
         "source_count": data.get("source_count", len(sources) or ""),
+        "source_weights": source_weights,
+        "lr_schedule": training.get("lr_schedule", "unknown"),
+        "total_steps": training.get("total_steps", ""),
+        "warmup_steps": training.get("warmup_steps", ""),
+        "grad_clip_norm": training.get("grad_clip_norm", ""),
+        "threads": training.get("threads", ""),
+        "memory_budget_gb": training.get("memory_budget_gb", ""),
+        "checkpoint_retention": training.get("checkpoint_retention", ""),
+        "log_interval": training.get("log_interval", ""),
+        "validation_batches": training.get("validation_batches", ""),
+        "validation_interval": training.get("validation_interval", ""),
+        "checkpoint_interval": training.get("checkpoint_interval", ""),
+        "tokenizer_sample_bytes": training.get("tokenizer_sample_bytes", ""),
+        "tokenizer_spread": training.get("tokenizer_spread", ""),
         "initial_step": initial_step,
         "final_step": final_step,
         "steps_completed": steps_completed,
@@ -98,7 +116,11 @@ def load_run(metrics_path: str | Path) -> dict[str, Any]:
 
 FIELDS = [
     "run", "optimizer", "model", "batch_size", "sequence_length",
-    "corpus_mix", "source_count", "initial_step", "final_step",
+    "corpus_mix", "source_count", "source_weights", "lr_schedule",
+    "total_steps", "warmup_steps", "grad_clip_norm", "threads",
+    "memory_budget_gb", "checkpoint_retention", "log_interval",
+    "validation_batches", "validation_interval", "checkpoint_interval",
+    "tokenizer_sample_bytes", "tokenizer_spread", "initial_step", "final_step",
     "steps_completed", "estimated_tokens", "best_validation_loss",
     "best_validation_step", "final_train_loss", "final_validation_loss",
     "final_validation_perplexity", "elapsed_seconds", "learning_rate",
