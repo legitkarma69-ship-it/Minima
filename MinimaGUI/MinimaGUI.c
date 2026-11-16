@@ -907,13 +907,57 @@ static void add_corpus_files(void) {
 
 static BOOL append_option(wchar_t* command, size_t capacity,
     const wchar_t* name, HWND control) {
-    wchar_t value[128];
-    GetWindowTextW(control, value, _countof(value));
-    if (!value[0]) return FALSE;
+    wchar_t class_name[64] = L"", value[128] = L"";
+    if (!control || !IsWindow(control) ||
+        !GetClassNameW(control, class_name, (int)_countof(class_name)) ||
+        _wcsicmp(class_name, L"Edit") != 0) {
+        wchar_t diagnostic[256];
+        _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
+            L"Command validation rejected %s: expected an EDIT control (HWND=%p, class=%s).\\r\\n",
+            name ? name : L"(unnamed option)", (void*)control,
+            class_name[0] ? class_name : L"<invalid>");
+        append_log(diagnostic);
+        return FALSE;
+    }
+    GetWindowTextW(control, value, (int)_countof(value));
+    if (!value[0]) {
+        wchar_t diagnostic[160];
+        _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
+            L"Command validation rejected %s: its edit field is empty.\\r\\n",
+            name ? name : L"(unnamed option)");
+        append_log(diagnostic);
+        return FALSE;
+    }
     size_t used=wcslen(command), nl=wcslen(name), vl=wcslen(value);
     if (used+nl+vl+3>=capacity) return FALSE;
     command[used++]=L' '; wcscpy_s(command+used,capacity-used,name); used+=nl;
     command[used++]=L' '; wcscpy_s(command+used,capacity-used,value);
+    return TRUE;
+}
+
+static BOOL append_integer_option(wchar_t* command, size_t capacity,
+    const wchar_t* name, HWND control, DWORD maximum) {
+    DWORD value = 0;
+    if (!read_bounded_integer(control, maximum, &value)) {
+        wchar_t class_name[64] = L"", text[128] = L"", diagnostic[320];
+        if (control && IsWindow(control)) {
+            GetClassNameW(control, class_name, (int)_countof(class_name));
+            GetWindowTextW(control, text, (int)_countof(text));
+        }
+        _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
+            L"Command validation rejected %s: expected an integer edit value; HWND=%p, class=%s, text=\\\"%s\\\".\\r\\n",
+            name ? name : L"(unnamed option)", (void*)control,
+            class_name[0] ? class_name : L"<invalid>",
+            text[0] ? text : L"<empty>");
+        append_log(diagnostic);
+        return FALSE;
+    }
+    wchar_t number[32];
+    _snwprintf_s(number, _countof(number), _TRUNCATE, L"%lu", (unsigned long)value);
+    size_t used=wcslen(command), nl=wcslen(name), vl=wcslen(number);
+    if (used+nl+vl+3>=capacity) return FALSE;
+    command[used++]=L' '; wcscpy_s(command+used,capacity-used,name); used+=nl;
+    command[used++]=L' '; wcscpy_s(command+used,capacity-used,number);
     return TRUE;
 }
 
@@ -1003,16 +1047,27 @@ static BOOL archive_existing_metrics(void) {
 }
 
 static BOOL prebuilt_tokenizer_settings_match(void) {
-    wchar_t vocab[64],bytes[64],sampling[64];
-    GetWindowTextW(g_vocab,vocab,_countof(vocab));
-    GetWindowTextW(g_tokenizer_bytes,bytes,_countof(bytes));
-    int index=(int)SendMessageW(g_tokenizer_sampling,CB_GETCURSEL,0,0);
-    if(index<0)return FALSE;
-    SendMessageW(g_tokenizer_sampling,CB_GETLBTEXT,(WPARAM)index,(LPARAM)sampling);
-    return engine_sidecar_exists(L"minima.bpe") &&
-        wcscmp(vocab,g_prebuilt_vocab)==0 &&
-        wcscmp(bytes,g_prebuilt_tokenizer_bytes)==0 &&
-        wcscmp(sampling,g_prebuilt_sampling)==0;
+    wchar_t vocab[64] = L"", bytes[64] = L"", sampling[64] = L"";
+    GetWindowTextW(g_vocab, vocab, (int)_countof(vocab));
+    GetWindowTextW(g_tokenizer_bytes, bytes, (int)_countof(bytes));
+    int index = (int)SendMessageW(g_tokenizer_sampling, CB_GETCURSEL, 0, 0);
+    if (index >= 0)
+        SendMessageW(g_tokenizer_sampling, CB_GETLBTEXT, (WPARAM)index, (LPARAM)sampling);
+    const BOOL tokenizer_exists = engine_sidecar_exists(L"minima.bpe");
+    const BOOL vocab_match = wcscmp(vocab, g_prebuilt_vocab) == 0;
+    const BOOL bytes_match = wcscmp(bytes, g_prebuilt_tokenizer_bytes) == 0;
+    const BOOL sampling_match = index >= 0 && wcscmp(sampling, g_prebuilt_sampling) == 0;
+    if (!tokenizer_exists || !vocab_match || !bytes_match || !sampling_match) {
+        wchar_t diagnostic[640];
+        _snwprintf_s(diagnostic, _countof(diagnostic), _TRUNCATE,
+            L"Tokenizer reuse mismatch: file=%s; vocab saved/current=%s/%s; sample-bytes saved/current=%s/%s; sampling saved/current=%s/%s.\\r\\n",
+            tokenizer_exists ? L"present" : L"missing",
+            g_prebuilt_vocab, vocab, g_prebuilt_tokenizer_bytes, bytes,
+            g_prebuilt_sampling, sampling[0] ? sampling : L"<no selection>");
+        append_log(diagnostic);
+        return FALSE;
+    }
+    return TRUE;
 }
 static void remember_prebuilt_tokenizer_settings(void) {
     GetWindowTextW(g_vocab,g_prebuilt_vocab,_countof(g_prebuilt_vocab));
@@ -1132,7 +1187,7 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
            !append_option(command,_countof(command),L"--grad-clip",g_grad_clip) ||
            !append_option(command,_countof(command),L"--weight-decay",g_weight_decay) ||
            !append_option(command,_countof(command),L"--threads",g_threads) ||
-           !append_option(command,_countof(command),L"--warmup",g_warmup) ||
+           !append_integer_option(command,_countof(command),L"--warmup",g_warmup,2147483647u) ||
 
            !append_option(command,_countof(command),L"--log-interval",g_log_interval) ||
            !append_option(command,_countof(command),L"--validation-batches",g_validation_batches) ||
@@ -1268,6 +1323,10 @@ static void start_engine(BOOL chat_mode, BOOL tokenizer_only) {
         MessageBoxW(g_window,L"Could not configure Windows resource limits. The engine was not started.",L"Resource limits",MB_ICONERROR);
         return;
     }
+
+    append_log(L"Engine command: ");
+    append_log(command);
+    append_log(L"\\r\\n");
 
     if (!CreateProcessW(g_engine_path, command, NULL, NULL, TRUE,
         CREATE_NO_WINDOW | CREATE_SUSPENDED, NULL, working_dir, &si, &pi)) {
@@ -1811,6 +1870,12 @@ static void create_controls(HWND hwnd) {
         &g_compare_runs_button,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
+    /* Resolve the warmup edit by its stable control ID rather than relying only
+       on the page-control pointer table. This prevents a button HWND (for
+       example the Stop button) from ever being serialized as --warmup. */
+    g_warmup = GetDlgItem(hwnd, IDC_WARMUP);
+    if (!g_warmup || !IsWindow(g_warmup))
+        append_log(L"GUI initialization error: the warmup edit control (IDC_WARMUP) was not created.\\r\\n");
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
     g_min_p = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 62, 177, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP, NULL, NULL);
     CreateWindowW(L"STATIC", L"Frequency", WS_CHILD | WS_VISIBLE, 12, 218, 82, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_FREQ_LABEL, NULL, NULL);
