@@ -16,7 +16,7 @@ static BOOL is_advanced_page_control(HWND child) {
 
 static BOOL is_chat_page_control(HWND child) {
     return child == g_group_output || child == g_output_label ||
-        child == g_chat_display || child == g_chat_input || child == g_clear_chat || child == g_eval_button ||
+        child == g_chat_display || child == g_chat_input || child == g_clear_chat || child == g_eval_button || child == g_compare_runs_button ||
         child == GetDlgItem(g_window, IDC_STATUS) ||
         child == GetDlgItem(g_window, IDC_CHAT_START) ||
         child == GetDlgItem(g_window, IDC_CHAT_SEND) ||
@@ -29,7 +29,7 @@ static BOOL is_generation_page_control(HWND child) {
 }
 
 static BOOL is_logs_page_control(HWND child) {
-    return child == g_log || child == g_log_label || child == g_clear_logs;
+    return child == g_log || child == g_log_label || child == g_clear_logs || child == g_compare_runs_button;
 }
 
 static BOOL CALLBACK apply_page_visibility(HWND child, LPARAM page_parameter) {
@@ -140,7 +140,7 @@ void gui_layout_layout_controls(HWND hwnd) {
         HWND child=g_initial_rects[i].hwnd; RECT r=g_initial_rects[i].rect;
         if(!IsWindow(child)||child==g_group_corpus||child==g_group_model||child==g_group_training||
            child==g_group_advanced||child==g_group_monitor||child==g_group_output||child==g_group_generation||child==g_status_bar||child==g_main_tabs||child==g_corpus||
-           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile||is_generation_page_control(child)||GetDlgCtrlID(child)==IDC_SAVE_PROFILE||GetDlgCtrlID(child)==IDC_LOAD_PROFILE)continue;
+           child==g_graph||child==g_log||child==g_chat_display||child==g_chat_input||child==g_chat_test||child==g_clear_chat||child==g_clear_logs||child==g_eval_button||child==g_compare_runs_button||child==g_log_label||child==g_resource_status||child==g_cpu_limit||child==g_ram_limit||child==g_arena_budget||child==g_cpu_warning||child==g_ram_warning||child==g_resource_profile||is_generation_page_control(child)||GetDlgCtrlID(child)==IDC_SAVE_PROFILE||GetDlgCtrlID(child)==IDC_LOAD_PROFILE)continue;
         int id=GetDlgCtrlID(child);
         if(id==IDC_ADD||id==IDC_REMOVE||id==IDC_BASIC_DEFAULTS||id==IDC_START||id==IDC_STOP||id==IDC_CHAT_START||
            id==IDC_SAVE_NOW||id==IDC_REBUILD_TOKENIZER||id==IDC_AUTO_SETTINGS||id==IDC_STATUS||
@@ -182,8 +182,10 @@ void gui_layout_layout_controls(HWND hwnd) {
         MoveWindow(g_eval_button,pad+scale_px(112),chat_y,scale_px(150),scale_px(28),TRUE);
         MoveWindow(g_clear_chat,pad+scale_px(8),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
     }
-    if(g_active_page==4)
+    if(g_active_page==4) {
+        MoveWindow(g_compare_runs_button,width-pad-scale_px(240),output_top+scale_px(2),scale_px(120),scale_px(24),TRUE);
         MoveWindow(g_clear_logs,width-pad-scale_px(112),output_top+scale_px(2),scale_px(100),scale_px(24),TRUE);
+    }
     if(g_chat_test)MoveWindow(g_chat_test,pad+scale_px(820),gy3,scale_px(100),scale_px(23),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_SEND),width-pad-scale_px(218),chat_y,scale_px(108),scale_px(28),TRUE);
     MoveWindow(GetDlgItem(hwnd,IDC_CHAT_STOP),width-pad-scale_px(104),chat_y,scale_px(104),scale_px(28),TRUE);
