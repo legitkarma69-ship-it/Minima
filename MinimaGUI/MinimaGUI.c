@@ -946,8 +946,13 @@ static BOOL archive_existing_metrics(void) {
             L"%s.meta.json", g_metrics_path) < 0)
         return FALSE;
     const DWORD metadata_attributes = GetFileAttributesW(metadata_source);
-    const BOOL have_metadata = metadata_attributes != INVALID_FILE_ATTRIBUTES &&
+    BOOL have_metadata = metadata_attributes != INVALID_FILE_ATTRIBUTES &&
         !(metadata_attributes & FILE_ATTRIBUTE_DIRECTORY);
+    if (metadata_attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+            return FALSE;
+    }
 
     SYSTEMTIME now;
     GetLocalTime(&now);
