@@ -4,6 +4,22 @@
 #include "gui_pages.h"
 #include "gui_layout.h"
 
+static HWND create_verified_edit(HWND parent, const wchar_t* text, DWORD style,
+    int x, int y, int width, int height, int control_id) {
+    HWND control = CreateWindowW(L"EDIT", text, style, x, y, width, height,
+        parent, (HMENU)(INT_PTR)control_id, GetModuleHandleW(NULL), NULL);
+    wchar_t actual_class[32] = L"";
+    if (!control) return NULL;
+    if (!IsWindow(control) || GetParent(control) != parent ||
+        GetDlgCtrlID(control) != control_id ||
+        !GetClassNameW(control, actual_class, (int)_countof(actual_class)) ||
+        _wcsicmp(actual_class, L"Edit") != 0) {
+        if (IsWindow(control)) DestroyWindow(control);
+        return NULL;
+    }
+    return control;
+}
+
 void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
     HWND* model_group, HWND* training_group, HWND* advanced_toggle,
     HWND* monitor_group, HWND* output_group) {
@@ -60,7 +76,60 @@ void gui_pages_create_shell(HWND parent, HWND* tabs, HWND* corpus_group,
 
 void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     void (*register_advanced)(HWND)) {
-    if (!page_controls) return;
+    if (!page_controls || !parent) return;
+#define REQUIRE_SLOT(name) do { if (!page_controls->name) return; } while (0)
+    REQUIRE_SLOT(corpus);
+    REQUIRE_SLOT(steps);
+    REQUIRE_SLOT(resume);
+    REQUIRE_SLOT(vocab);
+    REQUIRE_SLOT(dim);
+    REQUIRE_SLOT(layers);
+    REQUIRE_SLOT(heads);
+    REQUIRE_SLOT(ffn);
+    REQUIRE_SLOT(max_seq);
+    REQUIRE_SLOT(batch_size);
+    REQUIRE_SLOT(sequence_length);
+    REQUIRE_SLOT(lr);
+    REQUIRE_SLOT(warmup);
+    REQUIRE_SLOT(log_interval);
+    REQUIRE_SLOT(validation_interval);
+    REQUIRE_SLOT(validation_batches);
+    REQUIRE_SLOT(checkpoint_interval);
+    REQUIRE_SLOT(seed);
+    REQUIRE_SLOT(tokenizer_bytes);
+    REQUIRE_SLOT(temperature);
+    REQUIRE_SLOT(top_k);
+    REQUIRE_SLOT(top_p);
+    REQUIRE_SLOT(repetition);
+    REQUIRE_SLOT(max_tokens);
+    REQUIRE_SLOT(lr_schedule);
+    REQUIRE_SLOT(tokenizer_sampling);
+    REQUIRE_SLOT(corpus_mix);
+    REQUIRE_SLOT(grad_clip);
+    REQUIRE_SLOT(total_steps);
+    REQUIRE_SLOT(status);
+    REQUIRE_SLOT(graph);
+    REQUIRE_SLOT(output_label);
+    REQUIRE_SLOT(log);
+    REQUIRE_SLOT(chat_display);
+    REQUIRE_SLOT(log_label);
+    REQUIRE_SLOT(clear_chat);
+    REQUIRE_SLOT(clear_logs);
+    REQUIRE_SLOT(chat_input);
+    REQUIRE_SLOT(chat_test);
+    REQUIRE_SLOT(optimizer);
+    REQUIRE_SLOT(weight_decay);
+    REQUIRE_SLOT(threads);
+    REQUIRE_SLOT(arena_budget);
+    REQUIRE_SLOT(cpu_warning);
+    REQUIRE_SLOT(ram_warning);
+    REQUIRE_SLOT(source_weights);
+    REQUIRE_SLOT(beta1);
+    REQUIRE_SLOT(beta2);
+    REQUIRE_SLOT(epsilon);
+    REQUIRE_SLOT(checkpoint_retention);
+    REQUIRE_SLOT(compare_runs_button);
+#undef REQUIRE_SLOT
 #define REGISTER_ADVANCED(control) do { if (register_advanced) register_advanced(control); } while (0)
 #define g_corpus (*page_controls->corpus)
 #define g_steps (*page_controls->steps)
@@ -141,9 +210,9 @@ void gui_pages_create_content(HWND parent, GuiPageControls* page_controls,
     CreateWindowW(L"STATIC",L"Seq",WS_CHILD|WS_VISIBLE,278,210,30,18,parent,NULL,NULL,NULL);
     g_sequence_length=CreateWindowW(L"EDIT",L"128",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,309,207,40,23,parent,NULL,NULL,NULL);
     CreateWindowW(L"STATIC",L"LR",WS_CHILD|WS_VISIBLE,355,210,22,18,parent,NULL,NULL,NULL);
-    g_lr=CreateWindowW(L"EDIT",L"0.0002",WS_CHILD|WS_VISIBLE|WS_BORDER,379,207,65,23,parent,(HMENU)(INT_PTR)IDC_LR,NULL,NULL);
+    g_lr=create_verified_edit(parent,L"0.0002",WS_CHILD|WS_VISIBLE|WS_BORDER,379,207,65,23,IDC_LR);
     CreateWindowW(L"STATIC",L"Warmup",WS_CHILD|WS_VISIBLE,450,210,52,18,parent,NULL,NULL,NULL);
-    g_warmup=CreateWindowW(L"EDIT",L"3000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,parent,(HMENU)(INT_PTR)IDC_WARMUP,NULL,NULL);
+    g_warmup=create_verified_edit(parent,L"3000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,503,207,45,23,IDC_WARMUP);
 
     REGISTER_ADVANCED(CreateWindowW(L"STATIC",L"Log every",WS_CHILD|WS_VISIBLE,12,264,60,18,parent,NULL,NULL,NULL));
     g_log_interval=CreateWindowW(L"EDIT",L"1000",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,74,261,48,23,parent,NULL,NULL,NULL); REGISTER_ADVANCED(g_log_interval);
