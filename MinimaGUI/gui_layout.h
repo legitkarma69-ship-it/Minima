@@ -89,4 +89,5 @@ extern HWND g_status_bar;
 #define IDC_WARMUP 1066
 #define IDC_RELIABLE_DEFAULTS 1067
 #define IDC_VOCAB4096_DEFAULTS 1068
+#define IDC_LR 1069
 #endif
