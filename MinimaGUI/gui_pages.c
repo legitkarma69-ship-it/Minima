@@ -12,7 +12,7 @@ static HWND create_verified_edit(HWND parent, const wchar_t* text, DWORD style,
     if (!control) return NULL;
     if (!IsWindow(control) || GetParent(control) != parent ||
         GetDlgCtrlID(control) != control_id ||
-        !GetClassNameW(control, actual_class, (int)_countof(actual_class)) ||
+        !GetClassNameW(control, actual_class, (int)(sizeof(actual_class) / sizeof(actual_class[0]))) ||
         _wcsicmp(actual_class, L"Edit") != 0) {
         if (IsWindow(control)) DestroyWindow(control);
         return NULL;
