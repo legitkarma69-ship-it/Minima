@@ -1870,14 +1870,19 @@ static void create_controls(HWND hwnd) {
         &g_compare_runs_button,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
-    /* Resolve both critical numeric edits by stable IDs. The page-control pointer table
-       can become stale when controls are added; never let --lr target a button HWND. */
-    g_lr = GetDlgItem(hwnd, IDC_LR);
-    if (!g_lr || !IsWindow(g_lr))
-        append_log(L"GUI initialization error: the learning-rate edit control (IDC_LR) was not created.\r\n");
-    g_warmup = GetDlgItem(hwnd, IDC_WARMUP);
-    if (!g_warmup || !IsWindow(g_warmup))
-        append_log(L"GUI initialization error: the warmup edit control (IDC_WARMUP) was not created.\r\n");
+    /* gui_pages_create_content assigns these handles directly through page_controls.
+       Do not re-resolve them with GetDlgItem: control IDs can collide with other
+       child controls, which can silently return a BUTTON instead of the EDIT. */
+    wchar_t lr_class[32] = L"";
+    wchar_t warmup_class[32] = L"";
+    if (!g_lr || !IsWindow(g_lr) ||
+        !GetClassNameW(g_lr, lr_class, (int)_countof(lr_class)) ||
+        _wcsicmp(lr_class, L"Edit") != 0)
+        append_log(L"GUI initialization error: learning-rate handle is not a valid EDIT control.\\r\\n");
+    if (!g_warmup || !IsWindow(g_warmup) ||
+        !GetClassNameW(g_warmup, warmup_class, (int)_countof(warmup_class)) ||
+        _wcsicmp(warmup_class, L"Edit") != 0)
+        append_log(L"GUI initialization error: warmup handle is not a valid EDIT control.\\r\\n");
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
     g_min_p = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 62, 177, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP, NULL, NULL);
     CreateWindowW(L"STATIC", L"Frequency", WS_CHILD | WS_VISIBLE, 12, 218, 82, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_FREQ_LABEL, NULL, NULL);
