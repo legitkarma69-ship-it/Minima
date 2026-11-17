@@ -21,10 +21,10 @@ static const wchar_t* const g_edit_keys[43] = {
     L"min_new_tokens", L"sampling_seed", L"stop_sequence", L"checkpoint_retention"
 };
 static const wchar_t* const g_edit_defaults[43] = {
-    L"2000", L"4096", L"128", L"8", L"4", L"512", L"128", L"4", L"128",
-    L"0.0002", L"3000", L"100000", L"1000", L"1000", L"16", L"1000", L"1234",
-    L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0",
-    L"0.01", L"0", L"0", L"0", L"0", L"0", L"0", L"", L"0.9", L"0.95", L"0.00000001",
+    L"2000", L"4096", L"128", L"2", L"4", L"256", L"128", L"1", L"128",
+    L"0.0003", L"500", L"100000", L"500", L"1000", L"8", L"1000", L"1234",
+    L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"64", L"1.0",
+    L"0.01", L"8", L"85", L"10", L"8", L"95", L"8", L"", L"0.9", L"0.95", L"0.00000001",
     L"0", L"0", L"0", L"0", L"0", L"0", L"", L"3"
 };
 static const wchar_t* const g_combo_keys[5] = {
@@ -32,7 +32,7 @@ static const wchar_t* const g_combo_keys[5] = {
     L"resource_profile"
 };
 static const wchar_t* const g_combo_defaults[5] = {
-    L"cosine", L"spread", L"sqrt", L"adamw", L"Custom"
+    L"cosine", L"spread", L"sqrt", L"adamw", L"Training"
 };
 
 static void load_edit_setting(const wchar_t* path, const wchar_t* key,
@@ -144,14 +144,14 @@ void minima_settings_load(const MinimaSettingsContext* context) {
        the user's corpus list and all unrelated settings. */
     if (GetPrivateProfileIntW(L"UI", L"training_defaults_version", 0,
         context->path) < 1) {
-        SetWindowTextW(context->edit_controls[0], L"2000");
-        SetWindowTextW(context->edit_controls[1], L"4096");
-        SetWindowTextW(context->edit_controls[11], L"100000");
-        SetWindowTextW(context->edit_controls[17], L"4194304");
-        LRESULT spread = SendMessageW(context->combo_controls[1],
-            CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)L"spread");
-        if (spread >= 0)
-            SendMessageW(context->combo_controls[1], CB_SETCURSEL, (WPARAM)spread, 0);
+        for (int i = 0; i < 43; ++i)
+            SetWindowTextW(context->edit_controls[i], g_edit_defaults[i]);
+        for (int i = 0; i < 5; ++i) {
+            LRESULT index = SendMessageW(context->combo_controls[i],
+                CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)g_combo_defaults[i]);
+            if (index >= 0)
+                SendMessageW(context->combo_controls[i], CB_SETCURSEL, (WPARAM)index, 0);
+        }
         SendMessageW(context->resume_control, BM_SETCHECK, BST_UNCHECKED, 0);
         if (context->use_saved_tokenizer)
             *context->use_saved_tokenizer = FALSE;
@@ -168,9 +168,8 @@ void minima_settings_load(const MinimaSettingsContext* context) {
 
 void minima_settings_reset_defaults(const MinimaSettingsContext* context) {
     if (!context) return;
-    for (int i = 0; i < 28; ++i)
+    for (int i = 0; i < 43; ++i)
         SetWindowTextW(context->edit_controls[i], g_edit_defaults[i]);
-    SetWindowTextW(context->edit_controls[42], g_edit_defaults[42]);
     for (int i = 0; i < 5; ++i) {
         LRESULT index = SendMessageW(context->combo_controls[i],
             CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)g_combo_defaults[i]);
