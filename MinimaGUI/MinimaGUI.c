@@ -1870,14 +1870,11 @@ static void create_controls(HWND hwnd) {
         &g_compare_runs_button,
     };
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
-    /* Resolve the warmup edit by its stable control ID rather than relying only
-       on the page-control pointer table. This prevents a button HWND (for
-       example the Stop button) from ever being serialized as --warmup. */
     /* Resolve both critical numeric edits by stable IDs. The page-control pointer table
        can become stale when controls are added; never let --lr target a button HWND. */
     g_lr = GetDlgItem(hwnd, IDC_LR);
     if (!g_lr || !IsWindow(g_lr))
-        append_log(L"GUI initialization error: the learning-rate edit control (IDC_LR) was not created.\\r\\n");
+        append_log(L"GUI initialization error: the learning-rate edit control (IDC_LR) was not created.\r\n");
     g_warmup = GetDlgItem(hwnd, IDC_WARMUP);
     if (!g_warmup || !IsWindow(g_warmup))
         append_log(L"GUI initialization error: the warmup edit control (IDC_WARMUP) was not created.\r\n");
