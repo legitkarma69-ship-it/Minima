@@ -21,7 +21,7 @@ static const wchar_t* const g_edit_keys[43] = {
     L"min_new_tokens", L"sampling_seed", L"stop_sequence", L"checkpoint_retention"
 };
 static const wchar_t* const g_edit_defaults[43] = {
-    L"10000", L"30000", L"128", L"8", L"4", L"512", L"128", L"4", L"128",
+    L"2000", L"4096", L"128", L"8", L"4", L"512", L"128", L"4", L"128",
     L"0.0002", L"3000", L"100000", L"1000", L"1000", L"16", L"1000", L"1234",
     L"4194304", L"0.8", L"40", L"0.9", L"1.1", L"32", L"1.0",
     L"0.01", L"0", L"0", L"0", L"0", L"0", L"0", L"", L"0.9", L"0.95", L"0.00000001",
@@ -138,6 +138,32 @@ void minima_settings_load(const MinimaSettingsContext* context) {
     }
     if (context->update_fresh_only_controls)
         context->update_fresh_only_controls();
+
+    /* One-time migration: prepare the next launch for a 4,096-tokenizer rebuild
+       and a 2,000-step opening segment on the 100,000-step schedule. Preserve
+       the user's corpus list and all unrelated settings. */
+    if (GetPrivateProfileIntW(L"UI", L"training_defaults_version", 0,
+        context->path) < 1) {
+        SetWindowTextW(context->edit_controls[0], L"2000");
+        SetWindowTextW(context->edit_controls[1], L"4096");
+        SetWindowTextW(context->edit_controls[11], L"100000");
+        SetWindowTextW(context->edit_controls[17], L"4194304");
+        LRESULT spread = SendMessageW(context->combo_controls[1],
+            CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)L"spread");
+        if (spread >= 0)
+            SendMessageW(context->combo_controls[1], CB_SETCURSEL, (WPARAM)spread, 0);
+        SendMessageW(context->resume_control, BM_SETCHECK, BST_UNCHECKED, 0);
+        if (context->use_saved_tokenizer)
+            *context->use_saved_tokenizer = FALSE;
+        WritePrivateProfileStringW(L"Training", L"prebuilt_tokenizer", L"0", context->path);
+        WritePrivateProfileStringW(L"Training", L"prebuilt_vocab", L"", context->path);
+        WritePrivateProfileStringW(L"Training", L"prebuilt_tokenizer_bytes", L"", context->path);
+        WritePrivateProfileStringW(L"Training", L"prebuilt_sampling", L"", context->path);
+        minima_settings_save(context);
+        WritePrivateProfileStringW(L"UI", L"training_defaults_version", L"1", context->path);
+        if (context->update_fresh_only_controls)
+            context->update_fresh_only_controls();
+    }
 }
 
 void minima_settings_reset_defaults(const MinimaSettingsContext* context) {

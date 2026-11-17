@@ -2090,7 +2090,7 @@ static void apply_reliable_training_preset(HWND hwnd, int vocab_size) {
     const BOOL larger_vocab = vocab_size == 4096;
     const wchar_t* model_vocab = larger_vocab ? L"4096" : L"2048";
     const wchar_t* model_layers = L"2";
-    const wchar_t* segment_steps = L"10000";
+    const wchar_t* segment_steps = L"2000";
 
     wchar_t prompt[512];
     _snwprintf_s(prompt, _countof(prompt), _TRUNCATE,
@@ -2161,7 +2161,7 @@ static void apply_reliable_training_preset(HWND hwnd, int vocab_size) {
 
     wchar_t summary[320];
     _snwprintf_s(summary, _countof(summary), _TRUNCATE,
-        L"%s preset applied: %s vocabulary, dim=128, layers=%s, heads=4, FFN=256, batch=1, seq=128, 10,000-step segment. Resume disabled; corpus selection preserved. Rebuild tokenizer is optional: a fresh Start training run builds it automatically.\r\n",
+        L"%s preset applied: %s vocabulary, dim=128, layers=%s, heads=4, FFN=256, batch=1, seq=128, 2,000-step opening segment (continue with 8,000 steps). Resume disabled; corpus selection preserved. Rebuild tokenizer is optional: a fresh Start training run builds it automatically.\r\n",
         larger_vocab ? L"4,096" : L"Reliable",
         model_vocab, model_layers);
     append_log(summary);
