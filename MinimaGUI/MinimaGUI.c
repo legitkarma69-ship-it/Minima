@@ -1816,59 +1816,59 @@ static void create_controls(HWND hwnd) {
         WS_CHILD | WS_VISIBLE | SS_LEFT, 12, 100, 900, 18, hwnd,
         (HMENU)(INT_PTR)IDC_STATUS_BAR, NULL, NULL);
     HFONT font = g_ui_font ? g_ui_font : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-    GuiPageControls page_controls = {
-        &g_corpus,
-        &g_steps,
-        &g_resume,
-        &g_vocab,
-        &g_dim,
-        &g_layers,
-        &g_heads,
-        &g_ffn,
-        &g_max_seq,
-        &g_batch_size,
-        &g_sequence_length,
-        &g_lr,
-        &g_warmup,
-        &g_log_interval,
-        &g_validation_interval,
-        &g_validation_batches,
-        &g_checkpoint_interval,
-        &g_seed,
-        &g_tokenizer_bytes,
-        &g_temperature,
-        &g_top_k,
-        &g_top_p,
-        &g_repetition,
-        &g_max_tokens,
-        &g_lr_schedule,
-        &g_tokenizer_sampling,
-        &g_corpus_mix,
-        &g_grad_clip,
-        &g_total_steps,
-        &g_status,
-        &g_graph,
-        &g_output_label,
-        &g_log,
-        &g_chat_display,
-        &g_log_label,
-        &g_clear_chat,
-        &g_clear_logs,
-        &g_chat_input,
-        &g_chat_test,
-        &g_optimizer,
-        &g_weight_decay,
-        &g_threads,
-        &g_arena_budget,
-        &g_cpu_warning,
-        &g_ram_warning,
-        &g_source_weights,
-        &g_beta1,
-        &g_beta2,
-        &g_epsilon,
-        &g_checkpoint_retention,
-        &g_compare_runs_button,
-    };
+    GuiPageControls page_controls;
+    ZeroMemory(&page_controls, sizeof(page_controls));
+    page_controls.corpus = &g_corpus;
+    page_controls.steps = &g_steps;
+    page_controls.resume = &g_resume;
+    page_controls.vocab = &g_vocab;
+    page_controls.dim = &g_dim;
+    page_controls.layers = &g_layers;
+    page_controls.heads = &g_heads;
+    page_controls.ffn = &g_ffn;
+    page_controls.max_seq = &g_max_seq;
+    page_controls.batch_size = &g_batch_size;
+    page_controls.sequence_length = &g_sequence_length;
+    page_controls.lr = &g_lr;
+    page_controls.warmup = &g_warmup;
+    page_controls.log_interval = &g_log_interval;
+    page_controls.validation_interval = &g_validation_interval;
+    page_controls.validation_batches = &g_validation_batches;
+    page_controls.checkpoint_interval = &g_checkpoint_interval;
+    page_controls.seed = &g_seed;
+    page_controls.tokenizer_bytes = &g_tokenizer_bytes;
+    page_controls.temperature = &g_temperature;
+    page_controls.top_k = &g_top_k;
+    page_controls.top_p = &g_top_p;
+    page_controls.repetition = &g_repetition;
+    page_controls.max_tokens = &g_max_tokens;
+    page_controls.lr_schedule = &g_lr_schedule;
+    page_controls.tokenizer_sampling = &g_tokenizer_sampling;
+    page_controls.corpus_mix = &g_corpus_mix;
+    page_controls.grad_clip = &g_grad_clip;
+    page_controls.total_steps = &g_total_steps;
+    page_controls.status = &g_status;
+    page_controls.graph = &g_graph;
+    page_controls.output_label = &g_output_label;
+    page_controls.log = &g_log;
+    page_controls.chat_display = &g_chat_display;
+    page_controls.log_label = &g_log_label;
+    page_controls.clear_chat = &g_clear_chat;
+    page_controls.clear_logs = &g_clear_logs;
+    page_controls.chat_input = &g_chat_input;
+    page_controls.chat_test = &g_chat_test;
+    page_controls.optimizer = &g_optimizer;
+    page_controls.weight_decay = &g_weight_decay;
+    page_controls.threads = &g_threads;
+    page_controls.arena_budget = &g_arena_budget;
+    page_controls.cpu_warning = &g_cpu_warning;
+    page_controls.ram_warning = &g_ram_warning;
+    page_controls.source_weights = &g_source_weights;
+    page_controls.beta1 = &g_beta1;
+    page_controls.beta2 = &g_beta2;
+    page_controls.epsilon = &g_epsilon;
+    page_controls.checkpoint_retention = &g_checkpoint_retention;
+    page_controls.compare_runs_button = &g_compare_runs_button;
     gui_pages_create_content(hwnd, &page_controls, register_advanced_control);
     /* gui_pages_create_content assigns these handles directly through page_controls.
        Do not re-resolve them with GetDlgItem: control IDs can collide with other
