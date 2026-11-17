@@ -141,7 +141,7 @@ void minima_settings_load(const MinimaSettingsContext* context) {
 
     /* One-time migration: prepare the next launch for a 4,096-tokenizer rebuild
        and a 2,000-step opening segment on the 100,000-step schedule. Preserve
-       the user's corpus list and all unrelated settings. */
+       the user's selected corpus list while applying the full 4,096 preset. */
     if (GetPrivateProfileIntW(L"UI", L"training_defaults_version", 0,
         context->path) < 1) {
         for (int i = 0; i < 43; ++i)
