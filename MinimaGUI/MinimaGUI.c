@@ -1875,14 +1875,18 @@ static void create_controls(HWND hwnd) {
        child controls, which can silently return a BUTTON instead of the EDIT. */
     wchar_t lr_class[32] = L"";
     wchar_t warmup_class[32] = L"";
-    if (!g_lr || !IsWindow(g_lr) ||
-        !GetClassNameW(g_lr, lr_class, (int)_countof(lr_class)) ||
-        _wcsicmp(lr_class, L"Edit") != 0)
-        append_log(L"GUI initialization error: learning-rate handle is not a valid EDIT control.\\r\\n");
-    if (!g_warmup || !IsWindow(g_warmup) ||
-        !GetClassNameW(g_warmup, warmup_class, (int)_countof(warmup_class)) ||
-        _wcsicmp(warmup_class, L"Edit") != 0)
-        append_log(L"GUI initialization error: warmup handle is not a valid EDIT control.\\r\\n");
+    const BOOL lr_control_valid = g_lr && IsWindow(g_lr) &&
+        GetParent(g_lr) == hwnd && GetDlgCtrlID(g_lr) == IDC_LR &&
+        GetClassNameW(g_lr, lr_class, (int)_countof(lr_class)) &&
+        _wcsicmp(lr_class, L"Edit") == 0;
+    const BOOL warmup_control_valid = g_warmup && IsWindow(g_warmup) &&
+        GetParent(g_warmup) == hwnd && GetDlgCtrlID(g_warmup) == IDC_WARMUP &&
+        GetClassNameW(g_warmup, warmup_class, (int)_countof(warmup_class)) &&
+        _wcsicmp(warmup_class, L"Edit") == 0;
+    if (!lr_control_valid || !warmup_control_valid) {
+        EnableWindow(GetDlgItem(hwnd, IDC_START), FALSE);
+        append_log(L"GUI initialization error: training controls failed class, parent, or ID validation. Start training has been disabled.\\r\\n");
+    }
     CreateWindowW(L"STATIC", L"Min-p", WS_CHILD | WS_VISIBLE, 12, 180, 50, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP_LABEL, NULL, NULL);
     g_min_p = CreateWindowW(L"EDIT", L"0", WS_CHILD | WS_VISIBLE | WS_BORDER, 62, 177, 55, 23, hwnd, (HMENU)(INT_PTR)IDC_GEN_MINP, NULL, NULL);
     CreateWindowW(L"STATIC", L"Frequency", WS_CHILD | WS_VISIBLE, 12, 218, 82, 18, hwnd, (HMENU)(INT_PTR)IDC_GEN_FREQ_LABEL, NULL, NULL);
